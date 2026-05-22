@@ -134,7 +134,11 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 	if g.caddy == nil {
 		return
 	}
-	routes := RoutesFromRepo(repo)
+	routes, err := RoutesFromRepo(repo)
+	if err != nil {
+		slog.Error("derive caddy routes failed", "err", err)
+		return
+	}
 	if err := g.caddy.ApplyRoutes(ctx, routes); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return

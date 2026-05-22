@@ -20,7 +20,10 @@ func TestRoutesFromRepo(t *testing.T) {
 			{Name: "noport", Host: "web1", Domains: []string{"x.com"}},                    // skipped: no healthcheck
 		},
 	}
-	routes := RoutesFromRepo(repo)
+	routes, err := RoutesFromRepo(repo)
+	if err != nil {
+		t.Fatalf("RoutesFromRepo: %v", err)
+	}
 	if len(routes) != 2 {
 		t.Fatalf("expected 2 routes, got %d: %+v", len(routes), routes)
 	}
@@ -28,6 +31,49 @@ func TestRoutesFromRepo(t *testing.T) {
 		if r.Upstream != "web1:8080" {
 			t.Errorf("upstream = %q, want web1:8080", r.Upstream)
 		}
+	}
+}
+
+func TestRoutesFromRepo_snippet(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.example.com"},
+				Healthcheck:  &config.Healthcheck{Port: 8080},
+				CaddySnippet: `[{"handler":"headers","response":{"set":{"X-Foo":["bar"]}}}]`},
+		},
+	}
+	routes, err := RoutesFromRepo(repo)
+	if err != nil {
+		t.Fatalf("RoutesFromRepo: %v", err)
+	}
+	if len(routes) != 1 || len(routes[0].Handlers) != 1 {
+		t.Fatalf("want 1 route with 1 snippet handler, got %+v", routes)
+	}
+
+	cfg := buildCaddyConfig(routes)
+	srv := cfg["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["shuttle"].(map[string]any)
+	route0 := srv["routes"].([]any)[0].(map[string]any)
+	handle := route0["handle"].([]any)
+	if len(handle) != 2 {
+		t.Fatalf("want 2 handlers (snippet + proxy), got %d: %+v", len(handle), handle)
+	}
+	if h := handle[0].(map[string]any)["handler"]; h != "headers" {
+		t.Errorf("first handler = %v, want headers (snippet before proxy)", h)
+	}
+	if h := handle[1].(map[string]any)["handler"]; h != "reverse_proxy" {
+		t.Errorf("last handler = %v, want reverse_proxy", h)
+	}
+}
+
+func TestRoutesFromRepo_badSnippet(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.example.com"},
+				Healthcheck: &config.Healthcheck{Port: 8080}, CaddySnippet: `{not valid`},
+		},
+	}
+	if _, err := RoutesFromRepo(repo); err == nil {
+		t.Fatal("expected error on invalid snippet JSON, got nil")
 	}
 }
 
