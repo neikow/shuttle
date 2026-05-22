@@ -75,8 +75,12 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		slog.Warn("grpc transport is insecure; set grpc_tls_* for mTLS")
 	}
 
+	tracker := orchestrator.NewStateTracker()
+	agentServer := orchestrator.NewAgentServiceServer(registry, store)
+	agentServer.SetStateTracker(tracker)
+
 	grpcServer := grpc.NewServer(grpcOpts...)
-	shuttlev1.RegisterAgentServiceServer(grpcServer, orchestrator.NewAgentServiceServer(registry, store))
+	shuttlev1.RegisterAgentServiceServer(grpcServer, agentServer)
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
@@ -94,6 +98,10 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
 		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)
+
+		reconciler := orchestrator.NewDriftReconciler(syncer, tracker, 60*time.Second, 90*time.Second)
+		go reconciler.Run(ctx)
+		slog.Info("drift reconciler started", "interval", "60s")
 	} else {
 		slog.Info("webhook disabled; set repo_url + webhook_secret to enable git sync")
 	}

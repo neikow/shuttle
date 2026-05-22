@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
+	"sync"
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
@@ -12,6 +14,37 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+const stateReportInterval = 30 * time.Second
+
+// deployedSet tracks the services this agent has deployed, so it can report
+// their container state for orchestrator drift detection. It survives
+// reconnects across sessions.
+type deployedSet struct {
+	mu sync.RWMutex
+	m  map[string]deployedService
+}
+
+type deployedService struct {
+	workDir string
+	sha     string
+}
+
+func newDeployedSet() *deployedSet { return &deployedSet{m: make(map[string]deployedService)} }
+
+func (s *deployedSet) put(service, workDir, sha string) {
+	s.mu.Lock()
+	s.m[service] = deployedService{workDir: workDir, sha: sha}
+	s.mu.Unlock()
+}
+
+func (s *deployedSet) snapshot() map[string]deployedService {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]deployedService, len(s.m))
+	maps.Copy(out, s.m)
+	return out
+}
 
 // Config is the agent runtime configuration.
 type Config struct {
@@ -46,9 +79,10 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 	defer conn.Close()
 
 	client := shuttlev1.NewAgentServiceClient(conn)
+	deployed := newDeployedSet()
 
 	for {
-		if err := runSession(ctx, cfg, client, driver); err != nil {
+		if err := runSession(ctx, cfg, client, driver, deployed); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -62,7 +96,7 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 	}
 }
 
-func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver) error {
+func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver, deployed *deployedSet) error {
 	stream, err := client.Register(ctx)
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
@@ -103,13 +137,46 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 	}()
 	defer func() { <-hbDone }()
 
+	// Container-state report goroutine: drives orchestrator drift detection.
+	go reportStateLoop(ctx, stream, driver, deployed)
+
 	for {
 		cmd, err := stream.Recv()
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
 		}
-		if err := handleCommand(ctx, cfg, stream, driver, cmd); err != nil {
+		if err := handleCommand(ctx, cfg, stream, driver, deployed, cmd); err != nil {
 			slog.Error("command error", "err", err)
+		}
+	}
+}
+
+func reportStateLoop(ctx context.Context, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet) {
+	ticker := time.NewTicker(stateReportInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for service, ds := range deployed.snapshot() {
+				status, err := driver.Status(ctx, service, ds.workDir)
+				if err != nil {
+					slog.Warn("status check failed", "service", service, "err", err)
+					continue
+				}
+				if err := stream.Send(&shuttlev1.AgentEvent{
+					Payload: &shuttlev1.AgentEvent_ContainerState{
+						ContainerState: &shuttlev1.ContainerState{
+							Service: service,
+							Status:  status,
+							Sha:     ds.sha,
+						},
+					},
+				}); err != nil {
+					return
+				}
+			}
 		}
 	}
 }
@@ -119,20 +186,21 @@ func handleCommand(
 	cfg Config,
 	stream shuttlev1.AgentService_RegisterClient,
 	driver Driver,
+	deployed *deployedSet,
 	cmd *shuttlev1.OrchestratorCommand,
 ) error {
 	switch payload := cmd.Payload.(type) {
 	case *shuttlev1.OrchestratorCommand_Deploy:
-		return executeDeploy(ctx, cfg, stream, driver, payload.Deploy)
+		return executeDeploy(ctx, cfg, stream, driver, deployed, payload.Deploy)
 	case *shuttlev1.OrchestratorCommand_Rollback:
-		return executeRollback(ctx, cfg, stream, driver, payload.Rollback)
+		return executeRollback(ctx, cfg, stream, driver, deployed, payload.Rollback)
 	default:
 		slog.Warn("unknown command type", "type", fmt.Sprintf("%T", cmd.Payload))
 	}
 	return nil
 }
 
-func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.DeployRequest) error {
+func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.DeployRequest) error {
 	slog.Info("executing deploy", "deploy_id", req.DeployId, "service", req.Service)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -142,10 +210,13 @@ func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 		Env:         req.Env,
 		WorkDir:     workDir,
 	})
+	if err == nil {
+		deployed.put(req.Service, workDir, req.Sha)
+	}
 	return streamDeployResult(stream, req.DeployId, logCh, err)
 }
 
-func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.RollbackRequest) error {
+func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.RollbackRequest) error {
 	slog.Info("executing rollback", "deploy_id", req.DeployId, "service", req.Service, "target_sha", req.TargetSha)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -155,6 +226,9 @@ func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 		Env:         req.Env,
 		WorkDir:     workDir,
 	})
+	if err == nil {
+		deployed.put(req.Service, workDir, req.TargetSha)
+	}
 	return streamDeployResult(stream, req.DeployId, logCh, err)
 }
 

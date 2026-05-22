@@ -67,35 +67,30 @@ func (g *GitSyncer) Sync(ctx context.Context) (string, error) {
 	return strings.TrimSpace(sha), nil
 }
 
-// Reconcile syncs the repo, computes the deploy plan against the ledger, and
-// dispatches deploys. If onlyServices is non-empty, only those services are
-// considered. Returns the deploy IDs that were dispatched.
-func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]string, error) {
+// syncAndLoad syncs the repo and parses the IaC config, returning the parsed
+// repo and the checked-out SHA.
+func (g *GitSyncer) syncAndLoad(ctx context.Context) (*config.Repo, string, error) {
 	sha, err := g.Sync(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-
 	repo, err := config.Load(g.dir)
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, "", fmt.Errorf("load config: %w", err)
 	}
+	return repo, sha, nil
+}
 
-	current, err := g.store.CurrentSHAs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("current state: %w", err)
-	}
-
-	filter := toSet(onlyServices)
-	plan := ComputePlan(repo, CurrentState(current), sha)
-
+// dispatchPlan dispatches the deploy steps, skipping any not in filter (when
+// filter is non-empty). Returns the dispatched deploy IDs.
+func (g *GitSyncer) dispatchPlan(ctx context.Context, repo *config.Repo, steps []Step, filter map[string]bool) []string {
 	svcByName := make(map[string]config.Service, len(repo.Services))
 	for _, s := range repo.Services {
 		svcByName[s.Name] = s
 	}
 
 	var dispatched []string
-	for _, step := range plan.Steps {
+	for _, step := range steps {
 		if step.Action != ActionDeploy {
 			continue
 		}
@@ -109,8 +104,41 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 		}
 		dispatched = append(dispatched, deployID)
 	}
-	return dispatched, nil
+	return dispatched
 }
+
+// Reconcile syncs the repo, computes the deploy plan against the ledger, and
+// dispatches deploys. If onlyServices is non-empty, only those services are
+// considered. Returns the deploy IDs that were dispatched.
+func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]string, error) {
+	repo, sha, err := g.syncAndLoad(ctx)
+	if err != nil {
+		return nil, err
+	}
+	current, err := g.store.CurrentSHAs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("current state: %w", err)
+	}
+	plan := ComputePlan(repo, CurrentState(current), sha)
+	return g.dispatchPlan(ctx, repo, plan.Steps, toSet(onlyServices)), nil
+}
+
+// ForceDeploy redeploys the named services at the current repo HEAD regardless
+// of ledger state. Used by the drift reconciler to recover crashed containers.
+func (g *GitSyncer) ForceDeploy(ctx context.Context, services []string) ([]string, error) {
+	repo, sha, err := g.syncAndLoad(ctx)
+	if err != nil {
+		return nil, err
+	}
+	steps := make([]Step, 0, len(repo.Services))
+	for _, svc := range repo.Services {
+		steps = append(steps, Step{Host: svc.Host, Service: svc.Name, Action: ActionDeploy, SHA: sha})
+	}
+	return g.dispatchPlan(ctx, repo, steps, toSet(services)), nil
+}
+
+// LocalDir returns the path of the synced working copy.
+func (g *GitSyncer) LocalDir() string { return g.dir }
 
 func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step) (string, error) {
 	composeYAML, err := g.renderCompose(svc)

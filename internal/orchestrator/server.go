@@ -16,11 +16,16 @@ type AgentServiceServer struct {
 	shuttlev1.UnimplementedAgentServiceServer
 	registry *Registry
 	store    *ledger.Store // optional; when nil, deploy results are not persisted
+	tracker  *StateTracker // optional; when nil, container state is not tracked
 }
 
 func NewAgentServiceServer(registry *Registry, store *ledger.Store) *AgentServiceServer {
 	return &AgentServiceServer{registry: registry, store: store}
 }
+
+// SetStateTracker attaches a tracker that receives container state reports for
+// drift detection. Call before serving.
+func (s *AgentServiceServer) SetStateTracker(t *StateTracker) { s.tracker = t }
 
 // ledgerStatus maps a proto DeployStatus to a ledger Status.
 func ledgerStatus(s shuttlev1.DeployStatus) (ledger.Status, bool) {
@@ -98,12 +103,15 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 				}
 			}
 		case *shuttlev1.AgentEvent_ContainerState:
+			cs := payload.ContainerState
 			slog.Debug("container state",
 				"host", host,
-				"service", payload.ContainerState.Service,
-				"status", payload.ContainerState.Status,
+				"service", cs.Service,
+				"status", cs.Status,
 			)
-			// TODO Phase 8: feed reconciler.
+			if s.tracker != nil {
+				s.tracker.Record(host, cs.Service, cs.Status, cs.Sha)
+			}
 		}
 	}
 }
