@@ -18,6 +18,7 @@ import (
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/mtls"
 	"github.com/neikow/shuttle/internal/orchestrator"
+	"github.com/neikow/shuttle/internal/webhook"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 )
@@ -82,9 +83,24 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		return fmt.Errorf("listen grpc %s: %w", cfg.GRPCAddr, err)
 	}
 
+	httpHandler := orchestrator.NewHTTPServer(cfg.BearerToken, store, registry)
+	if cfg.RepoURL != "" && cfg.WebhookSecret != "" {
+		repoDir := cfg.RepoDir
+		if repoDir == "" {
+			repoDir = filepath.Join(cfg.DataDir, "repo")
+		}
+		// Secrets provider wiring (Infisical) is deferred; nil = env passthrough off.
+		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, nil)
+		wh := webhook.NewHandler(cfg.WebhookSecret, store)
+		httpHandler.EnableWebhook(wh, syncer)
+		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)
+	} else {
+		slog.Info("webhook disabled; set repo_url + webhook_secret to enable git sync")
+	}
+
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPAddr,
-		Handler: orchestrator.NewHTTPServer(cfg.BearerToken, store, registry),
+		Handler: httpHandler,
 	}
 
 	errCh := make(chan error, 2)

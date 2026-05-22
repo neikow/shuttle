@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/neikow/shuttle/internal/ledger"
+	"github.com/neikow/shuttle/internal/webhook"
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 )
 
@@ -19,6 +21,17 @@ type HTTPServer struct {
 	ledger   *ledger.Store
 	registry *Registry
 	mux      *http.ServeMux
+
+	webhook *webhook.Handler
+	syncer  *GitSyncer
+}
+
+// EnableWebhook registers POST /webhook, which validates the signed payload and
+// triggers a git sync + reconcile. Call before serving.
+func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
+	s.webhook = h
+	s.syncer = syncer
+	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
 }
 
 func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPServer {
@@ -173,6 +186,31 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID, "target_sha": targetSHA})
+}
+
+// handleWebhook validates the signed payload, then reconciles asynchronously
+// (git clone/pull can be slow) and returns 202 immediately.
+func (s *HTTPServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	payload, err := s.webhook.Parse(r)
+	if err != nil {
+		http.Error(w, "webhook: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	services := payload.Services
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		ids, err := s.syncer.Reconcile(ctx, services)
+		if err != nil {
+			slog.Error("webhook reconcile failed", "err", err)
+			return
+		}
+		slog.Info("webhook reconcile dispatched", "count", len(ids), "sha", payload.CommitSHA)
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
 }
 
 func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
