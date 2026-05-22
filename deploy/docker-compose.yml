@@ -1,8 +1,12 @@
-# Local dev stack: orchestrator + Caddy.
+# Local dev stack: orchestrator + agent + Caddy.
 # Usage: docker compose -f deploy/docker-compose.yml up --build
 #
 # The orchestrator's HTTP control plane is exposed on :8080 and gRPC on :9090.
 # Caddy's admin API (:2019) is reachable by the orchestrator for route updates.
+# The agent dials the orchestrator over an INSECURE gRPC channel by default.
+#
+# For mutual-TLS, run `make certs` then layer the override:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.mtls.yml up --build
 services:
   orchestrator:
     build:
@@ -15,10 +19,27 @@ services:
     volumes:
       - ./config.example.yml:/etc/shuttle/config.yml:ro
       - shuttle-data:/var/lib/shuttle
-      # Mount certs after `make certs` to enable mTLS (see config.example.yml).
-      - ../certs:/etc/shuttle/certs:ro
     depends_on:
       - caddy
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command:
+      - "agent"
+      - "--orchestrator"
+      - "orchestrator:9090"
+      - "--host"
+      - "web1"
+      - "--work-dir"
+      - "/var/lib/shuttle-agent"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # required to run compose deploys
+      - agent-work:/var/lib/shuttle-agent
+    depends_on:
+      - orchestrator
     restart: unless-stopped
 
   caddy:
@@ -35,5 +56,6 @@ services:
 
 volumes:
   shuttle-data:
+  agent-work:
   caddy-data:
   caddy-config:
