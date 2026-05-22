@@ -64,7 +64,7 @@ func (p *InfisicalProvider) Get(_ context.Context, key string) (string, error) {
 }
 
 func (p *InfisicalProvider) GetAll(_ context.Context) (map[string]string, error) {
-	secrets, err := p.client.Secrets().List(infisical.ListSecretsOptions{
+	res, err := p.client.Secrets().ListSecrets(infisical.ListSecretsOptions{
 		ProjectID:   p.projectID,
 		Environment: p.environment,
 		SecretPath:  p.secretPath,
@@ -72,8 +72,8 @@ func (p *InfisicalProvider) GetAll(_ context.Context) (map[string]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("infisical list: %w", err)
 	}
-	out := make(map[string]string, len(secrets))
-	for _, s := range secrets {
+	out := make(map[string]string, len(res.Secrets))
+	for _, s := range res.Secrets {
 		out[s.SecretKey] = s.SecretValue
 	}
 	return out, nil

@@ -1,0 +1,39 @@
+# Local dev stack: orchestrator + Caddy.
+# Usage: docker compose -f deploy/docker-compose.yml up --build
+#
+# The orchestrator's HTTP control plane is exposed on :8080 and gRPC on :9090.
+# Caddy's admin API (:2019) is reachable by the orchestrator for route updates.
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    command: ["orchestrator", "--config", "/etc/shuttle/config.yml"]
+    ports:
+      - "8080:8080" # HTTP control plane
+      - "9090:9090" # gRPC (agents dial in)
+    volumes:
+      - ./config.example.yml:/etc/shuttle/config.yml:ro
+      - shuttle-data:/var/lib/shuttle
+      # Mount certs after `make certs` to enable mTLS (see config.example.yml).
+      - ../certs:/etc/shuttle/certs:ro
+    depends_on:
+      - caddy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "2019:2019" # admin API
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  shuttle-data:
+  caddy-data:
+  caddy-config:

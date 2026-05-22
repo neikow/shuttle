@@ -2,11 +2,15 @@ package orchestrator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/neikow/shuttle/internal/config"
 )
 
 // CaddyClient drives the Caddy Admin API on a local or remote Caddy instance.
@@ -28,15 +32,32 @@ type CaddyRoute struct {
 	Upstream string // host:port
 }
 
+// RoutesFromRepo derives the desired Caddy routes from the repo. Each service
+// domain maps to an upstream of <host>:<healthcheck.port>; services without
+// domains or a healthcheck port are skipped (nothing to route).
+func RoutesFromRepo(repo *config.Repo) []CaddyRoute {
+	var routes []CaddyRoute
+	for _, svc := range repo.Services {
+		if len(svc.Domains) == 0 || svc.Healthcheck == nil || svc.Healthcheck.Port == 0 {
+			continue
+		}
+		upstream := svc.Host + ":" + strconv.Itoa(svc.Healthcheck.Port)
+		for _, domain := range svc.Domains {
+			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream})
+		}
+	}
+	return routes
+}
+
 // ApplyRoutes replaces the entire Caddy config with the given routes.
 // Each route: HTTPS + auto-TLS via Let's Encrypt.
-func (c *CaddyClient) ApplyRoutes(routes []CaddyRoute) error {
+func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute) error {
 	cfg := buildCaddyConfig(routes)
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, c.adminURL+"/load", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.adminURL+"/load", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -45,7 +66,7 @@ func (c *CaddyClient) ApplyRoutes(routes []CaddyRoute) error {
 	if err != nil {
 		return fmt.Errorf("caddy load: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("caddy load status %d: %s", resp.StatusCode, body)

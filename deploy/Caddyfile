@@ -1,0 +1,5 @@
+# Expose the admin API on all interfaces so the orchestrator container can push
+# routes. Sites are configured at runtime via the admin API, not here.
+{
+	admin 0.0.0.0:2019
+}

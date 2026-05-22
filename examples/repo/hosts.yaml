@@ -1,0 +1,5 @@
+hosts:
+  - name: web1
+    labels:
+      region: eu-west
+      role: edge

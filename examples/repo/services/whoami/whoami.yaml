@@ -1,0 +1,9 @@
+name: whoami
+host: web1
+domains:
+  - whoami.localhost
+env_schema:
+  - WHOAMI_NAME
+healthcheck:
+  path: /
+  port: 80

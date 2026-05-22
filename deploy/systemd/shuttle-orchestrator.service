@@ -1,0 +1,16 @@
+# Install: copy to /etc/systemd/system/, place config at /etc/shuttle/config.yml,
+# then: systemctl daemon-reload && systemctl enable --now shuttle-orchestrator
+[Unit]
+Description=Shuttle orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/shuttle orchestrator --config /etc/shuttle/config.yml
+Restart=always
+RestartSec=5
+User=shuttle
+StateDirectory=shuttle
+
+[Install]
+WantedBy=multi-user.target

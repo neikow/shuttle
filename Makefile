@@ -44,9 +44,10 @@ certs:
 	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -days 3650 -nodes \
 		-keyout certs/ca.key -out certs/ca.crt -subj "/CN=shuttle-dev-ca"
 	openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-		-keyout certs/orchestrator.key -out certs/orchestrator.csr -subj "/CN=orchestrator"
+		-keyout certs/orchestrator.key -out certs/orchestrator.csr -subj "/CN=orchestrator" \
+		-addext "subjectAltName=DNS:orchestrator,DNS:localhost,IP:127.0.0.1"
 	openssl x509 -req -in certs/orchestrator.csr -CA certs/ca.crt -CAkey certs/ca.key \
-		-CAcreateserial -out certs/orchestrator.crt -days 3650
+		-CAcreateserial -out certs/orchestrator.crt -days 3650 -copy_extensions copyall
 	openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
 		-keyout certs/agent.key -out certs/agent.csr -subj "/CN=agent-dev"
 	openssl x509 -req -in certs/agent.csr -CA certs/ca.crt -CAkey certs/ca.key \

@@ -1,0 +1,27 @@
+# Orchestrator config. Copy to config.yml and edit.
+bearer_token: "change-me"          # required; auth for the HTTP control plane
+grpc_addr: ":9090"
+http_addr: ":8080"
+data_dir: /var/lib/shuttle         # SQLite ledger lives here
+
+# Git sync + webhook (optional). Set both repo_url and webhook_secret to enable
+# POST /webhook and the drift reconcile loop.
+# repo_url: "https://github.com/you/your-iac-repo.git"
+# repo_branch: "main"
+# repo_dir: ""                     # defaults to <data_dir>/repo
+# webhook_secret: "change-me-too"
+
+# Caddy admin API for ingress route push (optional). In the dev stack Caddy is
+# reachable at http://caddy:2019. Empty disables route push.
+caddy_admin_url: "http://caddy:2019"
+
+# Secrets provider for rendering service env (optional). "infisical" reads
+# INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. Default "none"
+# means env passthrough is off.
+secrets_provider: "none"
+
+# gRPC mTLS (optional). Run `make certs`, then uncomment all three. When unset,
+# the gRPC transport is insecure (dev only).
+# grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
+# grpc_tls_key: /etc/shuttle/certs/orchestrator.key
+# grpc_tls_ca: /etc/shuttle/certs/ca.crt

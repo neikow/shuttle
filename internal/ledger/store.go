@@ -60,7 +60,7 @@ func Open(path string) (*Store, error) {
 	// SQLite allows one writer; cap open conns to avoid lock contention.
 	db.SetMaxOpenConns(1)
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 	return &Store{db: db}, nil
@@ -115,7 +115,7 @@ func (s *Store) RollbackTarget(ctx context.Context, service string, steps int) (
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var shas []string
 	for rows.Next() {
@@ -154,6 +154,29 @@ func (s *Store) SeenNonce(ctx context.Context, nonce string, ttl time.Duration) 
 }
 
 // ListDeploys returns the last `limit` deploys for a service (all services if service is "").
+// CurrentSHAs returns the latest successfully-deployed SHA per service.
+// SQLite returns the bare columns from the row holding MAX(started_at).
+func (s *Store) CurrentSHAs(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT service, sha, MAX(started_at) FROM deploys
+		 WHERE status = ? GROUP BY service`, StatusSuccess)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]string)
+	for rows.Next() {
+		var service, sha string
+		var maxStarted int64
+		if err := rows.Scan(&service, &sha, &maxStarted); err != nil {
+			return nil, err
+		}
+		out[service] = sha
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListDeploys(ctx context.Context, service string, limit int) ([]DeployRecord, error) {
 	var (
 		rows *sql.Rows
@@ -171,7 +194,7 @@ func (s *Store) ListDeploys(ctx context.Context, service string, limit int) ([]D
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []DeployRecord
 	for rows.Next() {

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build-lint-test:
     runs-on: ubuntu-latest
@@ -14,7 +17,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache: true
 
       - name: Download modules
@@ -30,9 +33,14 @@ jobs:
         run: go test -count=1 -race ./internal/... ./cmd/...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v8 targets golangci-lint v2 (our .golangci.yml is v2 format); v6/v7
+        # install v1 and reject the v2 config. goinstall builds with the
+        # runner's Go (1.25) so the binary is not older than the module's go
+        # directive (1.25.7) — prebuilt binaries lag at go1.24.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.12.2
+          install-mode: goinstall
 
   proto:
     runs-on: ubuntu-latest
@@ -41,6 +49,9 @@ jobs:
 
       - uses: bufbuild/buf-action@v1
         with:
+          # Inline GitHub annotations only; skip the PR summary comment so the
+          # job does not require pull-requests:write on the default token.
+          pr_comment: false
           lint: true
           breaking: true
           breaking_against: "https://github.com/${{ github.repository }}.git#branch=main"

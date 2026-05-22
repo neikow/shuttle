@@ -33,6 +33,9 @@ type RollbackParams = ApplyParams
 type Driver interface {
 	Apply(ctx context.Context, p ApplyParams) (<-chan LogLine, error)
 	Rollback(ctx context.Context, p RollbackParams) (<-chan LogLine, error)
+	// Status returns a coarse aggregate status ("running", "exited", ...) for the
+	// service's compose project in workDir.
+	Status(ctx context.Context, service, workDir string) (string, error)
 }
 
 // ComposeDriver shells out to `docker compose`.
@@ -114,16 +117,41 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 	return lines, nil
 }
 
+// Status runs `docker compose ps` and returns an aggregate status for the
+// project: "running" if any container is up, otherwise the first reported
+// state, or "stopped" when nothing is listed.
+func (d *ComposeDriver) Status(ctx context.Context, service, workDir string) (string, error) {
+	composePath := filepath.Join(workDir, "docker-compose.yml")
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "ps", "--format", "{{.State}}")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("docker compose ps: %w", err)
+	}
+	states := strings.Fields(strings.TrimSpace(string(out)))
+	if len(states) == 0 {
+		return "stopped", nil
+	}
+	for _, s := range states {
+		if strings.EqualFold(s, "running") {
+			return "running", nil
+		}
+	}
+	return states[0], nil
+}
+
 func writeEnvFile(path string, env map[string]string) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for k, v := range env {
 		// Escape newlines in values.
 		escaped := strings.ReplaceAll(v, "\n", "\\n")
-		fmt.Fprintf(f, "%s=%s\n", k, escaped)
+		if _, err := fmt.Fprintf(f, "%s=%s\n", k, escaped); err != nil {
+			return err
+		}
 	}
 	return nil
 }

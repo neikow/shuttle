@@ -18,6 +18,7 @@ var agentCmd = &cobra.Command{
 		cert, _ := cmd.Flags().GetString("cert")
 		key, _ := cmd.Flags().GetString("key")
 		ca, _ := cmd.Flags().GetString("ca")
+		serverName, _ := cmd.Flags().GetString("server-name")
 
 		cfg := agent.Config{
 			Host:         host,
@@ -27,6 +28,7 @@ var agentCmd = &cobra.Command{
 			CertFile:     cert,
 			KeyFile:      key,
 			CAFile:       ca,
+			ServerName:   serverName,
 		}
 
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -40,9 +42,10 @@ func init() {
 	agentCmd.Flags().String("orchestrator", "", "Orchestrator gRPC address (host:port)")
 	agentCmd.Flags().String("host", "", "Host name (must match hosts.yaml)")
 	agentCmd.Flags().String("work-dir", "./agent-work", "Base directory for compose workspaces")
-	agentCmd.Flags().String("cert", "", "Path to agent TLS certificate")
+	agentCmd.Flags().String("cert", "", "Path to agent TLS certificate (enables mTLS)")
 	agentCmd.Flags().String("key", "", "Path to agent TLS key")
 	agentCmd.Flags().String("ca", "", "Path to CA certificate for orchestrator verification")
-	agentCmd.MarkFlagRequired("orchestrator")
-	agentCmd.MarkFlagRequired("host")
+	agentCmd.Flags().String("server-name", "orchestrator", "Expected SAN on orchestrator certificate")
+	_ = agentCmd.MarkFlagRequired("orchestrator")
+	_ = agentCmd.MarkFlagRequired("host")
 }
