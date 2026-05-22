@@ -102,7 +102,7 @@ func (g *GitSyncer) dispatchPlan(ctx context.Context, repo *config.Repo, steps [
 		if len(filter) > 0 && !filter[step.Service] {
 			continue
 		}
-		deployID, err := g.dispatch(ctx, svcByName[step.Service], step)
+		deployID, err := g.dispatch(ctx, svcByName[step.Service], step, ledger.TriggeredByWebhook)
 		if err != nil {
 			slog.Error("dispatch failed", "service", step.Service, "host", step.Host, "err", err)
 			continue
@@ -159,7 +159,50 @@ func (g *GitSyncer) ForceDeploy(ctx context.Context, services []string) ([]strin
 // LocalDir returns the path of the synced working copy.
 func (g *GitSyncer) LocalDir() string { return g.dir }
 
-func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step) (string, error) {
+// DeployAtSHA checks out the repo at sha, renders the named service's compose +
+// env at that revision, and dispatches a deploy. Used by the manual deploy and
+// rollback HTTP endpoints, which must ship real compose (unlike a bare
+// DeployRequest). Returns the deploy ID and the resolved host.
+//
+// The working copy is left detached at sha; the next Reconcile resets it to the
+// branch tip.
+func (g *GitSyncer) DeployAtSHA(ctx context.Context, service, sha string, triggeredBy ledger.TriggeredBy) (deployID, host string, err error) {
+	// Ensure the repo (and its history) is present.
+	if _, statErr := os.Stat(filepath.Join(g.dir, ".git")); errors.Is(statErr, os.ErrNotExist) {
+		if _, syncErr := g.Sync(ctx); syncErr != nil {
+			return "", "", syncErr
+		}
+	} else if fetchErr := g.git(ctx, g.dir, "fetch", "origin", g.branch); fetchErr != nil {
+		return "", "", fmt.Errorf("fetch: %w", fetchErr)
+	}
+	if coErr := g.git(ctx, g.dir, "checkout", sha); coErr != nil {
+		return "", "", fmt.Errorf("checkout %s: %w", sha, coErr)
+	}
+
+	repo, loadErr := config.Load(g.dir)
+	if loadErr != nil {
+		return "", "", fmt.Errorf("load config at %s: %w", sha, loadErr)
+	}
+	var svc *config.Service
+	for i := range repo.Services {
+		if repo.Services[i].Name == service {
+			svc = &repo.Services[i]
+			break
+		}
+	}
+	if svc == nil {
+		return "", "", fmt.Errorf("service %q not found at %s", service, sha)
+	}
+
+	step := Step{Host: svc.Host, Service: svc.Name, Action: ActionDeploy, SHA: sha}
+	id, dispErr := g.dispatch(ctx, *svc, step, triggeredBy)
+	if dispErr != nil {
+		return "", "", dispErr
+	}
+	return id, svc.Host, nil
+}
+
+func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step, triggeredBy ledger.TriggeredBy) (string, error) {
 	composeYAML, err := g.renderCompose(ctx, svc)
 	if err != nil {
 		return "", err
@@ -176,7 +219,7 @@ func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step)
 		Host:        step.Host,
 		SHA:         step.SHA,
 		Status:      ledger.StatusPending,
-		TriggeredBy: ledger.TriggeredByWebhook,
+		TriggeredBy: triggeredBy,
 		StartedAt:   time.Now(),
 	}
 	if err := g.store.RecordDeploy(ctx, rec); err != nil {

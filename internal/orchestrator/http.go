@@ -85,6 +85,23 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sha required", http.StatusBadRequest)
 		return
 	}
+
+	// Preferred path: render real compose from the repo at the requested SHA.
+	if s.syncer != nil {
+		deployID, host, err := s.syncer.DeployAtSHA(r.Context(), service, sha, ledger.TriggeredByManual)
+		if err != nil {
+			writeDeployError(w, err)
+			return
+		}
+		slog.Info("deploy queued", "deploy_id", deployID, "service", service, "host", host, "sha", sha)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID, "host": host})
+		return
+	}
+
+	// Legacy path (no git sync configured): dispatch without compose. The agent
+	// can only act on this if it already has the project on disk.
 	host := r.URL.Query().Get("host")
 	if host == "" {
 		http.Error(w, "host required", http.StatusBadRequest)
@@ -140,15 +157,29 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 			steps = n
 		}
 	}
-	host := r.URL.Query().Get("host")
-	if host == "" {
-		http.Error(w, "host required", http.StatusBadRequest)
-		return
-	}
-
 	targetSHA, err := s.ledger.RollbackTarget(r.Context(), service, steps)
 	if err != nil {
 		http.Error(w, "rollback target: "+err.Error(), http.StatusConflict)
+		return
+	}
+
+	// Preferred path: render the target SHA's compose from the repo.
+	if s.syncer != nil {
+		deployID, host, err := s.syncer.DeployAtSHA(r.Context(), service, targetSHA, ledger.TriggeredByRollback)
+		if err != nil {
+			writeDeployError(w, err)
+			return
+		}
+		slog.Info("rollback queued", "deploy_id", deployID, "service", service, "host", host, "target_sha", targetSHA)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID, "target_sha": targetSHA, "host": host})
+		return
+	}
+
+	host := r.URL.Query().Get("host")
+	if host == "" {
+		http.Error(w, "host required", http.StatusBadRequest)
 		return
 	}
 
@@ -211,6 +242,16 @@ func (s *HTTPServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+}
+
+// writeDeployError maps a DeployAtSHA failure to an HTTP status: unknown
+// service → 404, anything else (git, agent send) → 502.
+func writeDeployError(w http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "not found") {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadGateway)
 }
 
 func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
