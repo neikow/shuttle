@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -63,6 +64,48 @@ func gitInit(t *testing.T, dir string) {
 	run("init", "-b", "main")
 	run("add", "-A")
 	run("commit", "-m", "init")
+}
+
+func TestGitSyncer_DeployAtSHA(t *testing.T) {
+	src := makeSourceRepo(t)
+	headCmd := exec.Command("git", "-C", src, "rev-parse", "HEAD")
+	out, err := headCmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(string(out))
+
+	store, err := ledger.Open(filepath.Join(t.TempDir(), "led.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := NewRegistry()
+	conn := registry.register("web1")
+	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, nil)
+
+	id, host, err := g.DeployAtSHA(context.Background(), "app", sha, ledger.TriggeredByManual)
+	if err != nil {
+		t.Fatalf("DeployAtSHA: %v", err)
+	}
+	if id == "" || host != "web1" {
+		t.Fatalf("id=%q host=%q", id, host)
+	}
+	cmd := <-conn.send
+	dep := cmd.GetDeploy()
+	if dep == nil || dep.Service != "app" || dep.Sha != sha || len(dep.ComposeYaml) == 0 {
+		t.Fatalf("unexpected deploy: %+v", dep)
+	}
+
+	// Ledger records it as a manual deploy.
+	recs, err := store.ListDeploys(context.Background(), "app", 1)
+	if err != nil || len(recs) != 1 || recs[0].TriggeredBy != ledger.TriggeredByManual {
+		t.Fatalf("ledger: %v %+v", err, recs)
+	}
+
+	if _, _, err := g.DeployAtSHA(context.Background(), "ghost", sha, ledger.TriggeredByManual); err == nil {
+		t.Fatal("expected error for unknown service")
+	}
 }
 
 func TestGitSyncer_RemoteCompose(t *testing.T) {
