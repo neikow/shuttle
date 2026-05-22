@@ -10,6 +10,15 @@ type OrchestratorConfig struct {
 	RepoBranch    string `yaml:"repo_branch"`
 	RepoDir       string `yaml:"repo_dir"`
 	WebhookSecret string `yaml:"webhook_secret"`
+	// gRPC mTLS: when all three are set the orchestrator requires client certs.
+	GRPCTLSCert string `yaml:"grpc_tls_cert"`
+	GRPCTLSKey  string `yaml:"grpc_tls_key"`
+	GRPCTLSCA   string `yaml:"grpc_tls_ca"`
+}
+
+// MTLSEnabled reports whether all gRPC TLS material is configured.
+func (c *OrchestratorConfig) MTLSEnabled() bool {
+	return c.GRPCTLSCert != "" && c.GRPCTLSKey != "" && c.GRPCTLSCA != ""
 }
 
 // Repo is the parsed state of a shuttle IaC repository.

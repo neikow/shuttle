@@ -16,6 +16,7 @@ import (
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/ledger"
+	"github.com/neikow/shuttle/internal/mtls"
 	"github.com/neikow/shuttle/internal/orchestrator"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -61,7 +62,19 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 
 	registry := orchestrator.NewRegistry()
 
-	grpcServer := grpc.NewServer()
+	var grpcOpts []grpc.ServerOption
+	if cfg.MTLSEnabled() {
+		creds, err := mtls.ServerCreds(cfg.GRPCTLSCert, cfg.GRPCTLSKey, cfg.GRPCTLSCA)
+		if err != nil {
+			return fmt.Errorf("grpc mTLS: %w", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+		slog.Info("grpc mTLS enabled")
+	} else {
+		slog.Warn("grpc transport is insecure; set grpc_tls_* for mTLS")
+	}
+
+	grpcServer := grpc.NewServer(grpcOpts...)
 	shuttlev1.RegisterAgentServiceServer(grpcServer, orchestrator.NewAgentServiceServer(registry))
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
+	"github.com/neikow/shuttle/internal/mtls"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -18,17 +19,26 @@ type Config struct {
 	Orchestrator string // host:port
 	AgentVersion string
 	WorkDir      string // base dir for compose workspaces
-	// TLS fields populated when mTLS is configured (Phase 11 hardening).
-	CertFile string
-	KeyFile  string
-	CAFile   string
+	// TLS fields enable mTLS when all three are set; otherwise the agent dials
+	// insecurely (dev only). ServerName must match a SAN on the orchestrator cert.
+	CertFile   string
+	KeyFile    string
+	CAFile     string
+	ServerName string
 }
 
 // Run connects to the orchestrator and processes commands until ctx is cancelled.
 func Run(ctx context.Context, cfg Config, driver Driver) error {
-	// TODO: replace insecure with mTLS creds from cfg.CertFile/KeyFile/CAFile.
+	creds := insecure.NewCredentials()
+	if cfg.CertFile != "" || cfg.KeyFile != "" || cfg.CAFile != "" {
+		var err error
+		creds, err = mtls.ClientCreds(cfg.CertFile, cfg.KeyFile, cfg.CAFile, cfg.ServerName)
+		if err != nil {
+			return fmt.Errorf("build mTLS creds: %w", err)
+		}
+	}
 	conn, err := grpc.NewClient(cfg.Orchestrator,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return fmt.Errorf("dial orchestrator: %w", err)
