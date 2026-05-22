@@ -145,11 +145,13 @@ func writeEnvFile(path string, env map[string]string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for k, v := range env {
 		// Escape newlines in values.
 		escaped := strings.ReplaceAll(v, "\n", "\\n")
-		fmt.Fprintf(f, "%s=%s\n", k, escaped)
+		if _, err := fmt.Fprintf(f, "%s=%s\n", k, escaped); err != nil {
+			return err
+		}
 	}
 	return nil
 }

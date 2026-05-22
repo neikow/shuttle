@@ -60,7 +60,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	if err != nil {
 		return fmt.Errorf("open ledger: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	registry := orchestrator.NewRegistry()
 
@@ -83,7 +83,8 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	grpcServer := grpc.NewServer(grpcOpts...)
 	shuttlev1.RegisterAgentServiceServer(grpcServer, agentServer)
 
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", cfg.GRPCAddr)
 	if err != nil {
 		return fmt.Errorf("listen grpc %s: %w", cfg.GRPCAddr, err)
 	}

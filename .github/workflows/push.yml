@@ -36,6 +36,10 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          # Build golangci-lint from source with the runner's Go (1.25) so its
+          # build version is not lower than the module's go directive (1.25.7);
+          # the prebuilt binaries lag at go1.24 and refuse to load the config.
+          install-mode: goinstall
 
   proto:
     runs-on: ubuntu-latest

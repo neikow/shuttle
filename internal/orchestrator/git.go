@@ -120,7 +120,7 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 	if err != nil {
 		return nil, err
 	}
-	g.applyRoutes(repo)
+	g.applyRoutes(ctx, repo)
 	current, err := g.store.CurrentSHAs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("current state: %w", err)
@@ -130,12 +130,12 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 }
 
 // applyRoutes pushes the repo's desired routes to Caddy when configured.
-func (g *GitSyncer) applyRoutes(repo *config.Repo) {
+func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 	if g.caddy == nil {
 		return
 	}
 	routes := RoutesFromRepo(repo)
-	if err := g.caddy.ApplyRoutes(routes); err != nil {
+	if err := g.caddy.ApplyRoutes(ctx, routes); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return
 	}
@@ -195,7 +195,7 @@ func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step)
 		},
 	}
 	if err := g.registry.Send(step.Host, cmd); err != nil {
-		g.store.MarkStatus(ctx, deployID, ledger.StatusFailed)
+		_ = g.store.MarkStatus(ctx, deployID, ledger.StatusFailed)
 		return "", fmt.Errorf("send to agent: %w", err)
 	}
 	slog.Info("deploy dispatched", "deploy_id", deployID, "service", step.Service, "host", step.Host, "sha", step.SHA)

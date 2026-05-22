@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,13 +51,13 @@ func RoutesFromRepo(repo *config.Repo) []CaddyRoute {
 
 // ApplyRoutes replaces the entire Caddy config with the given routes.
 // Each route: HTTPS + auto-TLS via Let's Encrypt.
-func (c *CaddyClient) ApplyRoutes(routes []CaddyRoute) error {
+func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute) error {
 	cfg := buildCaddyConfig(routes)
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, c.adminURL+"/load", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.adminURL+"/load", bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,7 @@ func (c *CaddyClient) ApplyRoutes(routes []CaddyRoute) error {
 	if err != nil {
 		return fmt.Errorf("caddy load: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("caddy load status %d: %s", resp.StatusCode, body)

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -48,7 +49,7 @@ func TestApplyRoutes(t *testing.T) {
 	routes := []CaddyRoute{
 		{Domain: "app.example.com", Upstream: "localhost:8080"},
 	}
-	if err := client.ApplyRoutes(routes); err != nil {
+	if err := client.ApplyRoutes(context.Background(), routes); err != nil {
 		t.Fatalf("ApplyRoutes: %v", err)
 	}
 	if received == nil {
@@ -71,7 +72,7 @@ func TestApplyRoutes_serverError(t *testing.T) {
 	defer srv.Close()
 
 	client := NewCaddyClient(srv.URL)
-	err := client.ApplyRoutes([]CaddyRoute{{Domain: "x.com", Upstream: "localhost:80"}})
+	err := client.ApplyRoutes(context.Background(), []CaddyRoute{{Domain: "x.com", Upstream: "localhost:80"}})
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
 	}

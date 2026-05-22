@@ -60,7 +60,7 @@ func Open(path string) (*Store, error) {
 	// SQLite allows one writer; cap open conns to avoid lock contention.
 	db.SetMaxOpenConns(1)
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("migrations: %w", err)
 	}
 	return &Store{db: db}, nil
@@ -115,7 +115,7 @@ func (s *Store) RollbackTarget(ctx context.Context, service string, steps int) (
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var shas []string
 	for rows.Next() {
@@ -163,7 +163,7 @@ func (s *Store) CurrentSHAs(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make(map[string]string)
 	for rows.Next() {
@@ -194,7 +194,7 @@ func (s *Store) ListDeploys(ctx context.Context, service string, limit int) ([]D
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []DeployRecord
 	for rows.Next() {

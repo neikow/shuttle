@@ -76,7 +76,7 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 	if err != nil {
 		return fmt.Errorf("dial orchestrator: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := shuttlev1.NewAgentServiceClient(conn)
 	deployed := newDeployedSet()

@@ -54,7 +54,7 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *HTTPServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +71,7 @@ func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(deploys)
+	_ = json.NewEncoder(w).Encode(deploys)
 }
 
 func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,7 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if err := s.registry.Send(host, cmd); err != nil {
-		s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
+		_ = s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
 		http.Error(w, "send to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -124,7 +124,7 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	slog.Info("deploy queued", "deploy_id", deployID, "service", service, "host", host)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID})
+	_ = json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID})
 }
 
 func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +177,7 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if err := s.registry.Send(host, cmd); err != nil {
-		s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
+		_ = s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
 		http.Error(w, "send rollback to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -185,7 +185,7 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 	slog.Info("rollback queued", "deploy_id", deployID, "service", service, "target_sha", targetSHA)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID, "target_sha": targetSHA})
+	_ = json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID, "target_sha": targetSHA})
 }
 
 // handleWebhook validates the signed payload, then reconciles asynchronously
@@ -210,7 +210,7 @@ func (s *HTTPServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
 }
 
 func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {

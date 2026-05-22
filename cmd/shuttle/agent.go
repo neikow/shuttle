@@ -46,6 +46,6 @@ func init() {
 	agentCmd.Flags().String("key", "", "Path to agent TLS key")
 	agentCmd.Flags().String("ca", "", "Path to CA certificate for orchestrator verification")
 	agentCmd.Flags().String("server-name", "orchestrator", "Expected SAN on orchestrator certificate")
-	agentCmd.MarkFlagRequired("orchestrator")
-	agentCmd.MarkFlagRequired("host")
+	_ = agentCmd.MarkFlagRequired("orchestrator")
+	_ = agentCmd.MarkFlagRequired("host")
 }
