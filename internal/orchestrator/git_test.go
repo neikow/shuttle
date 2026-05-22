@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/neikow/shuttle/internal/ledger"
@@ -60,12 +63,23 @@ func TestGitSyncer_Reconcile(t *testing.T) {
 	sec := secrets.NewFake(map[string]string{"API_KEY": "s3cret", "UNUSED": "x"})
 	g := NewGitSyncer(src, "main", clone, store, registry, sec)
 
+	var caddyHits int32
+	caddySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&caddyHits, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer caddySrv.Close()
+	g.SetCaddy(NewCaddyClient(caddySrv.URL))
+
 	dispatched, err := g.Reconcile(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	if len(dispatched) != 1 {
 		t.Fatalf("expected 1 dispatch, got %d", len(dispatched))
+	}
+	if atomic.LoadInt32(&caddyHits) == 0 {
+		t.Error("expected Caddy ApplyRoutes to be called during reconcile")
 	}
 
 	// Inspect the command queued to the agent.

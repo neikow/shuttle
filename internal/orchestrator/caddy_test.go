@@ -6,7 +6,29 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/neikow/shuttle/internal/config"
 )
+
+func TestRoutesFromRepo(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.example.com", "www.example.com"},
+				Healthcheck: &config.Healthcheck{Port: 8080}},
+			{Name: "nodomains", Host: "web1", Healthcheck: &config.Healthcheck{Port: 80}}, // skipped: no domains
+			{Name: "noport", Host: "web1", Domains: []string{"x.com"}},                    // skipped: no healthcheck
+		},
+	}
+	routes := RoutesFromRepo(repo)
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d: %+v", len(routes), routes)
+	}
+	for _, r := range routes {
+		if r.Upstream != "web1:8080" {
+			t.Errorf("upstream = %q, want web1:8080", r.Upstream)
+		}
+	}
+}
 
 func TestApplyRoutes(t *testing.T) {
 	var received map[string]any

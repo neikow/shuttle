@@ -10,6 +10,7 @@ type OrchestratorConfig struct {
 	RepoBranch    string `yaml:"repo_branch"`
 	RepoDir       string `yaml:"repo_dir"`
 	WebhookSecret string `yaml:"webhook_secret"`
+	CaddyAdminURL string `yaml:"caddy_admin_url"` // e.g. http://caddy:2019; empty disables route push
 	// gRPC mTLS: when all three are set the orchestrator requires client certs.
 	GRPCTLSCert string `yaml:"grpc_tls_cert"`
 	GRPCTLSKey  string `yaml:"grpc_tls_key"`

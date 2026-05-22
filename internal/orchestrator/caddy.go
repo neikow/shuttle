@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/neikow/shuttle/internal/config"
 )
 
 // CaddyClient drives the Caddy Admin API on a local or remote Caddy instance.
@@ -26,6 +29,23 @@ func NewCaddyClient(adminURL string) *CaddyClient {
 type CaddyRoute struct {
 	Domain   string
 	Upstream string // host:port
+}
+
+// RoutesFromRepo derives the desired Caddy routes from the repo. Each service
+// domain maps to an upstream of <host>:<healthcheck.port>; services without
+// domains or a healthcheck port are skipped (nothing to route).
+func RoutesFromRepo(repo *config.Repo) []CaddyRoute {
+	var routes []CaddyRoute
+	for _, svc := range repo.Services {
+		if len(svc.Domains) == 0 || svc.Healthcheck == nil || svc.Healthcheck.Port == 0 {
+			continue
+		}
+		upstream := svc.Host + ":" + strconv.Itoa(svc.Healthcheck.Port)
+		for _, domain := range svc.Domains {
+			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream})
+		}
+	}
+	return routes
 }
 
 // ApplyRoutes replaces the entire Caddy config with the given routes.

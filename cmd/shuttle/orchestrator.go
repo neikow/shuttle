@@ -95,6 +95,10 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		}
 		// Secrets provider wiring (Infisical) is deferred; nil = env passthrough off.
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, nil)
+		if cfg.CaddyAdminURL != "" {
+			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
+			slog.Info("caddy route push enabled", "admin_url", cfg.CaddyAdminURL)
+		}
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
 		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)

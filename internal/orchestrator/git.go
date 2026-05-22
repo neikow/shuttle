@@ -29,7 +29,12 @@ type GitSyncer struct {
 	store    *ledger.Store
 	registry *Registry
 	secrets  secrets.Provider
+	caddy    *CaddyClient // optional; when set, routes are pushed on each reconcile
 }
+
+// SetCaddy attaches a Caddy admin client; routes derived from the repo are
+// pushed after each reconcile. Call before serving.
+func (g *GitSyncer) SetCaddy(c *CaddyClient) { g.caddy = c }
 
 func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Registry, sec secrets.Provider) *GitSyncer {
 	if branch == "" {
@@ -115,12 +120,26 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 	if err != nil {
 		return nil, err
 	}
+	g.applyRoutes(repo)
 	current, err := g.store.CurrentSHAs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("current state: %w", err)
 	}
 	plan := ComputePlan(repo, CurrentState(current), sha)
 	return g.dispatchPlan(ctx, repo, plan.Steps, toSet(onlyServices)), nil
+}
+
+// applyRoutes pushes the repo's desired routes to Caddy when configured.
+func (g *GitSyncer) applyRoutes(repo *config.Repo) {
+	if g.caddy == nil {
+		return
+	}
+	routes := RoutesFromRepo(repo)
+	if err := g.caddy.ApplyRoutes(routes); err != nil {
+		slog.Error("apply caddy routes failed", "err", err)
+		return
+	}
+	slog.Info("caddy routes applied", "count", len(routes))
 }
 
 // ForceDeploy redeploys the named services at the current repo HEAD regardless

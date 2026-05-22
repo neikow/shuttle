@@ -11,6 +11,10 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # repo_dir: ""                     # defaults to <data_dir>/repo
 # webhook_secret: "change-me-too"
 
+# Caddy admin API for ingress route push (optional). In the dev stack Caddy is
+# reachable at http://caddy:2019. Empty disables route push.
+caddy_admin_url: "http://caddy:2019"
+
 # gRPC mTLS (optional). Run `make certs`, then uncomment all three. When unset,
 # the gRPC transport is insecure (dev only).
 # grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
