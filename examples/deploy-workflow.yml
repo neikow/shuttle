@@ -1,0 +1,38 @@
+# Shuttle deploy trigger — copy into your IaC repo at .github/workflows/deploy.yml
+#
+# On every push to main this signs a webhook payload with your shared secret and
+# POSTs it to the orchestrator, which pulls the repo and reconciles. The
+# signature scheme matches internal/webhook (HMAC-SHA256 over the raw body).
+#
+# Configure in the IaC repo:
+#   - Variable  SHUTTLE_URL              e.g. https://orchestrator.example.com:8080
+#   - Secret    SHUTTLE_WEBHOOK_SECRET   same value as webhook_secret in config.yml
+name: Deploy via Shuttle
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Shuttle reconcile
+        env:
+          SHUTTLE_URL: ${{ vars.SHUTTLE_URL }}
+          SHUTTLE_WEBHOOK_SECRET: ${{ secrets.SHUTTLE_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          # services:[] => orchestrator reconciles all changed services.
+          BODY=$(jq -nc \
+            --arg ref "$GITHUB_REF" \
+            --arg sha "$GITHUB_SHA" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{ref:$ref, commit_sha:$sha, repo:$repo, services:[]}')
+          TS=$(date +%s)
+          SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SHUTTLE_WEBHOOK_SECRET" | awk '{print $NF}')"
+          curl -fsS -X POST "$SHUTTLE_URL/webhook" \
+            -H "X-Hub-Signature-256: $SIG" \
+            -H "X-Shuttle-Timestamp: $TS" \
+            -H "Content-Type: application/json" \
+            --data-binary "$BODY"

@@ -1,0 +1,57 @@
+version: 2
+project_name: shuttle
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: shuttle
+    main: ./cmd/shuttle
+    binary: shuttle
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.Version={{ .Version }} -X main.Commit={{ .ShortCommit }}
+
+archives:
+  - id: shuttle
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+
+dockers:
+  - image_templates:
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+  - image_templates:
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+
+docker_manifests:
+  - name_template: "ghcr.io/neikow/shuttle:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-amd64"
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/neikow/shuttle:latest"
+    image_templates:
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-amd64"
+      - "ghcr.io/neikow/shuttle:{{ .Version }}-arm64"

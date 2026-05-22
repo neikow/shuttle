@@ -1,0 +1,6 @@
+# Used by GoReleaser: copies the prebuilt binary into a runtime image.
+# (The root Dockerfile builds from source for local/dev use.)
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates git docker-cli docker-cli-compose
+COPY shuttle /usr/local/bin/shuttle
+ENTRYPOINT ["shuttle"]
