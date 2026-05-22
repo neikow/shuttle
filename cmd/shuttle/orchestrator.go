@@ -18,6 +18,7 @@ import (
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/mtls"
 	"github.com/neikow/shuttle/internal/orchestrator"
+	"github.com/neikow/shuttle/internal/secrets"
 	"github.com/neikow/shuttle/internal/webhook"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -93,8 +94,14 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		if repoDir == "" {
 			repoDir = filepath.Join(cfg.DataDir, "repo")
 		}
-		// Secrets provider wiring (Infisical) is deferred; nil = env passthrough off.
-		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, nil)
+		secProvider, err := secrets.NewProvider(cfg.SecretsProvider)
+		if err != nil {
+			return fmt.Errorf("secrets provider: %w", err)
+		}
+		if secProvider != nil {
+			slog.Info("secrets provider enabled", "provider", cfg.SecretsProvider)
+		}
+		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
 			slog.Info("caddy route push enabled", "admin_url", cfg.CaddyAdminURL)

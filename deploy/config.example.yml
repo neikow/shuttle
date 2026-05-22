@@ -15,6 +15,11 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # reachable at http://caddy:2019. Empty disables route push.
 caddy_admin_url: "http://caddy:2019"
 
+# Secrets provider for rendering service env (optional). "infisical" reads
+# INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. Default "none"
+# means env passthrough is off.
+secrets_provider: "none"
+
 # gRPC mTLS (optional). Run `make certs`, then uncomment all three. When unset,
 # the gRPC transport is insecure (dev only).
 # grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
