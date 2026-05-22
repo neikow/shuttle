@@ -1,0 +1,20 @@
+# Build artifacts
+/shuttle
+/dist/
+
+# Local runtime state
+/data/
+/agent-work/
+*.db
+*.db-wal
+*.db-shm
+
+# Dev TLS material
+/certs/
+
+# Local config
+/config.yml
+/config.local.yml
+
+# OS / editor
+.DS_Store

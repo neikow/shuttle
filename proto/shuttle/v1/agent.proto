@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package shuttle.v1;
+
+import "shuttle/v1/deploy.proto";
+
+option go_package = "github.com/neikow/shuttle/gen/shuttle/v1;shuttlev1";
+
+// AgentEvent is sent from agent → orchestrator (upward direction).
+message AgentEvent {
+  oneof payload {
+    RegisterRequest register = 1;
+    Heartbeat heartbeat = 2;
+    DeployResponse deploy_result = 3;
+    ContainerState container_state = 4;
+  }
+}
+
+// OrchestratorCommand is sent from orchestrator → agent (downward direction).
+message OrchestratorCommand {
+  oneof payload {
+    DeployRequest deploy = 1;
+    RollbackRequest rollback = 2;
+    CaddyConfigRequest caddy_config = 3;
+  }
+}
+
+message RegisterRequest {
+  string host = 1;
+  string agent_version = 2;
+}
+
+message Heartbeat {
+  int64 ts_unix_ms = 1;
+}
+
+message ContainerState {
+  string service = 1;
+  string container_id = 2;
+  string status = 3;
+  string image = 4;
+  string sha = 5;
+}
+
+// AgentService is implemented by the orchestrator; agents call it.
+service AgentService {
+  rpc Register(stream AgentEvent) returns (stream OrchestratorCommand);
+}

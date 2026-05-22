@@ -1,0 +1,7 @@
+hosts:
+  - name: web1
+    labels:
+      region: eu
+  - name: web2
+    labels:
+      region: us

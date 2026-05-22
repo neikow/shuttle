@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package shuttle.v1;
+
+option go_package = "github.com/neikow/shuttle/gen/shuttle/v1;shuttlev1";
+
+enum DeployStatus {
+  DEPLOY_STATUS_UNSPECIFIED = 0;
+  DEPLOY_STATUS_PENDING = 1;
+  DEPLOY_STATUS_RUNNING = 2;
+  DEPLOY_STATUS_SUCCESS = 3;
+  DEPLOY_STATUS_FAILED = 4;
+  DEPLOY_STATUS_ROLLED_BACK = 5;
+}
+
+message DeployRequest {
+  string deploy_id = 1;
+  string service = 2;
+  string sha = 3;
+  map<string, string> env = 4;
+  bytes compose_yaml = 5;
+}
+
+message RollbackRequest {
+  string deploy_id = 1;
+  string service = 2;
+  string target_sha = 3;
+  bytes compose_yaml = 4;
+  map<string, string> env = 5;
+}
+
+message LogLine {
+  int64 ts_unix_ms = 1;
+  string stream = 2;
+  string text = 3;
+}
+
+message DeployResponse {
+  string deploy_id = 1;
+  DeployStatus status = 2;
+  repeated LogLine logs = 3;
+  string error = 4;
+}
+
+message CaddyConfigRequest {
+  string config_json = 1;
+}
+
+message CaddyConfigResponse {
+  bool ok = 1;
+  string error = 2;
+}

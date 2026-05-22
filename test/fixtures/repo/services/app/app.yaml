@@ -1,0 +1,7 @@
+name: app
+host: web1
+domains:
+  - app.example.com
+healthcheck:
+  path: /health
+  port: 8080
