@@ -30,23 +30,46 @@ func NewCaddyClient(adminURL string) *CaddyClient {
 type CaddyRoute struct {
 	Domain   string
 	Upstream string // host:port
+	// Handlers are extra Caddy HTTP handler objects parsed from the service's
+	// caddy_snippet, inserted ahead of the reverse_proxy handler (e.g. headers,
+	// rewrites, auth). Empty when the service has no snippet.
+	Handlers []any
 }
 
 // RoutesFromRepo derives the desired Caddy routes from the repo. Each service
 // domain maps to an upstream of <host>:<healthcheck.port>; services without
-// domains or a healthcheck port are skipped (nothing to route).
-func RoutesFromRepo(repo *config.Repo) []CaddyRoute {
+// domains or a healthcheck port are skipped (nothing to route). A service's
+// caddy_snippet, when set, must be a JSON array of Caddy HTTP handler objects;
+// an invalid snippet is a hard error.
+func RoutesFromRepo(repo *config.Repo) ([]CaddyRoute, error) {
 	var routes []CaddyRoute
 	for _, svc := range repo.Services {
 		if len(svc.Domains) == 0 || svc.Healthcheck == nil || svc.Healthcheck.Port == 0 {
 			continue
 		}
+		handlers, err := parseSnippet(svc.CaddySnippet)
+		if err != nil {
+			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
+		}
 		upstream := svc.Host + ":" + strconv.Itoa(svc.Healthcheck.Port)
 		for _, domain := range svc.Domains {
-			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream})
+			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
 		}
 	}
-	return routes
+	return routes, nil
+}
+
+// parseSnippet decodes a service caddy_snippet into a slice of Caddy HTTP
+// handler objects. Empty snippet yields nil.
+func parseSnippet(snippet string) ([]any, error) {
+	if snippet == "" {
+		return nil, nil
+	}
+	var handlers []any
+	if err := json.Unmarshal([]byte(snippet), &handlers); err != nil {
+		return nil, fmt.Errorf("must be a JSON array of Caddy handler objects: %w", err)
+	}
+	return handlers, nil
 }
 
 // ApplyRoutes replaces the entire Caddy config with the given routes.
@@ -78,18 +101,19 @@ func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute) erro
 func buildCaddyConfig(routes []CaddyRoute) map[string]any {
 	var servers []any
 	for _, r := range routes {
+		handle := make([]any, 0, len(r.Handlers)+1)
+		handle = append(handle, r.Handlers...) // snippet handlers run before the proxy
+		handle = append(handle, map[string]any{
+			"handler": "reverse_proxy",
+			"upstreams": []any{
+				map[string]any{"dial": r.Upstream},
+			},
+		})
 		servers = append(servers, map[string]any{
 			"match": []any{
 				map[string]any{"host": []string{r.Domain}},
 			},
-			"handle": []any{
-				map[string]any{
-					"handler": "reverse_proxy",
-					"upstreams": []any{
-						map[string]any{"dial": r.Upstream},
-					},
-				},
-			},
+			"handle": handle,
 		})
 	}
 
