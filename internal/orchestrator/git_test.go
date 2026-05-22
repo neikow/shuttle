@@ -47,6 +47,71 @@ func makeSourceRepo(t *testing.T) string {
 	return dir
 }
 
+// gitInit initializes a repo at dir and commits its current contents.
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("add", "-A")
+	run("commit", "-m", "init")
+}
+
+func TestGitSyncer_RemoteCompose(t *testing.T) {
+	// Remote repo holding the compose file.
+	remote := t.TempDir()
+	remoteCompose := "services:\n  api:\n    image: remote-image\n"
+	if err := os.WriteFile(filepath.Join(remote, "stack.yml"), []byte(remoteCompose), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, remote)
+
+	// IaC repo with a service that points at the remote compose (no local file).
+	src := t.TempDir()
+	mustWrite := func(rel, body string) {
+		p := filepath.Join(src, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("hosts.yaml", "hosts:\n  - name: web1\n")
+	mustWrite("services/api/api.yaml",
+		"name: api\nhost: web1\nremote:\n  repo: "+remote+"\n  branch: main\n  path: stack.yml\n")
+	gitInit(t, src)
+
+	store, err := ledger.Open(filepath.Join(t.TempDir(), "led.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := NewRegistry()
+	conn := registry.register("web1")
+	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, nil)
+
+	dispatched, err := g.Reconcile(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(dispatched) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(dispatched))
+	}
+	cmd := <-conn.send
+	if got := string(cmd.GetDeploy().ComposeYaml); got != remoteCompose {
+		t.Fatalf("remote compose mismatch:\n got: %q\nwant: %q", got, remoteCompose)
+	}
+}
+
 func TestGitSyncer_Reconcile(t *testing.T) {
 	src := makeSourceRepo(t)
 	clone := filepath.Join(t.TempDir(), "clone")

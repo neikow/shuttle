@@ -160,7 +160,7 @@ func (g *GitSyncer) ForceDeploy(ctx context.Context, services []string) ([]strin
 func (g *GitSyncer) LocalDir() string { return g.dir }
 
 func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step) (string, error) {
-	composeYAML, err := g.renderCompose(svc)
+	composeYAML, err := g.renderCompose(ctx, svc)
 	if err != nil {
 		return "", err
 	}
@@ -202,19 +202,68 @@ func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step)
 	return deployID, nil
 }
 
-// renderCompose reads the service's local compose file. Remote pointers are not
-// yet supported by the sync loop.
-func (g *GitSyncer) renderCompose(svc config.Service) ([]byte, error) {
-	local, ok := svc.Source.(config.LocalCompose)
-	if !ok {
-		return nil, fmt.Errorf("service %q: remote compose sources not yet supported", svc.Name)
+// renderCompose returns the service's compose YAML, either from the local repo
+// or fetched from a remote git pointer.
+func (g *GitSyncer) renderCompose(ctx context.Context, svc config.Service) ([]byte, error) {
+	switch src := svc.Source.(type) {
+	case config.LocalCompose:
+		path := filepath.Join(g.dir, src.Path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read compose %s: %w", path, err)
+		}
+		return data, nil
+	case config.RemotePointer:
+		return g.fetchRemoteCompose(ctx, src)
+	default:
+		return nil, fmt.Errorf("service %q: unknown compose source %T", svc.Name, svc.Source)
 	}
-	path := filepath.Join(g.dir, local.Path)
+}
+
+// fetchRemoteCompose shallow-clones (or updates) the pointer's repo into a
+// cache beside the working copy and reads the referenced compose file.
+func (g *GitSyncer) fetchRemoteCompose(ctx context.Context, rp config.RemotePointer) ([]byte, error) {
+	branch := rp.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	cacheDir := filepath.Join(g.dir+".remotes", sanitizeRepoKey(rp.Repo))
+	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir remote cache: %w", err)
+		}
+		if err := g.git(ctx, "", "clone", "--branch", branch, "--single-branch", "--depth", "1", rp.Repo, cacheDir); err != nil {
+			return nil, fmt.Errorf("clone remote %s: %w", rp.Repo, err)
+		}
+	} else {
+		if err := g.git(ctx, cacheDir, "fetch", "--depth", "1", "origin", branch); err != nil {
+			return nil, fmt.Errorf("fetch remote %s: %w", rp.Repo, err)
+		}
+		if err := g.git(ctx, cacheDir, "reset", "--hard", "origin/"+branch); err != nil {
+			return nil, fmt.Errorf("reset remote %s: %w", rp.Repo, err)
+		}
+	}
+
+	path := filepath.Join(cacheDir, rp.Path)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read compose %s: %w", path, err)
+		return nil, fmt.Errorf("read remote compose %s: %w", path, err)
 	}
 	return data, nil
+}
+
+// sanitizeRepoKey turns a repo URL into a filesystem-safe cache directory name.
+func sanitizeRepoKey(repo string) string {
+	var b strings.Builder
+	for _, r := range repo {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 // renderEnv resolves the service's secrets. When EnvSchema is set only those
