@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
+	"github.com/neikow/shuttle/internal/ledger"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -14,10 +15,27 @@ import (
 type AgentServiceServer struct {
 	shuttlev1.UnimplementedAgentServiceServer
 	registry *Registry
+	store    *ledger.Store // optional; when nil, deploy results are not persisted
 }
 
-func NewAgentServiceServer(registry *Registry) *AgentServiceServer {
-	return &AgentServiceServer{registry: registry}
+func NewAgentServiceServer(registry *Registry, store *ledger.Store) *AgentServiceServer {
+	return &AgentServiceServer{registry: registry, store: store}
+}
+
+// ledgerStatus maps a proto DeployStatus to a ledger Status.
+func ledgerStatus(s shuttlev1.DeployStatus) (ledger.Status, bool) {
+	switch s {
+	case shuttlev1.DeployStatus_DEPLOY_STATUS_SUCCESS:
+		return ledger.StatusSuccess, true
+	case shuttlev1.DeployStatus_DEPLOY_STATUS_FAILED:
+		return ledger.StatusFailed, true
+	case shuttlev1.DeployStatus_DEPLOY_STATUS_ROLLED_BACK:
+		return ledger.StatusRolledBack, true
+	case shuttlev1.DeployStatus_DEPLOY_STATUS_RUNNING:
+		return ledger.StatusRunning, true
+	default:
+		return "", false
+	}
 }
 
 func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServer) error {
@@ -65,12 +83,20 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 			s.registry.touch(host)
 			slog.Debug("heartbeat", "host", host, "ts", payload.Heartbeat.TsUnixMs)
 		case *shuttlev1.AgentEvent_DeployResult:
+			res := payload.DeployResult
 			slog.Info("deploy result",
 				"host", host,
-				"deploy_id", payload.DeployResult.DeployId,
-				"status", payload.DeployResult.Status,
+				"deploy_id", res.DeployId,
+				"status", res.Status,
+				"error", res.Error,
 			)
-			// TODO Phase 8: update ledger from deploy result.
+			if s.store != nil {
+				if ls, ok := ledgerStatus(res.Status); ok {
+					if err := s.store.MarkStatus(stream.Context(), res.DeployId, ls); err != nil {
+						slog.Error("mark deploy status", "deploy_id", res.DeployId, "err", err)
+					}
+				}
+			}
 		case *shuttlev1.AgentEvent_ContainerState:
 			slog.Debug("container state",
 				"host", host,

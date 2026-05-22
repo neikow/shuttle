@@ -76,7 +76,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	}
 
 	grpcServer := grpc.NewServer(grpcOpts...)
-	shuttlev1.RegisterAgentServiceServer(grpcServer, orchestrator.NewAgentServiceServer(registry))
+	shuttlev1.RegisterAgentServiceServer(grpcServer, orchestrator.NewAgentServiceServer(registry, store))
 
 	lis, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
