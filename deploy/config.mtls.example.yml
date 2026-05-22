@@ -1,4 +1,6 @@
-# Orchestrator config. Copy to config.yml and edit.
+# Orchestrator config with gRPC mTLS enabled. Used by docker-compose.mtls.yml.
+# Identical to config.example.yml except the grpc_tls_* keys are set, which
+# makes the orchestrator require and verify agent client certificates.
 bearer_token: "change-me"          # required; auth for the HTTP control plane
 grpc_addr: ":9090"
 http_addr: ":8080"
@@ -20,9 +22,8 @@ caddy_admin_url: "http://caddy:2019"
 # means env passthrough is off.
 secrets_provider: "none"
 
-# gRPC mTLS (optional). Unset here => the gRPC transport is insecure (dev only).
-# For the mTLS dev stack use config.mtls.example.yml via docker-compose.mtls.yml
-# (run `make certs` first). To enable manually, set all three:
-# grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
-# grpc_tls_key: /etc/shuttle/certs/orchestrator.key
-# grpc_tls_ca: /etc/shuttle/certs/ca.crt
+# gRPC mTLS. Certs come from `make certs`, mounted at /etc/shuttle/certs by the
+# mtls compose overlay. All three set => clients must present a valid cert.
+grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
+grpc_tls_key: /etc/shuttle/certs/orchestrator.key
+grpc_tls_ca: /etc/shuttle/certs/ca.crt
