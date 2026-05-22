@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Install: copy to ~/Library/LaunchAgents/ (or /Library/LaunchDaemons for
+     system-wide), edit args, then: launchctl load <path> -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.lysen.shuttle.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/shuttle</string>
+    <string>agent</string>
+    <string>--orchestrator</string>
+    <string>orchestrator.example.com:9090</string>
+    <string>--host</string>
+    <string>mac-mini</string>
+    <string>--work-dir</string>
+    <string>/usr/local/var/shuttle/agent</string>
+    <string>--cert</string>
+    <string>/usr/local/etc/shuttle/certs/agent.crt</string>
+    <string>--key</string>
+    <string>/usr/local/etc/shuttle/certs/agent.key</string>
+    <string>--ca</string>
+    <string>/usr/local/etc/shuttle/certs/ca.crt</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/usr/local/var/log/shuttle-agent.log</string>
+  <key>StandardOutPath</key>
+  <string>/usr/local/var/log/shuttle-agent.log</string>
+</dict>
+</plist>

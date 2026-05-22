@@ -1,0 +1,22 @@
+# Install: copy to /etc/systemd/system/, edit ExecStart, then
+#   systemctl daemon-reload && systemctl enable --now shuttle-agent
+[Unit]
+Description=Shuttle agent
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/local/bin/shuttle agent \
+  --orchestrator orchestrator.example.com:9090 \
+  --host %H \
+  --work-dir /var/lib/shuttle/agent \
+  --cert /etc/shuttle/certs/agent.crt \
+  --key /etc/shuttle/certs/agent.key \
+  --ca /etc/shuttle/certs/ca.crt
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
