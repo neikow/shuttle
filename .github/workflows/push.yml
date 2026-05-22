@@ -33,12 +33,13 @@ jobs:
         run: go test -count=1 -race ./internal/... ./cmd/...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v8 targets golangci-lint v2 (our .golangci.yml is v2 format); v6/v7
+        # install v1 and reject the v2 config. goinstall builds with the
+        # runner's Go (1.25) so the binary is not older than the module's go
+        # directive (1.25.7) — prebuilt binaries lag at go1.24.
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
-          # Build golangci-lint from source with the runner's Go (1.25) so its
-          # build version is not lower than the module's go directive (1.25.7);
-          # the prebuilt binaries lag at go1.24 and refuse to load the config.
+          version: v2.12.2
           install-mode: goinstall
 
   proto:
