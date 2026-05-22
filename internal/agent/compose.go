@@ -38,10 +38,55 @@ type Driver interface {
 	Status(ctx context.Context, service, workDir string) (string, error)
 }
 
-// ComposeDriver shells out to `docker compose`.
-type ComposeDriver struct{}
+// ComposeDriver shells out to the Docker Compose CLI. The executable and the
+// compose subcommand prefix are configurable so the same driver serves a
+// standard host (`docker compose`) and a Synology NAS, where the Docker CLI
+// lives at an absolute path outside the agent's PATH.
+type ComposeDriver struct {
+	bin     string   // executable, e.g. "docker" or "/usr/local/bin/docker"
+	compose []string // subcommand prefix before compose flags, e.g. ["compose"]
+}
 
-func NewComposeDriver() *ComposeDriver { return &ComposeDriver{} }
+// NewComposeDriver returns a driver for a standard Docker host (`docker compose`).
+func NewComposeDriver() *ComposeDriver {
+	return &ComposeDriver{bin: "docker", compose: []string{"compose"}}
+}
+
+// NewSynologyDriver targets Synology DSM Container Manager (DSM 7.2+). DSM ships
+// the Docker CLI with the compose plugin at /usr/local/bin/docker, which is
+// usually absent from PATH when the agent runs under Task Scheduler, so the
+// binary defaults to that absolute path. A non-empty bin overrides it.
+func NewSynologyDriver(bin string) *ComposeDriver {
+	if bin == "" {
+		bin = "/usr/local/bin/docker"
+	}
+	return &ComposeDriver{bin: bin, compose: []string{"compose"}}
+}
+
+// NewDriver builds a Driver for the named target. dockerBin, when non-empty,
+// overrides the Docker executable. Returns an error for unknown targets.
+func NewDriver(name, dockerBin string) (Driver, error) {
+	switch name {
+	case "", "compose", "docker":
+		d := NewComposeDriver()
+		if dockerBin != "" {
+			d.bin = dockerBin
+		}
+		return d, nil
+	case "synology":
+		return NewSynologyDriver(dockerBin), nil
+	default:
+		return nil, fmt.Errorf("unknown driver %q (want compose|synology)", name)
+	}
+}
+
+// composeArgs builds the full argument vector (excluding the executable) for a
+// compose invocation against composePath with the given subcommand.
+func (d *ComposeDriver) composeArgs(composePath, envFile string, sub ...string) []string {
+	args := append([]string{}, d.compose...)
+	args = append(args, "-f", composePath, "--env-file", envFile)
+	return append(args, sub...)
+}
 
 func (d *ComposeDriver) Apply(ctx context.Context, p ApplyParams) (<-chan LogLine, error) {
 	return d.runCompose(ctx, p, []string{"up", "-d", "--remove-orphans", "--pull", "always"})
@@ -66,8 +111,7 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 		return nil, fmt.Errorf("write env: %w", err)
 	}
 
-	args := append([]string{"compose", "-f", composePath, "--env-file", envFile}, subCmd...)
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, d.bin, d.composeArgs(composePath, envFile, subCmd...)...)
 	cmd.Dir = p.WorkDir
 
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -122,7 +166,9 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 // state, or "stopped" when nothing is listed.
 func (d *ComposeDriver) Status(ctx context.Context, service, workDir string) (string, error) {
 	composePath := filepath.Join(workDir, "docker-compose.yml")
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", composePath, "ps", "--format", "{{.State}}")
+	args := append([]string{}, d.compose...)
+	args = append(args, "-f", composePath, "ps", "--format", "{{.State}}")
+	cmd := exec.CommandContext(ctx, d.bin, args...)
 	cmd.Dir = workDir
 	out, err := cmd.Output()
 	if err != nil {

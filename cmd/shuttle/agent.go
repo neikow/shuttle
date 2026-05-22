@@ -19,6 +19,13 @@ var agentCmd = &cobra.Command{
 		key, _ := cmd.Flags().GetString("key")
 		ca, _ := cmd.Flags().GetString("ca")
 		serverName, _ := cmd.Flags().GetString("server-name")
+		driverName, _ := cmd.Flags().GetString("driver")
+		dockerBin, _ := cmd.Flags().GetString("docker-bin")
+
+		driver, err := agent.NewDriver(driverName, dockerBin)
+		if err != nil {
+			return err
+		}
 
 		cfg := agent.Config{
 			Host:         host,
@@ -34,7 +41,7 @@ var agentCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
-		return agent.Run(ctx, cfg, agent.NewComposeDriver())
+		return agent.Run(ctx, cfg, driver)
 	},
 }
 
@@ -46,6 +53,8 @@ func init() {
 	agentCmd.Flags().String("key", "", "Path to agent TLS key")
 	agentCmd.Flags().String("ca", "", "Path to CA certificate for orchestrator verification")
 	agentCmd.Flags().String("server-name", "orchestrator", "Expected SAN on orchestrator certificate")
+	agentCmd.Flags().String("driver", "compose", "Deploy driver: compose | synology")
+	agentCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
 	_ = agentCmd.MarkFlagRequired("orchestrator")
 	_ = agentCmd.MarkFlagRequired("host")
 }
