@@ -26,6 +26,20 @@ https_redirect: false
 # means env passthrough is off.
 secrets_provider: "none"
 
+# Infisical folder layout (only used with secrets_provider: infisical). Each
+# service reads the shared base folder merged with its own folder; a service's
+# secret_path overrides the template. Both must be absolute. Default base
+# "/shared"; no template means every service reads only the base.
+# secrets_base_path: "/shared"
+# secrets_path_template: "/services/{service}"
+
+# Infisical webhook (optional). Set infisical_webhook_secret to enable
+# POST /webhook/infisical: Infisical secret-change webhooks are authenticated
+# (HMAC) and only the services reading the changed folder are redeployed.
+# A burst of edits is coalesced over infisical_webhook_debounce (default 5s).
+# infisical_webhook_secret: "change-me-infisical"
+# infisical_webhook_debounce: "5s"
+
 # gRPC TLS (optional). Unset here => the gRPC transport is insecure (dev only).
 #   cert + key      => orchestrator serves TLS (pair with agent_token_auth below).
 #   cert + key + ca => mutual TLS: agents must present a client cert.

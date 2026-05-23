@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,11 @@ type GitSyncer struct {
 	// httpsRedirect, when true, makes Caddy serve only :443 and auto-redirect
 	// :80 -> HTTPS (308). When false, :80 is served plaintext (no redirect).
 	httpsRedirect bool
+	// secretsBasePath is the shared secrets folder merged under every service;
+	// secretsPathTemplate derives a service's own folder from its name. Both feed
+	// renderEnv via config.ResolveSecretsPaths.
+	secretsBasePath     string
+	secretsPathTemplate string
 }
 
 // SetCaddy attaches a Caddy admin client; routes derived from the repo are
@@ -41,6 +47,13 @@ func (g *GitSyncer) SetCaddy(c *CaddyClient) { g.caddy = c }
 
 // SetHTTPSRedirect toggles HTTP->HTTPS redirect in the generated Caddy config.
 func (g *GitSyncer) SetHTTPSRedirect(v bool) { g.httpsRedirect = v }
+
+// SetSecretsPaths configures the shared base folder and per-service path template
+// used to resolve where each service's secrets are read from. Call before serving.
+func (g *GitSyncer) SetSecretsPaths(basePath, template string) {
+	g.secretsBasePath = basePath
+	g.secretsPathTemplate = template
+}
 
 func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Registry, sec secrets.Provider) *GitSyncer {
 	if branch == "" {
@@ -488,26 +501,43 @@ func sanitizeRepoKey(repo string) string {
 }
 
 // renderEnv resolves the service's secrets. The service's env_from selects the
-// provider scope (the Infisical environment); when EnvSchema is set only those
-// keys are included, otherwise all secrets in the scope are passed through.
+// Infisical environment; the secrets are merged from a shared base folder and
+// the service's own folder (secret_path / secrets_path_template), with the
+// service folder winning on conflicts. When EnvSchema is set only those keys are
+// included, otherwise the whole merged set is passed through.
 func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[string]string, error) {
 	if g.secrets == nil {
 		return nil, nil
 	}
-	all, err := g.secrets.GetAll(ctx, svc.EnvFrom)
+	basePath, svcPath := config.ResolveSecretsPaths(g.secretsBasePath, g.secretsPathTemplate, svc.SecretPath, svc.Name)
+
+	all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
 	if err != nil {
-		return nil, fmt.Errorf("secrets: %w", err)
+		return nil, fmt.Errorf("secrets (base %q): %w", basePath, err)
 	}
+	if svcPath != basePath {
+		specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
+		if err != nil {
+			return nil, fmt.Errorf("secrets (service %q): %w", svcPath, err)
+		}
+		maps.Copy(all, specific) // service-specific keys override the shared base
+	}
+
 	if len(svc.EnvSchema) == 0 {
 		return all, nil
 	}
 	env := make(map[string]string, len(svc.EnvSchema))
+	var missing []string
 	for _, key := range svc.EnvSchema {
 		if v, ok := all[key]; ok {
 			env[key] = v
 		} else {
-			slog.Warn("env key declared in schema but not in secrets", "service", svc.Name, "key", key)
+			missing = append(missing, key)
 		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("service %q: env keys declared in env_schema but missing from secrets (base %q, service %q): %s",
+			svc.Name, basePath, svcPath, strings.Join(missing, ", "))
 	}
 	return env, nil
 }

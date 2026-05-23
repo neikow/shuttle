@@ -15,6 +15,7 @@ import (
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 	"github.com/neikow/shuttle/internal/config"
+	"github.com/neikow/shuttle/internal/infisical"
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/mtls"
 	"github.com/neikow/shuttle/internal/orchestrator"
@@ -119,6 +120,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 			slog.Info("secrets provider enabled", "provider", cfg.SecretsProvider)
 		}
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
+		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
 			syncer.SetHTTPSRedirect(cfg.HTTPSRedirect)
@@ -127,6 +129,22 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
 		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)
+
+		if cfg.InfisicalWebhookSecret != "" {
+			debounce := 5 * time.Second
+			if cfg.InfisicalWebhookDebounce != "" {
+				d, err := time.ParseDuration(cfg.InfisicalWebhookDebounce)
+				if err != nil {
+					return fmt.Errorf("infisical_webhook_debounce: %w", err)
+				}
+				debounce = d
+			}
+			httpHandler.EnableInfisicalWebhook(
+				infisical.NewHandler(cfg.InfisicalWebhookSecret),
+				syncer, debounce, os.Getenv("INFISICAL_ENV"),
+			)
+			slog.Info("infisical webhook enabled", "debounce", debounce)
+		}
 
 		if cfg.AgentTokenAuth {
 			advertiseAddr := cfg.AdvertiseAddr

@@ -10,9 +10,10 @@ import (
 	"strings"
 	"time"
 
+	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
+	"github.com/neikow/shuttle/internal/infisical"
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/webhook"
-	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 )
 
 // HTTPServer exposes the orchestrator control plane over HTTP.
@@ -25,6 +26,10 @@ type HTTPServer struct {
 	webhook *webhook.Handler
 	syncer  *GitSyncer
 	enroll  *EnrollOptions
+
+	infisical         *infisical.Handler
+	infisicalDebounce *changeDebouncer
+	infisicalDefEnv   string // default env for services with no env_from
 }
 
 // EnableWebhook registers POST /webhook, which validates the signed payload and
@@ -34,6 +39,69 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.syncer = syncer
 	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
 	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
+}
+
+// EnableInfisicalWebhook registers POST /webhook/infisical, which authenticates
+// an Infisical secret-change webhook, maps the changed secret to the services
+// that read it, and redeploys only those — debounced so a burst of edits
+// triggers one reconcile pass. defaultEnv resolves services with no env_from.
+// Call before serving.
+func (s *HTTPServer) EnableInfisicalWebhook(h *infisical.Handler, syncer *GitSyncer, debounce time.Duration, defaultEnv string) {
+	s.infisical = h
+	s.syncer = syncer
+	s.infisicalDefEnv = defaultEnv
+	s.infisicalDebounce = newChangeDebouncer(debounce, s.reconcileSecretChanges)
+	s.mux.HandleFunc("POST /webhook/infisical", s.handleInfisicalWebhook)
+}
+
+// handleInfisicalWebhook validates the signed payload and queues a debounced
+// redeploy of the affected services, returning 202 immediately.
+func (s *HTTPServer) handleInfisicalWebhook(w http.ResponseWriter, r *http.Request) {
+	payload, err := s.infisical.Parse(r)
+	if err != nil {
+		http.Error(w, "infisical webhook: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.infisicalDebounce.Trigger(SecretChange{Env: payload.Env(), Path: payload.Path()})
+	slog.Info("infisical change queued", "event", payload.Event, "env", payload.Env(), "path", payload.Path())
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+}
+
+// reconcileSecretChanges resolves the union of services affected by the given
+// secret changes and reconciles them. It runs off the request path (debounced),
+// so it manages its own context and only logs failures.
+func (s *HTTPServer) reconcileSecretChanges(changes []SecretChange) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	affected := make(map[string]struct{})
+	for _, c := range changes {
+		svcs, err := s.syncer.ServicesUsingSecret(ctx, c.Env, c.Path, s.infisicalDefEnv)
+		if err != nil {
+			slog.Error("infisical resolve affected services failed", "env", c.Env, "path", c.Path, "err", err)
+			return
+		}
+		for _, svc := range svcs {
+			affected[svc] = struct{}{}
+		}
+	}
+	if len(affected) == 0 {
+		slog.Info("infisical change affected no services", "changes", len(changes))
+		return
+	}
+	services := make([]string, 0, len(affected))
+	for svc := range affected {
+		services = append(services, svc)
+	}
+	ids, err := s.syncer.Reconcile(ctx, services)
+	if err != nil {
+		slog.Error("infisical reconcile failed", "err", err)
+		return
+	}
+	slog.Info("infisical reconcile dispatched", "services", services, "count", len(ids))
 }
 
 // handlePrune force-deletes the volumes of every removed service that still has
@@ -286,4 +354,3 @@ func newID() string {
 
 // Ensure HTTPServer satisfies http.Handler.
 var _ http.Handler = (*HTTPServer)(nil)
-

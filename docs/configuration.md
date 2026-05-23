@@ -22,6 +22,8 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `caddy_admin_url` | — | Caddy Admin API URL (e.g. `http://caddy:2019`). Empty disables route push. |
 | `https_redirect` | `false` | When true, Caddy serves `:443` only and 308-redirects `:80` → HTTPS. When false, `:80` is served plaintext (no redirect). |
 | `secrets_provider` | `none` | `infisical` or `none`. |
+| `secrets_base_path` | `/shared` | Shared Infisical folder merged under every service. Must be absolute. |
+| `secrets_path_template` | — | Per-service folder derived from name, e.g. `/services/{service}` (`{service}` is substituted). Must be absolute. A service's `secret_path` overrides it. |
 | `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
 | `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |
 | `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
@@ -56,14 +58,25 @@ environment:
 | `INFISICAL_CLIENT_SECRET` | yes | — | Universal-auth client secret. |
 | `INFISICAL_PROJECT_ID` | yes | — | Project to read secrets from. |
 | `INFISICAL_ENV` | no | `production` | Default environment slug, used when a service has no `env_from`. |
-| `INFISICAL_SECRET_PATH` | no | `/` | Folder path within the environment. |
+| `INFISICAL_SECRET_PATH` | no | `/` | Provider fallback folder. Superseded per service by `secrets_base_path` / `secrets_path_template` / `secret_path`. |
 | `INFISICAL_SITE_URL` | no | Infisical Cloud | Self-hosted Infisical base URL. |
 
-For each deploy the orchestrator fetches the secrets, then writes the service's
-`.env`. A service's **`env_from`** selects the Infisical *environment* to read
-from (overriding `INFISICAL_ENV`), and **`env_schema`** filters which keys reach
-the service (see [iac-repo.md](iac-repo.md)). `none` (the default provider) means
-no secret injection.
+For each deploy the orchestrator fetches secrets along **two axes** and writes
+the service's `.env`:
+
+- **Environment** ← the service's **`env_from`** (overrides `INFISICAL_ENV`).
+- **Folder** ← a **shared base** (`secrets_base_path`, default `/shared`) merged
+  with the service's **own folder**. The service folder is its `secret_path` if
+  set, else `secrets_path_template` with `{service}` substituted, else the base.
+
+Both folders are read from the same environment and merged, with the
+service-specific folder winning on key conflicts; **`env_schema`** then filters
+which keys reach the service (see [iac-repo.md](iac-repo.md)). All folder paths
+must be absolute. `none` (the default provider) means no secret injection.
+
+Example: `secrets_base_path: /shared`, `secrets_path_template: /services/{service}`,
+and a service `api` with `env_from: production` reads `production` secrets from
+`/shared` + `/services/api`, the latter overriding the former.
 
 ## mTLS certificates
 

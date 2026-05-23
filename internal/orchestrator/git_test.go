@@ -168,7 +168,9 @@ func TestGitSyncer_Reconcile(t *testing.T) {
 	registry := NewRegistry()
 	conn := registry.register("web1") // simulate a connected agent
 
-	sec := secrets.NewFake(map[string]string{"API_KEY": "s3cret", "UNUSED": "x"})
+	sec := secrets.NewFake(nil)
+	// Secrets live in the default base folder ("/shared"); renderEnv reads there.
+	sec.SetScope(secrets.Scope{Path: "/shared"}, map[string]string{"API_KEY": "s3cret", "UNUSED": "x"})
 	g := NewGitSyncer(src, "main", clone, store, registry, sec)
 
 	var caddyHits int32

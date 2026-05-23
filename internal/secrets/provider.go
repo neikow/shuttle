@@ -5,14 +5,20 @@ import (
 	"fmt"
 )
 
-// Provider resolves secret keys to plaintext values. scope selects a named
-// secret set — for Infisical it is the environment slug (a service's env_from);
-// the empty scope means the provider's default environment.
+// Scope identifies a secret set. For Infisical, Env is the environment slug (a
+// service's env_from) and Path is the folder. An empty field falls back to the
+// provider's configured default for that axis.
+type Scope struct {
+	Env  string
+	Path string
+}
+
+// Provider resolves secret keys to plaintext values within a Scope.
 type Provider interface {
 	// Get returns the plaintext value for key in scope. Returns ErrNotFound if absent.
-	Get(ctx context.Context, scope, key string) (string, error)
+	Get(ctx context.Context, scope Scope, key string) (string, error)
 	// GetAll returns all secrets in scope as a map.
-	GetAll(ctx context.Context, scope string) (map[string]string, error)
+	GetAll(ctx context.Context, scope Scope) (map[string]string, error)
 }
 
 // NewProvider constructs a Provider by name. "" and "none" return (nil, nil),
