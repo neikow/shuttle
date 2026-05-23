@@ -33,6 +33,13 @@ secrets_provider: "none"
 # secrets_base_path: "/shared"
 # secrets_path_template: "/services/{service}"
 
+# Infisical webhook (optional). Set infisical_webhook_secret to enable
+# POST /webhook/infisical: Infisical secret-change webhooks are authenticated
+# (HMAC) and only the services reading the changed folder are redeployed.
+# A burst of edits is coalesced over infisical_webhook_debounce (default 5s).
+# infisical_webhook_secret: "change-me-infisical"
+# infisical_webhook_debounce: "5s"
+
 # gRPC TLS (optional). Unset here => the gRPC transport is insecure (dev only).
 #   cert + key      => orchestrator serves TLS (pair with agent_token_auth below).
 #   cert + key + ca => mutual TLS: agents must present a client cert.

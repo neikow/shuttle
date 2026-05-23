@@ -19,6 +19,14 @@ type OrchestratorConfig struct {
 	// overrides it. Both must be absolute paths.
 	SecretsBasePath     string `yaml:"secrets_base_path"`
 	SecretsPathTemplate string `yaml:"secrets_path_template"`
+	// InfisicalWebhookSecret enables POST /webhook/infisical: when set, the
+	// orchestrator authenticates Infisical secret-change webhooks (HMAC) and
+	// redeploys the affected services. Empty disables the endpoint.
+	InfisicalWebhookSecret string `yaml:"infisical_webhook_secret"`
+	// InfisicalWebhookDebounce is the quiet window over which a burst of
+	// Infisical changes is coalesced into one redeploy pass (e.g. "5s").
+	// Empty defaults to 5s.
+	InfisicalWebhookDebounce string `yaml:"infisical_webhook_debounce"`
 	// gRPC TLS. cert+key => the orchestrator serves TLS; adding ca makes it
 	// require+verify client certs (mutual TLS).
 	GRPCTLSCert string `yaml:"grpc_tls_cert"`

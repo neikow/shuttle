@@ -35,6 +35,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
+| `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
 | `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
@@ -52,7 +53,9 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/hosts`, `/enroll`, `/prune`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`). |
+| `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
+| `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 
 ## Request flows
 
@@ -62,6 +65,13 @@ Always run `make test` before committing. The repo is kept race-clean.
 pending ledger row, `registry.Send` a `DeployRequest` → agent runs
 `docker compose up` → streams `DeployResponse` back → ledger `MarkStatus`. Caddy
 routes are re-pushed each reconcile.
+
+**Infisical webhook deploy:** `POST /webhook/infisical` → `infisical.Handler`
+verifies the HMAC signature → `ServicesUsingSecret` syncs the repo and finds the
+services whose resolved secret folders (base or service) exactly match the
+changed (env, path) → `changeDebouncer` coalesces a burst → `Reconcile` of just
+the affected services. Folder matching is exact (non-recursive), mirroring
+`renderEnv`'s per-folder reads.
 
 **Manual deploy / rollback:** `POST /deploy/{service}` and
 `POST /rollback?service=…&steps=N` use `GitSyncer.DeployAtSHA` (checkout the
@@ -146,9 +156,24 @@ These are deliberate. Don't reverse them without updating this file.
   both folders in that environment and merges them (service folder wins), then
   filters by `env_schema`, producing the `.env` shipped with the compose file.
   Folder paths must be absolute. The provider stays generic `(env, path) →
-  secrets`; all path *policy* lives in the orchestrator.
+  secrets`; all path *policy* lives in the orchestrator. A key declared in
+  `env_schema` but absent from the resolved secrets is a **hard error** (not a
+  warning) — the deploy fails loudly rather than shipping a silently-empty `.env`.
+- **CLI loads `CWD/.env` at startup.** `main` calls `config.LoadDotEnv(".env")`
+  before any subcommand, so the `INFISICAL_*` provider vars (and others) can come
+  from a local `.env`. The real environment always wins; a missing file is not an
+  error. Tiny built-in parser (no `godotenv` dep), consistent with the project's
+  shell-out-over-library bias.
 - **Webhook auth = HMAC `X-Hub-Signature-256` + nonce replay guard (10 min TTL).**
   Matches the GitHub webhook convention; the nonce guard blocks replays.
+- **Infisical webhook = HMAC `x-infisical-signature` → selective, debounced
+  redeploy.** `infisical_webhook_secret` enables `POST /webhook/infisical`. The
+  signature is `t=<ts>,v1=<hmac>` over `<ts>.<body>` (Stripe/Infisical style;
+  skipped only if no secret is configured). A change carries an (env, folder);
+  `ServicesUsingSecret` maps it to exactly the services reading that folder
+  (non-recursive match, since `renderEnv` reads folders non-recursively) and only
+  those are reconciled — no full redeploy. A burst of edits is coalesced over
+  `infisical_webhook_debounce` (default 5s) so N rapid changes trigger one pass.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
 - **Agent auth = mTLS *or* enrollment token.** Either present a client cert
   (mutual TLS) or a host-scoped bearer token over server-auth TLS. The token path
