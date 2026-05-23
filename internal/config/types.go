@@ -14,8 +14,8 @@ type OrchestratorConfig struct {
 	HTTPSRedirect   bool   `yaml:"https_redirect"`   // when true, Caddy serves :443 only and 308-redirects :80 -> HTTPS
 	SecretsProvider string `yaml:"secrets_provider"` // "infisical" | "none" (default)
 	// SecretsBasePath is the shared secrets folder merged under every service
-	// (default "/shared"). SecretsPathTemplate, when set, derives a service's own
-	// folder from its name (e.g. "/services/{service}"); a service's secret_path
+	// (default "/shared"). SecretsPathTemplate derives a service's own folder
+	// from its name (default "/services/{service}"); a service's secret_path
 	// overrides it. Both must be absolute paths.
 	SecretsBasePath     string `yaml:"secrets_base_path"`
 	SecretsPathTemplate string `yaml:"secrets_path_template"`

@@ -58,17 +58,20 @@ func TestRenderEnv_explicitSecretPathOverridesTemplate(t *testing.T) {
 	}
 }
 
-func TestRenderEnv_noTemplateUsesBaseOnly(t *testing.T) {
+func TestRenderEnv_unsetTemplateDefaultsToServicesFolder(t *testing.T) {
 	sec := secrets.NewFake(nil)
 	sec.SetScope(secrets.Scope{Env: "prod", Path: "/shared"}, map[string]string{"ONLY": "base"})
+	// With no template configured, the service folder defaults to
+	// /services/{service}; here it's empty, so only the base secrets come through.
+	sec.SetScope(secrets.Scope{Env: "prod", Path: "/services/api"}, map[string]string{"SVC": "v"})
 
-	syncer := newSecretsSyncer(t, sec, "/shared", "") // no template, no per-service path
+	syncer := newSecretsSyncer(t, sec, "/shared", "") // unset template -> /services/{service}
 	env, err := syncer.renderEnv(context.Background(), config.Service{Name: "api", EnvFrom: "prod"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(env) != 1 || env["ONLY"] != "base" {
-		t.Fatalf("env = %v, want only base secrets", env)
+	if len(env) != 2 || env["ONLY"] != "base" || env["SVC"] != "v" {
+		t.Fatalf("env = %v, want base + default /services/api secrets", env)
 	}
 }
 
