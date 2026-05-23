@@ -21,7 +21,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "shuttle:", err)
 		os.Exit(1)
 	}
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd)
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
