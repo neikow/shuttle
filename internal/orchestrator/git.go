@@ -133,7 +133,71 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 		return nil, fmt.Errorf("current state: %w", err)
 	}
 	plan := ComputePlan(repo, CurrentState(current), sha)
-	return g.dispatchPlan(ctx, repo, plan.Steps, toSet(onlyServices)), nil
+	dispatched := g.dispatchPlan(ctx, repo, plan.Steps, toSet(onlyServices))
+	g.reconcileRemovals(ctx, repo)
+	return dispatched, nil
+}
+
+// reconcileRemovals tears down services that have left the repo. It records the
+// repo's services as present, flips any previously-present service that is now
+// absent to removed, and dispatches a container teardown for each removed
+// service whose containers have not yet been brought down (idempotent, so an
+// offline agent is retried next tick). Volumes are always kept here; their
+// deletion is governed separately by each service's delete_volumes policy.
+func (g *GitSyncer) reconcileRemovals(ctx context.Context, repo *config.Repo) {
+	repoNames := make(map[string]bool, len(repo.Services))
+	for _, svc := range repo.Services {
+		repoNames[svc.Name] = true
+		if err := g.store.MarkServicePresent(ctx, svc.Name, svc.Host, "manual"); err != nil {
+			slog.Error("mark service present failed", "service", svc.Name, "err", err)
+		}
+	}
+
+	present, err := g.store.PresentServices(ctx)
+	if err != nil {
+		slog.Error("list present services failed", "err", err)
+		return
+	}
+	for _, svc := range present {
+		if repoNames[svc] {
+			continue
+		}
+		if err := g.store.MarkServiceRemoved(ctx, svc, nil); err != nil {
+			slog.Error("mark service removed failed", "service", svc, "err", err)
+		}
+	}
+
+	awaiting, err := g.store.ServicesAwaitingTeardown(ctx)
+	if err != nil {
+		slog.Error("list services awaiting teardown failed", "err", err)
+		return
+	}
+	for _, sl := range awaiting {
+		if err := g.dispatchTeardown(sl.Service, sl.Host, false); err != nil {
+			slog.Warn("teardown dispatch failed (will retry)", "service", sl.Service, "host", sl.Host, "err", err)
+			continue
+		}
+		if err := g.store.MarkContainersRemoved(ctx, sl.Service); err != nil {
+			slog.Error("mark containers removed failed", "service", sl.Service, "err", err)
+			continue
+		}
+		slog.Info("service teardown dispatched", "service", sl.Service, "host", sl.Host)
+	}
+}
+
+// dispatchTeardown sends a teardown command to the host's agent. removeVolumes
+// is false for ordinary removals (data kept) and true for volume purges.
+func (g *GitSyncer) dispatchTeardown(service, host string, removeVolumes bool) error {
+	cmd := &shuttlev1.OrchestratorCommand{
+		Payload: &shuttlev1.OrchestratorCommand_Teardown{
+			Teardown: &shuttlev1.TeardownRequest{
+				DeployId:      newID(),
+				Service:       service,
+				RemoveVolumes: removeVolumes,
+			},
+		},
+	}
+	return g.registry.Send(host, cmd)
 }
 
 // applyRoutes pushes the repo's desired routes to Caddy when configured.

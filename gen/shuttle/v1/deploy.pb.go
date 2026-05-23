@@ -359,6 +359,70 @@ func (x *DeployResponse) GetError() string {
 	return ""
 }
 
+// TeardownRequest tells an agent to bring a service down. The agent runs
+// `docker compose down` against the service's persisted compose workspace.
+// remove_volumes adds `--volumes` (used by the volume-purge path); when false,
+// named volumes are kept so the data survives until an explicit purge.
+type TeardownRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeployId      string                 `protobuf:"bytes,1,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
+	Service       string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	RemoveVolumes bool                   `protobuf:"varint,3,opt,name=remove_volumes,json=removeVolumes,proto3" json:"remove_volumes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeardownRequest) Reset() {
+	*x = TeardownRequest{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeardownRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeardownRequest) ProtoMessage() {}
+
+func (x *TeardownRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeardownRequest.ProtoReflect.Descriptor instead.
+func (*TeardownRequest) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TeardownRequest) GetDeployId() string {
+	if x != nil {
+		return x.DeployId
+	}
+	return ""
+}
+
+func (x *TeardownRequest) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *TeardownRequest) GetRemoveVolumes() bool {
+	if x != nil {
+		return x.RemoveVolumes
+	}
+	return false
+}
+
 type CaddyConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ConfigJson    string                 `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
@@ -368,7 +432,7 @@ type CaddyConfigRequest struct {
 
 func (x *CaddyConfigRequest) Reset() {
 	*x = CaddyConfigRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +444,7 @@ func (x *CaddyConfigRequest) String() string {
 func (*CaddyConfigRequest) ProtoMessage() {}
 
 func (x *CaddyConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +457,7 @@ func (x *CaddyConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaddyConfigRequest.ProtoReflect.Descriptor instead.
 func (*CaddyConfigRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{4}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CaddyConfigRequest) GetConfigJson() string {
@@ -413,7 +477,7 @@ type CaddyConfigResponse struct {
 
 func (x *CaddyConfigResponse) Reset() {
 	*x = CaddyConfigResponse{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -425,7 +489,7 @@ func (x *CaddyConfigResponse) String() string {
 func (*CaddyConfigResponse) ProtoMessage() {}
 
 func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -438,7 +502,7 @@ func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaddyConfigResponse.ProtoReflect.Descriptor instead.
 func (*CaddyConfigResponse) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{5}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CaddyConfigResponse) GetOk() bool {
@@ -489,7 +553,11 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x120\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x18.shuttle.v1.DeployStatusR\x06status\x12'\n" +
 	"\x04logs\x18\x03 \x03(\v2\x13.shuttle.v1.LogLineR\x04logs\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"5\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"o\n" +
+	"\x0fTeardownRequest\x12\x1b\n" +
+	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12%\n" +
+	"\x0eremove_volumes\x18\x03 \x01(\bR\rremoveVolumes\"5\n" +
 	"\x12CaddyConfigRequest\x12\x1f\n" +
 	"\vconfig_json\x18\x01 \x01(\tR\n" +
 	"configJson\";\n" +
@@ -517,21 +585,22 @@ func file_shuttle_v1_deploy_proto_rawDescGZIP() []byte {
 }
 
 var file_shuttle_v1_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(DeployStatus)(0),           // 0: shuttle.v1.DeployStatus
 	(*DeployRequest)(nil),       // 1: shuttle.v1.DeployRequest
 	(*RollbackRequest)(nil),     // 2: shuttle.v1.RollbackRequest
 	(*LogLine)(nil),             // 3: shuttle.v1.LogLine
 	(*DeployResponse)(nil),      // 4: shuttle.v1.DeployResponse
-	(*CaddyConfigRequest)(nil),  // 5: shuttle.v1.CaddyConfigRequest
-	(*CaddyConfigResponse)(nil), // 6: shuttle.v1.CaddyConfigResponse
-	nil,                         // 7: shuttle.v1.DeployRequest.EnvEntry
-	nil,                         // 8: shuttle.v1.RollbackRequest.EnvEntry
+	(*TeardownRequest)(nil),     // 5: shuttle.v1.TeardownRequest
+	(*CaddyConfigRequest)(nil),  // 6: shuttle.v1.CaddyConfigRequest
+	(*CaddyConfigResponse)(nil), // 7: shuttle.v1.CaddyConfigResponse
+	nil,                         // 8: shuttle.v1.DeployRequest.EnvEntry
+	nil,                         // 9: shuttle.v1.RollbackRequest.EnvEntry
 }
 var file_shuttle_v1_deploy_proto_depIdxs = []int32{
-	7, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
-	8, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
+	8, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
+	9, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
 	0, // 2: shuttle.v1.DeployResponse.status:type_name -> shuttle.v1.DeployStatus
 	3, // 3: shuttle.v1.DeployResponse.logs:type_name -> shuttle.v1.LogLine
 	4, // [4:4] is the sub-list for method output_type
@@ -552,7 +621,7 @@ func file_shuttle_v1_deploy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shuttle_v1_deploy_proto_rawDesc), len(file_shuttle_v1_deploy_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
