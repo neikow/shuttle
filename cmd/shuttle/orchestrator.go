@@ -65,15 +65,31 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	registry := orchestrator.NewRegistry()
 
 	var grpcOpts []grpc.ServerOption
-	if cfg.MTLSEnabled() {
+	switch {
+	case cfg.MTLSEnabled():
 		creds, err := mtls.ServerCreds(cfg.GRPCTLSCert, cfg.GRPCTLSKey, cfg.GRPCTLSCA)
 		if err != nil {
 			return fmt.Errorf("grpc mTLS: %w", err)
 		}
 		grpcOpts = append(grpcOpts, grpc.Creds(creds))
 		slog.Info("grpc mTLS enabled")
-	} else {
-		slog.Warn("grpc transport is insecure; set grpc_tls_* for mTLS")
+	case cfg.ServerTLSEnabled():
+		creds, err := mtls.ServerTLSCreds(cfg.GRPCTLSCert, cfg.GRPCTLSKey)
+		if err != nil {
+			return fmt.Errorf("grpc server TLS: %w", err)
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+		slog.Info("grpc server TLS enabled (agents authenticate by token)")
+	default:
+		slog.Warn("grpc transport is insecure; set grpc_tls_cert/key (+ agent_token_auth) or grpc_tls_ca for mTLS")
+	}
+
+	if cfg.AgentTokenAuth {
+		grpcOpts = append(grpcOpts, grpc.ChainStreamInterceptor(orchestrator.TokenStreamInterceptor(store)))
+		slog.Info("agent token auth enabled")
+		if !cfg.ServerTLSEnabled() {
+			slog.Warn("agent_token_auth without TLS sends tokens in cleartext; set grpc_tls_cert/key")
+		}
 	}
 
 	tracker := orchestrator.NewStateTracker()
@@ -110,6 +126,20 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
 		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)
+
+		if cfg.AgentTokenAuth {
+			advertiseAddr := cfg.AdvertiseAddr
+			if advertiseAddr == "" {
+				advertiseAddr = cfg.GRPCAddr
+			}
+			httpHandler.EnableEnrollment(orchestrator.EnrollOptions{
+				AdvertiseAddr: advertiseAddr,
+				ServerName:    cfg.AdvertiseServerName,
+				TLS:           cfg.ServerTLSEnabled(),
+				Hosts:         syncer.Hosts,
+			})
+			slog.Info("agent enrollment endpoints enabled", "advertise_addr", advertiseAddr)
+		}
 
 		reconciler := orchestrator.NewDriftReconciler(syncer, tracker, 60*time.Second, 90*time.Second)
 		go reconciler.Run(ctx)

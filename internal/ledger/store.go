@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-//go:embed 00001_schema.sql
+//go:embed *.sql
 var embedMigrations embed.FS
 
 type Status string
