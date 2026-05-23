@@ -78,8 +78,24 @@ func (s *HTTPServer) handleInfisicalWebhook(w http.ResponseWriter, r *http.Reque
 		"top_level_env", payload.Environment,
 		"top_level_path", payload.SecretPath,
 	)
-	if payload.Event == "test" {
+	switch payload.Event {
+	case infisical.EventTest:
 		slog.Info("infisical test ping received")
+		w.WriteHeader(http.StatusOK)
+		return
+	case infisical.EventSecretsRotationFailed:
+		slog.Warn("infisical secret rotation failed",
+			"env", payload.Env(),
+			"path", payload.Path(),
+			"rotation", payload.Project.RotationName,
+			"error", payload.Project.ErrorMessage,
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	case infisical.EventSecretsModified:
+		// fall through to reconcile
+	default:
+		slog.Warn("infisical webhook: unrecognised event type; ignoring", "event", payload.Event)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
