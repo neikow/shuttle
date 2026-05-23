@@ -28,7 +28,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `version.go`. Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `version.go`. Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
@@ -52,7 +52,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/hosts`, `/enroll`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/hosts`, `/enroll`, `/prune`). |
 
 ## Request flows
 
@@ -85,6 +85,17 @@ and retried until `registry.Send` succeeds (so an offline host heals when it
 reconnects). Volumes are **kept** here — their deletion is governed separately
 by each service's `delete_volumes` policy (see below).
 
+**Volume deletion:** a service's `delete_volumes` policy (captured in
+`service_lifecycle` while present, so it survives removal) decides when its named
+volumes go. At removal `purgeAfterForPolicy` sets a deadline: `immediate` → now,
+a duration (`"7 days"`) → now+duration, `manual` (default) → none. Each
+`DriftReconciler` tick calls `PurgeExpiredVolumes` → for services past their
+deadline, sends a `TeardownRequest{remove_volumes:true}` → agent runs
+`docker compose down --volumes` and deletes the workspace. `manual` services
+wait for an explicit prune: `POST /prune` (or `shuttle prune`) →
+`PruneVolumes` force-purges every removed service whose volumes remain. Purges
+are marked on `registry.Send` success and retried for offline hosts.
+
 ## Design decisions & rationale
 
 These are deliberate. Don't reverse them without updating this file.
@@ -109,6 +120,12 @@ These are deliberate. Don't reverse them without updating this file.
   the service is still in the repo so it survives the removal. Teardown is
   idempotent (re-`docker compose down` is harmless), so the orchestrator marks
   progress on `registry.Send` success and retries offline hosts next tick.
+- **`delete_volumes` defaults to `manual` (data is never auto-deleted).** Removing
+  a service from the repo tears down its containers but, by default, keeps its
+  volumes until an explicit `prune` — so an accidental repo deletion loses no
+  data. Opt into deletion per service: `true`/`immediate`, or a duration
+  (`"7 days"`) that defers the purge. The duration parser (`ParseHumanDuration`)
+  extends `time.ParseDuration` with day/week and spelled-out units.
 - **git via shell-out, not a Go git library.** Mirrors the agent's
   `docker compose` shell-out and avoids a heavy `go-git` dependency. The git CLI
   is already a hard runtime requirement.

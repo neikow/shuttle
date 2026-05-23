@@ -2,6 +2,8 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -61,6 +63,21 @@ func (s *Store) PresentServices(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// ServiceDeleteVolumes returns a service's last-known delete_volumes policy,
+// captured while it was present. Defaults to "manual" if the service is unknown.
+func (s *Store) ServiceDeleteVolumes(ctx context.Context, service string) (string, error) {
+	var policy string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT delete_volumes FROM service_lifecycle WHERE service = ?`, service).Scan(&policy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "manual", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return policy, nil
+}
+
 // MarkServiceRemoved flips a service to absent and stamps removed_at (only if not
 // already set, so repeated reconciles keep the original removal time). purgeAfter,
 // when non-nil, schedules volume deletion for that epoch-ms instant; nil leaves
@@ -84,9 +101,43 @@ func (s *Store) MarkServiceRemoved(ctx context.Context, service string, purgeAft
 // dispatches a teardown for each; the operation is idempotent, so an agent that
 // was offline at removal time is retried on the next tick.
 func (s *Store) ServicesAwaitingTeardown(ctx context.Context) ([]ServiceLifecycle, error) {
-	rows, err := s.db.QueryContext(ctx,
+	return s.queryLifecycle(ctx,
 		`SELECT service, host, delete_volumes FROM service_lifecycle
 		 WHERE present = 0 AND containers_removed_at IS NULL`)
+}
+
+// MarkContainersRemoved stamps containers_removed_at, recording that a teardown
+// was dispatched for the service.
+func (s *Store) MarkContainersRemoved(ctx context.Context, service string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE service_lifecycle SET containers_removed_at = ?, updated_at = ? WHERE service = ?`,
+		time.Now().UnixMilli(), time.Now().UnixMilli(), service,
+	)
+	return err
+}
+
+// ServicesAwaitingPurge returns removed services whose scheduled volume-deletion
+// deadline (volumes_purge_after) has passed and whose volumes are not yet purged.
+// Services with no deadline (manual policy) are excluded — those wait for prune.
+func (s *Store) ServicesAwaitingPurge(ctx context.Context, now int64) ([]ServiceLifecycle, error) {
+	return s.queryLifecycle(ctx,
+		`SELECT service, host, delete_volumes FROM service_lifecycle
+		 WHERE present = 0 AND containers_removed_at IS NOT NULL
+		   AND volumes_purged_at IS NULL
+		   AND volumes_purge_after IS NOT NULL AND volumes_purge_after <= ?`, now)
+}
+
+// ServicesPendingVolumes returns every removed service whose volumes have not yet
+// been purged, regardless of policy or deadline. This is the prune set: an
+// explicit prune force-deletes all kept volumes now.
+func (s *Store) ServicesPendingVolumes(ctx context.Context) ([]ServiceLifecycle, error) {
+	return s.queryLifecycle(ctx,
+		`SELECT service, host, delete_volumes FROM service_lifecycle
+		 WHERE present = 0 AND volumes_purged_at IS NULL`)
+}
+
+func (s *Store) queryLifecycle(ctx context.Context, query string, args ...any) ([]ServiceLifecycle, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +153,13 @@ func (s *Store) ServicesAwaitingTeardown(ctx context.Context) ([]ServiceLifecycl
 	return out, rows.Err()
 }
 
-// MarkContainersRemoved stamps containers_removed_at, recording that a teardown
-// was dispatched for the service.
-func (s *Store) MarkContainersRemoved(ctx context.Context, service string) error {
+// MarkVolumesPurged stamps volumes_purged_at, recording that the service's
+// volumes were deleted.
+func (s *Store) MarkVolumesPurged(ctx context.Context, service string) error {
+	now := time.Now().UnixMilli()
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE service_lifecycle SET containers_removed_at = ?, updated_at = ? WHERE service = ?`,
-		time.Now().UnixMilli(), time.Now().UnixMilli(), service,
+		`UPDATE service_lifecycle SET volumes_purged_at = ?, updated_at = ? WHERE service = ?`,
+		now, now, service,
 	)
 	return err
 }

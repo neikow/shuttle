@@ -39,6 +39,7 @@ env_from: production      # optional; secrets environment/scope
 env_schema:               # optional; the only secret keys passed to this service
   - WHOAMI_NAME
 port: 80                  # optional; the Caddy upstream port for this service's domains
+delete_volumes: manual    # optional; volume deletion policy on removal (default: manual)
 caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
   [{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]
 ```
@@ -54,6 +55,18 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 - **`caddy_snippet`** must be a JSON array of Caddy HTTP handler objects. They are
   injected *ahead of* the `reverse_proxy` handler for the service's domains
   (headers, rewrites, auth, …). Invalid JSON is a hard error.
+- **`delete_volumes`** controls what happens to the service's named volumes when
+  it is removed from the repo. When a service is deleted, the orchestrator always
+  brings its containers down; this setting decides the *volumes*:
+  - `manual` (default) — keep the volumes; delete them only with `shuttle prune`
+    (or `POST /prune`). Safest: no data loss on an accidental removal.
+  - `true` / `immediate` — delete the volumes as soon as the service is removed.
+  - `false` — same as `manual`.
+  - a duration like `"7 days"`, `"30 minutes"`, `"12h"` — keep the volumes, then
+    delete them once that long has passed since removal.
+
+  Accepts a YAML boolean or a quoted string. The policy in effect is the one
+  recorded the last time the service was present in the repo.
 
 ## Compose source — exactly one
 

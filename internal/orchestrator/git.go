@@ -148,7 +148,7 @@ func (g *GitSyncer) reconcileRemovals(ctx context.Context, repo *config.Repo) {
 	repoNames := make(map[string]bool, len(repo.Services))
 	for _, svc := range repo.Services {
 		repoNames[svc.Name] = true
-		if err := g.store.MarkServicePresent(ctx, svc.Name, svc.Host, "manual"); err != nil {
+		if err := g.store.MarkServicePresent(ctx, svc.Name, svc.Host, svc.DeleteVolumes); err != nil {
 			slog.Error("mark service present failed", "service", svc.Name, "err", err)
 		}
 	}
@@ -162,7 +162,14 @@ func (g *GitSyncer) reconcileRemovals(ctx context.Context, repo *config.Repo) {
 		if repoNames[svc] {
 			continue
 		}
-		if err := g.store.MarkServiceRemoved(ctx, svc, nil); err != nil {
+		// The just-removed service is no longer in the repo; its last-known
+		// policy was captured in the lifecycle row, so read it back.
+		pol, err := g.store.ServiceDeleteVolumes(ctx, svc)
+		if err != nil {
+			slog.Error("read delete_volumes policy failed", "service", svc, "err", err)
+			pol = config.DeleteVolumesManual
+		}
+		if err := g.store.MarkServiceRemoved(ctx, svc, purgeAfterForPolicy(pol, time.Now())); err != nil {
 			slog.Error("mark service removed failed", "service", svc, "err", err)
 		}
 	}
@@ -198,6 +205,66 @@ func (g *GitSyncer) dispatchTeardown(service, host string, removeVolumes bool) e
 		},
 	}
 	return g.registry.Send(host, cmd)
+}
+
+// purgeAfterForPolicy maps a delete_volumes policy to a volume-deletion deadline
+// (epoch ms) relative to now: "immediate" => now, a duration => now+duration,
+// "manual" (or anything unparseable) => nil (no scheduled purge; wait for prune).
+func purgeAfterForPolicy(policy string, now time.Time) *int64 {
+	switch policy {
+	case config.DeleteVolumesImmediate:
+		ms := now.UnixMilli()
+		return &ms
+	case config.DeleteVolumesManual, "":
+		return nil
+	}
+	d, err := config.ParseHumanDuration(policy)
+	if err != nil {
+		return nil // unknown policy: keep volumes until pruned
+	}
+	ms := now.Add(d).UnixMilli()
+	return &ms
+}
+
+// PurgeExpiredVolumes deletes the volumes of removed services whose scheduled
+// deadline has passed (immediate or duration policies). Manual-policy services
+// are left for an explicit prune. Returns the services whose purge was
+// dispatched. Driven by the drift reconciler tick.
+func (g *GitSyncer) PurgeExpiredVolumes(ctx context.Context) ([]string, error) {
+	due, err := g.store.ServicesAwaitingPurge(ctx, time.Now().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	return g.dispatchPurges(ctx, due), nil
+}
+
+// PruneVolumes force-deletes the volumes of every removed service that still has
+// them, regardless of policy or deadline. Backs the manual prune command.
+func (g *GitSyncer) PruneVolumes(ctx context.Context) ([]string, error) {
+	pending, err := g.store.ServicesPendingVolumes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return g.dispatchPurges(ctx, pending), nil
+}
+
+// dispatchPurges sends a volume-removing teardown for each service and marks it
+// purged on success. An offline host's purge is skipped and retried later.
+func (g *GitSyncer) dispatchPurges(ctx context.Context, services []ledger.ServiceLifecycle) []string {
+	var purged []string
+	for _, sl := range services {
+		if err := g.dispatchTeardown(sl.Service, sl.Host, true); err != nil {
+			slog.Warn("volume purge dispatch failed (will retry)", "service", sl.Service, "host", sl.Host, "err", err)
+			continue
+		}
+		if err := g.store.MarkVolumesPurged(ctx, sl.Service); err != nil {
+			slog.Error("mark volumes purged failed", "service", sl.Service, "err", err)
+			continue
+		}
+		slog.Info("service volumes purged", "service", sl.Service, "host", sl.Host)
+		purged = append(purged, sl.Service)
+	}
+	return purged
 }
 
 // applyRoutes pushes the repo's desired routes to Caddy when configured.
