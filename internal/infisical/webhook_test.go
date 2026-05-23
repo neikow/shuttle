@@ -19,11 +19,27 @@ func TestParse_signedRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if p.Event != "secrets.modified" {
+	if p.Event != EventSecretsModified {
 		t.Errorf("event = %q", p.Event)
 	}
 	if p.Env() != "prod" || p.Path() != "/services/api" {
 		t.Errorf("env/path = %q %q, want prod /services/api", p.Env(), p.Path())
+	}
+}
+
+func TestParse_rotationFailed(t *testing.T) {
+	body := `{"event":"secrets.rotation-failed","project":{"environment":"prod","secretPath":"/services/api","rotationName":"db-creds","errorMessage":"timeout"}}`
+	r := httptest.NewRequest("POST", "/webhook/infisical", strings.NewReader(body))
+
+	p, err := NewHandler("").Parse(r)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Event != EventSecretsRotationFailed {
+		t.Errorf("event = %q", p.Event)
+	}
+	if p.Project.RotationName != "db-creds" || p.Project.ErrorMessage != "timeout" {
+		t.Errorf("rotation fields = %q %q", p.Project.RotationName, p.Project.ErrorMessage)
 	}
 }
 

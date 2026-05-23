@@ -19,18 +19,38 @@ const (
 	maxBodyBytes = 1 << 20 // 1 MiB
 	// SignatureHeader is the HMAC signature Infisical sends with each webhook.
 	SignatureHeader = "x-infisical-signature"
+
+	// Infisical webhook event types.
+	//
+	// EventSecretsModified fires when secrets in the configured scope are
+	// created, updated, or deleted. This is the primary trigger for redeploy.
+	//
+	// EventSecretsRotationFailed fires when a secret rotation fails. We log it
+	// but do not redeploy — rotation failure does not change the live secret
+	// values.
+	//
+	// EventTest is the connectivity ping sent from the Infisical dashboard.
+	EventSecretsModified     = "secrets.modified"
+	EventSecretsRotationFailed = "secrets.rotation-failed"
+	EventTest                = "test"
 )
 
-// Payload is the subset of an Infisical webhook body we act on. Infisical nests
-// the environment and secret path under "project"; we also accept them at the
-// top level for resilience across versions.
+// Payload is the subset of an Infisical webhook body we act on.
 type Payload struct {
 	Event   string `json:"event"`
 	Project struct {
-		WorkspaceID string `json:"workspaceId"`
-		Environment string `json:"environment"`
-		SecretPath  string `json:"secretPath"`
+		WorkspaceID        string `json:"workspaceId"`
+		Environment        string `json:"environment"`
+		SecretPath         string `json:"secretPath"`
+		ChangedBy          string `json:"changedBy"`
+		ChangedByActorType string `json:"changedByActorType"`
+		// rotation-failed only
+		RotationName      string `json:"rotationName"`
+		ErrorMessage      string `json:"errorMessage"`
+		TriggeredManually bool   `json:"triggeredManually"`
 	} `json:"project"`
+	Timestamp   string `json:"timestamp"`
+	// top-level fallbacks (older payload format)
 	Environment string `json:"environment"`
 	SecretPath  string `json:"secretPath"`
 }
@@ -93,7 +113,7 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 	if h.secret != "" {
 		// Unsigned test pings are accepted without a signature; everything else
 		// requires a valid HMAC.
-		if p.Event != "test" || sigHeader != "" {
+		if p.Event != EventTest || sigHeader != "" {
 			slog.Debug("infisical parse: verifying signature")
 			if err := VerifySignature(body, h.secret, sigHeader); err != nil {
 				slog.Debug("infisical parse: signature verification failed", "err", err)
