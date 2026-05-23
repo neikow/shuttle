@@ -42,6 +42,41 @@ func TestStatus_includesStderr(t *testing.T) {
 	}
 }
 
+// TestStatus_relativeWorkDir reproduces the path-doubling bug: with a relative
+// workdir and cmd.Dir set, a relative -f path was re-resolved against cmd.Dir
+// (agent-work/whoami/agent-work/whoami/...). The stub opens the -f file it
+// receives, so it only succeeds when the path is absolute / not doubled.
+func TestStatus_relativeWorkDir(t *testing.T) {
+	base := t.TempDir()
+	t.Chdir(base)
+
+	wd := filepath.Join("agent-work", "whoami") // relative, as the agent passes it
+	if err := os.MkdirAll(wd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wd, "docker-compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stub := filepath.Join(base, "fakedocker")
+	script := "#!/bin/sh\n" +
+		"while [ $# -gt 0 ]; do [ \"$1\" = \"-f\" ] && { shift; f=\"$1\"; }; shift; done\n" +
+		"cat \"$f\" >/dev/null 2>&1 || { echo \"open $f: no such file or directory\" >&2; exit 1; }\n" +
+		"printf 'running'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &ComposeDriver{bin: stub}
+	got, err := d.Status(context.Background(), "whoami", wd)
+	if err != nil {
+		t.Fatalf("relative workdir should resolve to a single path: %v", err)
+	}
+	if got != "running" {
+		t.Errorf("Status = %q, want running", got)
+	}
+}
+
 func TestStatus_states(t *testing.T) {
 	tests := []struct {
 		name, stdout, want string

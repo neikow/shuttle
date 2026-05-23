@@ -98,22 +98,28 @@ func (d *ComposeDriver) Rollback(ctx context.Context, p RollbackParams) (<-chan 
 }
 
 func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []string) (<-chan LogLine, error) {
-	if err := os.MkdirAll(p.WorkDir, 0700); err != nil {
+	// Resolve to an absolute path: cmd.Dir is set to the workdir, so a relative
+	// -f / --env-file would be re-resolved against it and double the path.
+	workDir, err := filepath.Abs(p.WorkDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workdir: %w", err)
+	}
+	if err := os.MkdirAll(workDir, 0700); err != nil {
 		return nil, fmt.Errorf("mkdirall workdir: %w", err)
 	}
 
-	composePath := filepath.Join(p.WorkDir, "docker-compose.yml")
+	composePath := filepath.Join(workDir, "docker-compose.yml")
 	if err := os.WriteFile(composePath, p.ComposeYAML, 0600); err != nil {
 		return nil, fmt.Errorf("write compose: %w", err)
 	}
 
-	envFile := filepath.Join(p.WorkDir, ".env")
+	envFile := filepath.Join(workDir, ".env")
 	if err := writeEnvFile(envFile, p.Env); err != nil {
 		return nil, fmt.Errorf("write env: %w", err)
 	}
 
 	cmd := exec.CommandContext(ctx, d.bin, d.composeArgs(composePath, envFile, subCmd...)...)
-	cmd.Dir = p.WorkDir
+	cmd.Dir = workDir
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -168,6 +174,10 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 // listed. The -a flag includes stopped containers so the drift reconciler can
 // see a crash rather than an empty list.
 func (d *ComposeDriver) Status(ctx context.Context, service, workDir string) (string, error) {
+	workDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workdir: %w", err)
+	}
 	composePath := filepath.Join(workDir, "docker-compose.yml")
 	args := append([]string{}, d.compose...)
 	args = append(args, "-f", composePath, "ps", "-a", "--format", "{{.State}}")
