@@ -50,13 +50,20 @@ only when they are empty in the file.
 `secrets_provider: infisical` reads universal-auth credentials from the
 environment:
 
-- `INFISICAL_CLIENT_ID`
-- `INFISICAL_CLIENT_SECRET`
-- `INFISICAL_PROJECT_ID`
+| Env var | Required | Default | Purpose |
+|---------|----------|---------|---------|
+| `INFISICAL_CLIENT_ID` | yes | — | Universal-auth client ID. |
+| `INFISICAL_CLIENT_SECRET` | yes | — | Universal-auth client secret. |
+| `INFISICAL_PROJECT_ID` | yes | — | Project to read secrets from. |
+| `INFISICAL_ENV` | no | `production` | Default environment slug, used when a service has no `env_from`. |
+| `INFISICAL_SECRET_PATH` | no | `/` | Folder path within the environment. |
+| `INFISICAL_SITE_URL` | no | Infisical Cloud | Self-hosted Infisical base URL. |
 
-The orchestrator fetches secrets and passes a service only the keys listed in its
-`env_schema` (see [iac-repo.md](iac-repo.md)). `none` (the default) means no
-secret injection.
+For each deploy the orchestrator fetches the secrets, then writes the service's
+`.env`. A service's **`env_from`** selects the Infisical *environment* to read
+from (overriding `INFISICAL_ENV`), and **`env_schema`** filters which keys reach
+the service (see [iac-repo.md](iac-repo.md)). `none` (the default provider) means
+no secret injection.
 
 ## mTLS certificates
 

@@ -487,13 +487,14 @@ func sanitizeRepoKey(repo string) string {
 	return b.String()
 }
 
-// renderEnv resolves the service's secrets. When EnvSchema is set only those
-// keys are included; otherwise all secrets are passed through.
+// renderEnv resolves the service's secrets. The service's env_from selects the
+// provider scope (the Infisical environment); when EnvSchema is set only those
+// keys are included, otherwise all secrets in the scope are passed through.
 func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[string]string, error) {
 	if g.secrets == nil {
 		return nil, nil
 	}
-	all, err := g.secrets.GetAll(ctx)
+	all, err := g.secrets.GetAll(ctx, svc.EnvFrom)
 	if err != nil {
 		return nil, fmt.Errorf("secrets: %w", err)
 	}

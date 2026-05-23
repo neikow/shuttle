@@ -2,21 +2,23 @@ package secrets
 
 import (
 	"context"
+	"maps"
 	"sync"
 )
 
-// Fake is an in-memory Provider for tests.
+// Fake is an in-memory Provider for tests. The empty scope ("") is the default
+// secret set; named scopes (e.g. a service's env_from) can be seeded with
+// SetScope to exercise per-scope resolution.
 type Fake struct {
-	mu   sync.RWMutex
-	data map[string]string
+	mu     sync.RWMutex
+	data   map[string]string            // default scope ("")
+	scopes map[string]map[string]string // per-scope overrides
 }
 
 func NewFake(initial map[string]string) *Fake {
 	m := make(map[string]string, len(initial))
-	for k, v := range initial {
-		m[k] = v
-	}
-	return &Fake{data: m}
+	maps.Copy(m, initial)
+	return &Fake{data: m, scopes: make(map[string]map[string]string)}
 }
 
 func (f *Fake) Set(key, value string) {
@@ -25,9 +27,28 @@ func (f *Fake) Set(key, value string) {
 	f.mu.Unlock()
 }
 
-func (f *Fake) Get(_ context.Context, key string) (string, error) {
+// SetScope seeds the secrets for a named scope, overriding the default set for
+// callers that pass that scope.
+func (f *Fake) SetScope(scope string, m map[string]string) {
+	cp := make(map[string]string, len(m))
+	maps.Copy(cp, m)
+	f.mu.Lock()
+	f.scopes[scope] = cp
+	f.mu.Unlock()
+}
+
+// scopeMap returns the secret set for scope (caller holds the lock). The empty
+// scope is the default set; a named-but-unseeded scope resolves to nothing.
+func (f *Fake) scopeMap(scope string) map[string]string {
+	if scope == "" {
+		return f.data
+	}
+	return f.scopes[scope]
+}
+
+func (f *Fake) Get(_ context.Context, scope, key string) (string, error) {
 	f.mu.RLock()
-	v, ok := f.data[key]
+	v, ok := f.scopeMap(scope)[key]
 	f.mu.RUnlock()
 	if !ok {
 		return "", ErrNotFound{Key: key}
@@ -35,12 +56,11 @@ func (f *Fake) Get(_ context.Context, key string) (string, error) {
 	return v, nil
 }
 
-func (f *Fake) GetAll(_ context.Context) (map[string]string, error) {
+func (f *Fake) GetAll(_ context.Context, scope string) (map[string]string, error) {
 	f.mu.RLock()
-	out := make(map[string]string, len(f.data))
-	for k, v := range f.data {
-		out[k] = v
-	}
+	src := f.scopeMap(scope)
+	out := make(map[string]string, len(src))
+	maps.Copy(out, src)
 	f.mu.RUnlock()
 	return out, nil
 }
