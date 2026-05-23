@@ -19,3 +19,6 @@
 
 # OS / editor
 .DS_Store
+
+
+*.env
