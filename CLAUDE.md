@@ -39,7 +39,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
 | `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
-| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`). |
+| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + Caddy sidecar manager (`caddy.go`). |
 
 ### `internal/orchestrator/` internals
 

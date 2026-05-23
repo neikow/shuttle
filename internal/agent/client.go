@@ -100,10 +100,7 @@ type Config struct {
 	// Token, when set, is sent as a bearer credential to authenticate the agent
 	// (see `shuttle enroll`).
 	Token string
-	// Caddy, when enabled, makes the agent run and manage a Caddy ingress
-	// sidecar; the orchestrator pushes this host's routes via CaddyConfigRequest.
-	CaddyEnabled bool
-	DockerBin    string // docker executable, shared with the Caddy sidecar
+	DockerBin string // docker executable, shared with the Caddy sidecar
 }
 
 // tokenCreds attaches a bearer token to every RPC. RequireTransportSecurity is
@@ -150,14 +147,11 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 		slog.Info("reconciled deployed services from disk", "count", n, "work_dir", cfg.WorkDir)
 	}
 
-	var caddy *caddySidecar
-	if cfg.CaddyEnabled {
-		caddy = newCaddySidecar(CaddyOptions{DockerBin: cfg.DockerBin})
-		if err := caddy.ensure(ctx); err != nil {
-			slog.Error("caddy sidecar start failed; continuing without ingress", "err", err)
-		} else {
-			slog.Info("caddy ingress sidecar running", "network", caddy.opts.Network, "container", caddy.opts.Container)
-		}
+	caddy := newCaddySidecar(CaddyOptions{DockerBin: cfg.DockerBin})
+	if err := caddy.ensure(ctx); err != nil {
+		slog.Error("caddy sidecar start failed; continuing without ingress", "err", err)
+	} else {
+		slog.Info("caddy ingress sidecar running", "network", caddy.opts.Network, "container", caddy.opts.Container)
 	}
 
 	for {
@@ -275,10 +269,6 @@ func handleCommand(
 	case *shuttlev1.OrchestratorCommand_Rollback:
 		return executeRollback(ctx, cfg, stream, driver, deployed, caddy, payload.Rollback)
 	case *shuttlev1.OrchestratorCommand_CaddyConfig:
-		if caddy == nil {
-			slog.Warn("received caddy config but --caddy is not enabled; ignoring")
-			return nil
-		}
 		if err := caddy.apply(ctx, []byte(payload.CaddyConfig.ConfigJson)); err != nil {
 			return fmt.Errorf("apply caddy config: %w", err)
 		}
@@ -352,7 +342,7 @@ func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 // connectToCaddy joins a freshly deployed project to the Caddy network so the
 // sidecar can proxy to it. Best-effort: failures are logged, not fatal.
 func connectToCaddy(ctx context.Context, caddy *caddySidecar, workDir, service string, deployErr error) {
-	if caddy == nil || deployErr != nil {
+	if deployErr != nil {
 		return
 	}
 	composePath := filepath.Join(workDir, "docker-compose.yml")

@@ -22,7 +22,6 @@ var agentCmd = &cobra.Command{
 		tok, _ := cmd.Flags().GetString("token")
 		driverName, _ := cmd.Flags().GetString("driver")
 		dockerBin, _ := cmd.Flags().GetString("docker-bin")
-		caddyEnabled, _ := cmd.Flags().GetBool("caddy")
 
 		driver, err := agent.NewDriver(driverName, dockerBin)
 		if err != nil {
@@ -39,7 +38,6 @@ var agentCmd = &cobra.Command{
 			CAFile:       ca,
 			ServerName:   serverName,
 			Token:        tok,
-			CaddyEnabled: caddyEnabled,
 			DockerBin:    dockerBin,
 		}
 
@@ -61,7 +59,6 @@ func init() {
 	agentCmd.Flags().String("token", "", "Agent enrollment token (from `shuttle enroll`)")
 	agentCmd.Flags().String("driver", "compose", "Deploy driver: compose | synology")
 	agentCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
-	agentCmd.Flags().Bool("caddy", false, "Run a managed Caddy ingress sidecar; the orchestrator pushes this host's routes")
 	_ = agentCmd.MarkFlagRequired("orchestrator")
 	_ = agentCmd.MarkFlagRequired("host")
 }
