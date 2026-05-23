@@ -183,12 +183,38 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	return nil
 }
 
+// grpcShutdownTimeout bounds the graceful gRPC stop. Agents hold a long-lived
+// bidi Register stream that never ends on its own, so an unbounded
+// GracefulStop would block forever — making Ctrl+C appear dead while any agent
+// is connected. After this grace period we force-close active streams.
+const grpcShutdownTimeout = 5 * time.Second
+
 func shutdown(grpcServer *grpc.Server, httpServer *http.Server) {
-	grpcServer.GracefulStop()
+	if forced := stopGRPC(grpcServer, grpcShutdownTimeout); forced {
+		slog.Warn("grpc graceful stop timed out; force-closing active streams", "timeout", grpcShutdownTimeout)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		slog.Error("http shutdown", "err", err)
+	}
+}
+
+// stopGRPC gracefully stops the server, but force-closes (Stop) if the graceful
+// stop does not finish within timeout. Returns true when it had to force.
+func stopGRPC(grpcServer *grpc.Server, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return false
+	case <-time.After(timeout):
+		grpcServer.Stop() // unblocks the in-flight GracefulStop
+		<-done
+		return true
 	}
 }
 
