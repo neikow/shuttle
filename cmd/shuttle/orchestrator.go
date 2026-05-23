@@ -163,6 +163,19 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		reconciler := orchestrator.NewDriftReconciler(syncer, tracker, 60*time.Second, 90*time.Second)
 		go reconciler.Run(ctx)
 		slog.Info("drift reconciler started", "interval", "60s")
+
+		if cfg.InfisicalPollInterval != "" {
+			if secProvider == nil {
+				return fmt.Errorf("infisical_poll_interval set but no secrets provider configured")
+			}
+			pollInterval, err := time.ParseDuration(cfg.InfisicalPollInterval)
+			if err != nil {
+				return fmt.Errorf("infisical_poll_interval: %w", err)
+			}
+			poller := orchestrator.NewSecretPoller(syncer, pollInterval, os.Getenv("INFISICAL_ENV"))
+			go poller.Run(ctx)
+			slog.Info("infisical secret polling started", "interval", pollInterval)
+		}
 	} else {
 		slog.Info("webhook disabled; set repo_url + webhook_secret to enable git sync")
 	}

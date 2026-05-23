@@ -27,6 +27,12 @@ type OrchestratorConfig struct {
 	// Infisical changes is coalesced into one redeploy pass (e.g. "5s").
 	// Empty defaults to 5s.
 	InfisicalWebhookDebounce string `yaml:"infisical_webhook_debounce"`
+	// InfisicalPollInterval enables periodic polling of the Infisical folders the
+	// repo's services read (e.g. "60s"): when a folder's secret set changes, the
+	// affected services are redeployed. A fallback for when webhooks are not
+	// delivered. Requires a secrets provider. Empty disables polling. Only secret
+	// fingerprints (SHA-256) are kept — never the values.
+	InfisicalPollInterval string `yaml:"infisical_poll_interval"`
 	// gRPC TLS. cert+key => the orchestrator serves TLS; adding ca makes it
 	// require+verify client certs (mutual TLS).
 	GRPCTLSCert string `yaml:"grpc_tls_cert"`
