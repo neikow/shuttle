@@ -37,26 +37,66 @@ type CaddyRoute struct {
 }
 
 // RoutesFromRepo derives the desired Caddy routes from the repo. Each service
-// domain maps to an upstream of <host>:<healthcheck.port>; services without
-// domains or a healthcheck port are skipped (nothing to route). A service's
+// domain maps to an upstream of <host>:<port>; services without domains or a
+// port are skipped (nothing to route). A service's
 // caddy_snippet, when set, must be a JSON array of Caddy HTTP handler objects;
 // an invalid snippet is a hard error.
 func RoutesFromRepo(repo *config.Repo) ([]CaddyRoute, error) {
 	var routes []CaddyRoute
 	for _, svc := range repo.Services {
-		if len(svc.Domains) == 0 || svc.Healthcheck == nil || svc.Healthcheck.Port == 0 {
+		if len(svc.Domains) == 0 || svc.Port == 0 {
 			continue
 		}
 		handlers, err := parseSnippet(svc.CaddySnippet)
 		if err != nil {
 			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
 		}
-		upstream := svc.Host + ":" + strconv.Itoa(svc.Healthcheck.Port)
+		upstream := svc.Host + ":" + strconv.Itoa(svc.Port)
 		for _, domain := range svc.Domains {
 			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
 		}
 	}
 	return routes, nil
+}
+
+// RoutesForHost derives Caddy routes for a single host's sidecar. Unlike
+// RoutesFromRepo (used by the central Caddy), upstreams dial the service NAME,
+// which is the network alias the agent assigns when it joins the service's
+// containers to the shared Caddy network — so Caddy reaches them as
+// "<service>:<port>" on that network.
+func RoutesForHost(repo *config.Repo, host string) ([]CaddyRoute, error) {
+	var routes []CaddyRoute
+	for _, svc := range repo.Services {
+		if svc.Host != host || len(svc.Domains) == 0 || svc.Port == 0 {
+			continue
+		}
+		handlers, err := parseSnippet(svc.CaddySnippet)
+		if err != nil {
+			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
+		}
+		upstream := svc.Name + ":" + strconv.Itoa(svc.Port)
+		for _, domain := range svc.Domains {
+			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
+		}
+	}
+	return routes, nil
+}
+
+// HostCaddyConfigJSON builds the Caddy JSON config a host's sidecar should run,
+// or (nil, false) when the host has no routable services.
+func HostCaddyConfigJSON(repo *config.Repo, host string, httpsRedirect bool) ([]byte, bool, error) {
+	routes, err := RoutesForHost(repo, host)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(routes) == 0 {
+		return nil, false, nil
+	}
+	data, err := json.Marshal(buildCaddyConfig(routes, httpsRedirect))
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
 }
 
 // parseSnippet decodes a service caddy_snippet into a slice of Caddy HTTP
@@ -74,8 +114,8 @@ func parseSnippet(snippet string) ([]any, error) {
 
 // ApplyRoutes replaces the entire Caddy config with the given routes.
 // Each route: HTTPS + auto-TLS via Let's Encrypt.
-func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute) error {
-	cfg := buildCaddyConfig(routes)
+func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute, httpsRedirect bool) error {
+	cfg := buildCaddyConfig(routes, httpsRedirect)
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
@@ -98,7 +138,15 @@ func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute) erro
 }
 
 // buildCaddyConfig produces a minimal Caddy JSON config for the given routes.
-func buildCaddyConfig(routes []CaddyRoute) map[string]any {
+// When httpsRedirect is true, the app server listens on :443 only, so Caddy's
+// automatic HTTPS stands up its own :80 server that 308-redirects to HTTPS (and
+// still serves ACME HTTP-01 challenges). When false, the server also listens on
+// :80 and serves plaintext directly — claiming :80 suppresses the auto-redirect.
+func buildCaddyConfig(routes []CaddyRoute, httpsRedirect bool) map[string]any {
+	listen := []string{":80", ":443"}
+	if httpsRedirect {
+		listen = []string{":443"}
+	}
 	var servers []any
 	for _, r := range routes {
 		handle := make([]any, 0, len(r.Handlers)+1)
@@ -117,21 +165,18 @@ func buildCaddyConfig(routes []CaddyRoute) map[string]any {
 		})
 	}
 
+	// No explicit tls block: every route matches specific domains, so Caddy's
+	// automatic HTTPS provisions certs for those hostnames (Let's Encrypt for
+	// public domains, an internal CA for *.localhost). on-demand TLS is avoided
+	// because it requires a separate permission module.
 	return map[string]any{
 		"admin": map[string]any{"disabled": false},
 		"apps": map[string]any{
 			"http": map[string]any{
 				"servers": map[string]any{
 					"shuttle": map[string]any{
-						"listen": []string{":443"},
+						"listen": listen,
 						"routes": servers,
-					},
-				},
-			},
-			"tls": map[string]any{
-				"automation": map[string]any{
-					"policies": []any{
-						map[string]any{"on_demand": true},
 					},
 				},
 			},

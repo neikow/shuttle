@@ -70,7 +70,11 @@ via `ledger.RollbackTarget`.
 
 **Drift heal:** agents report `ContainerState` every ~30s. `DriftReconciler`
 ticks every 60s: SHA drift → `Reconcile`; crashed/missing containers →
-`ForceDeploy`.
+`ForceDeploy`. The agent's deployed-set is in-memory, so on restart it
+reconciles from reality — `seedFromDisk` re-tracks every `<work_dir>/<service>`
+compose workspace, so the report/heal loop resumes for services deployed before
+the restart (recorded SHA is unknown post-restart and left empty; container
+drift keys on status, not SHA).
 
 ## Design decisions & rationale
 
@@ -92,9 +96,13 @@ These are deliberate. Don't reverse them without updating this file.
   `docker compose` shell-out and avoids a heavy `go-git` dependency. The git CLI
   is already a hard runtime requirement.
 - **Caddy for ingress (Admin API at `:2019`).** Per-host Caddy instance with
-  automatic Let's Encrypt. Routes are derived from service `domains` +
-  healthcheck port and pushed as a full config each reconcile (declarative, no
-  drift). `caddy_snippet` lets a service inject extra handlers ahead of the proxy.
+  automatic Let's Encrypt. Routes are derived from service `domains` + `port`
+  and pushed as a full config each reconcile (declarative, no drift).
+  `caddy_snippet` lets a service inject extra handlers ahead of the proxy.
+  `https_redirect` (orchestrator config) controls the server's `listen`: false →
+  `[:80, :443]` (plaintext served on :80, no redirect — claiming :80 suppresses
+  Caddy's auto-redirect); true → `[:443]` only, so Caddy's automatic HTTPS stands
+  up its own :80 server that 308-redirects to HTTPS and answers ACME HTTP-01.
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
   `Fake` backs tests. The orchestrator filters secrets by each service's
   `env_schema` so an agent only ever receives the keys it declares.

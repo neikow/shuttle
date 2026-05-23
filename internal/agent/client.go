@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -19,7 +20,8 @@ const stateReportInterval = 30 * time.Second
 
 // deployedSet tracks the services this agent has deployed, so it can report
 // their container state for orchestrator drift detection. It survives
-// reconnects across sessions.
+// reconnects across sessions, and is reseeded from on-disk compose workspaces
+// after a process restart (see seedFromDisk).
 type deployedSet struct {
 	mu sync.RWMutex
 	m  map[string]deployedService
@@ -36,6 +38,34 @@ func (s *deployedSet) put(service, workDir, sha string) {
 	s.mu.Lock()
 	s.m[service] = deployedService{workDir: workDir, sha: sha}
 	s.mu.Unlock()
+}
+
+// seedFromDisk reconciles the in-memory set with reality after a restart: the
+// agent loses its deployed map on process exit, but the compose workspaces it
+// wrote persist under baseDir as <baseDir>/<service>/docker-compose.yml. Each
+// such workspace is re-tracked so the state-report loop resumes reporting it
+// (and the orchestrator can heal a service whose container died while the agent
+// was down). The recorded SHA is unknown post-restart and left empty; container
+// drift detection keys on status, not SHA. Returns the number of services seeded.
+func (s *deployedSet) seedFromDisk(baseDir string) int {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		// No workspaces yet (fresh agent) or unreadable dir: nothing to seed.
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		workDir := filepath.Join(baseDir, e.Name())
+		if _, err := os.Stat(filepath.Join(workDir, "docker-compose.yml")); err != nil {
+			continue // not a shuttle compose workspace
+		}
+		s.put(e.Name(), workDir, "")
+		n++
+	}
+	return n
 }
 
 func (s *deployedSet) snapshot() map[string]deployedService {
@@ -62,6 +92,10 @@ type Config struct {
 	// Token, when set, is sent as a bearer credential to authenticate the agent
 	// (see `shuttle enroll`).
 	Token string
+	// Caddy, when enabled, makes the agent run and manage a Caddy ingress
+	// sidecar; the orchestrator pushes this host's routes via CaddyConfigRequest.
+	CaddyEnabled bool
+	DockerBin    string // docker executable, shared with the Caddy sidecar
 }
 
 // tokenCreds attaches a bearer token to every RPC. RequireTransportSecurity is
@@ -104,9 +138,22 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 
 	client := shuttlev1.NewAgentServiceClient(conn)
 	deployed := newDeployedSet()
+	if n := deployed.seedFromDisk(cfg.WorkDir); n > 0 {
+		slog.Info("reconciled deployed services from disk", "count", n, "work_dir", cfg.WorkDir)
+	}
+
+	var caddy *caddySidecar
+	if cfg.CaddyEnabled {
+		caddy = newCaddySidecar(CaddyOptions{DockerBin: cfg.DockerBin})
+		if err := caddy.ensure(ctx); err != nil {
+			slog.Error("caddy sidecar start failed; continuing without ingress", "err", err)
+		} else {
+			slog.Info("caddy ingress sidecar running", "network", caddy.opts.Network, "container", caddy.opts.Container)
+		}
+	}
 
 	for {
-		if err := runSession(ctx, cfg, client, driver, deployed); err != nil {
+		if err := runSession(ctx, cfg, client, driver, deployed, caddy); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -120,7 +167,7 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 	}
 }
 
-func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver, deployed *deployedSet) error {
+func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver, deployed *deployedSet, caddy *caddySidecar) error {
 	stream, err := client.Register(ctx)
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
@@ -169,7 +216,7 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
 		}
-		if err := handleCommand(ctx, cfg, stream, driver, deployed, cmd); err != nil {
+		if err := handleCommand(ctx, cfg, stream, driver, deployed, caddy, cmd); err != nil {
 			slog.Error("command error", "err", err)
 		}
 	}
@@ -211,20 +258,31 @@ func handleCommand(
 	stream shuttlev1.AgentService_RegisterClient,
 	driver Driver,
 	deployed *deployedSet,
+	caddy *caddySidecar,
 	cmd *shuttlev1.OrchestratorCommand,
 ) error {
 	switch payload := cmd.Payload.(type) {
 	case *shuttlev1.OrchestratorCommand_Deploy:
-		return executeDeploy(ctx, cfg, stream, driver, deployed, payload.Deploy)
+		return executeDeploy(ctx, cfg, stream, driver, deployed, caddy, payload.Deploy)
 	case *shuttlev1.OrchestratorCommand_Rollback:
-		return executeRollback(ctx, cfg, stream, driver, deployed, payload.Rollback)
+		return executeRollback(ctx, cfg, stream, driver, deployed, caddy, payload.Rollback)
+	case *shuttlev1.OrchestratorCommand_CaddyConfig:
+		if caddy == nil {
+			slog.Warn("received caddy config but --caddy is not enabled; ignoring")
+			return nil
+		}
+		if err := caddy.apply(ctx, []byte(payload.CaddyConfig.ConfigJson)); err != nil {
+			return fmt.Errorf("apply caddy config: %w", err)
+		}
+		slog.Info("caddy config applied")
+		return nil
 	default:
 		slog.Warn("unknown command type", "type", fmt.Sprintf("%T", cmd.Payload))
 	}
 	return nil
 }
 
-func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.DeployRequest) error {
+func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.DeployRequest) error {
 	slog.Info("executing deploy", "deploy_id", req.DeployId, "service", req.Service)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -237,10 +295,12 @@ func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 	if err == nil {
 		deployed.put(req.Service, workDir, req.Sha)
 	}
-	return streamDeployResult(stream, req.DeployId, logCh, err)
+	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	connectToCaddy(ctx, caddy, workDir, req.Service, res)
+	return res
 }
 
-func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.RollbackRequest) error {
+func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.RollbackRequest) error {
 	slog.Info("executing rollback", "deploy_id", req.DeployId, "service", req.Service, "target_sha", req.TargetSha)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -253,7 +313,21 @@ func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 	if err == nil {
 		deployed.put(req.Service, workDir, req.TargetSha)
 	}
-	return streamDeployResult(stream, req.DeployId, logCh, err)
+	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	connectToCaddy(ctx, caddy, workDir, req.Service, res)
+	return res
+}
+
+// connectToCaddy joins a freshly deployed project to the Caddy network so the
+// sidecar can proxy to it. Best-effort: failures are logged, not fatal.
+func connectToCaddy(ctx context.Context, caddy *caddySidecar, workDir, service string, deployErr error) {
+	if caddy == nil || deployErr != nil {
+		return
+	}
+	composePath := filepath.Join(workDir, "docker-compose.yml")
+	if err := caddy.connectProject(ctx, composePath, service); err != nil {
+		slog.Warn("caddy connect project failed", "service", service, "err", err)
+	}
 }
 
 func streamDeployResult(stream shuttlev1.AgentService_RegisterClient, deployID string, logCh <-chan LogLine, startErr error) error {

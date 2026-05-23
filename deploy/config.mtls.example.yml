@@ -13,9 +13,9 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # repo_dir: ""                     # defaults to <data_dir>/repo
 # webhook_secret: "change-me-too"
 
-# Caddy admin API for ingress route push (optional). In the dev stack Caddy is
-# reachable at http://caddy:2019. Empty disables route push.
-caddy_admin_url: "http://caddy:2019"
+# Central Caddy admin API (optional, legacy). Empty => agent-managed Caddy
+# sidecars (start the agent with --caddy).
+caddy_admin_url: ""
 
 # Secrets provider for rendering service env (optional). "infisical" reads
 # INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. Default "none"

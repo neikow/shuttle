@@ -11,9 +11,15 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # repo_dir: ""                     # defaults to <data_dir>/repo
 # webhook_secret: "change-me-too"
 
-# Caddy admin API for ingress route push (optional). In the dev stack Caddy is
-# reachable at http://caddy:2019. Empty disables route push.
-caddy_admin_url: "http://caddy:2019"
+# Central Caddy admin API for ingress route push (optional, legacy). Leave empty
+# to use agent-managed Caddy sidecars instead: start the agent with --caddy and
+# the orchestrator pushes each host's routes over gRPC (CaddyConfigRequest).
+caddy_admin_url: ""
+
+# Redirect HTTP to HTTPS. When true, Caddy serves :443 only and 308-redirects
+# :80 -> HTTPS (ACME HTTP-01 challenges still answered on :80). When false,
+# :80 is served plaintext with no redirect.
+https_redirect: false
 
 # Secrets provider for rendering service env (optional). "infisical" reads
 # INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. Default "none"

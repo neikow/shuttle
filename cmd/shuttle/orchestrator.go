@@ -121,7 +121,8 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
-			slog.Info("caddy route push enabled", "admin_url", cfg.CaddyAdminURL)
+			syncer.SetHTTPSRedirect(cfg.HTTPSRedirect)
+			slog.Info("caddy route push enabled", "admin_url", cfg.CaddyAdminURL, "https_redirect", cfg.HTTPSRedirect)
 		}
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
