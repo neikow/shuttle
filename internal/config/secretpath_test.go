@@ -14,8 +14,8 @@ func TestResolveSecretsPaths(t *testing.T) {
 	}{
 		{"explicit secret_path wins", "/shared", "/services/{service}", "/custom", "api", "/shared", "/custom"},
 		{"template substituted", "/shared", "/services/{service}", "", "api", "/shared", "/services/api"},
-		{"no template -> base", "/shared", "", "", "api", "/shared", "/shared"},
-		{"empty base defaults", "", "", "", "api", "/shared", "/shared"},
+		{"no template -> default template", "/shared", "", "", "api", "/shared", "/services/api"},
+		{"empty base and template default", "", "", "", "api", "/shared", "/services/api"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

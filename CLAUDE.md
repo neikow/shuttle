@@ -153,7 +153,8 @@ These are deliberate. Don't reverse them without updating this file.
   `env_from` is the environment (empty → `INFISICAL_ENV`), and the folder comes
   from `config.ResolveSecretsPaths` — a shared `secrets_base_path` (default
   `/shared`) merged with the service's own folder (`secret_path`, else
-  `secrets_path_template` with `{service}`, else the base). `renderEnv` reads
+  `secrets_path_template` with `{service}`, which itself defaults to
+  `/services/{service}` when unset). `renderEnv` reads
   both folders in that environment and merges them (service folder wins), then
   filters by `env_schema`, producing the `.env` shipped with the compose file.
   Folder paths must be absolute. The provider stays generic `(env, path) →
