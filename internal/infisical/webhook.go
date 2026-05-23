@@ -65,6 +65,11 @@ func NewHandler(secret string) *Handler { return &Handler{secret: secret} }
 
 // Parse reads the body, verifies the Infisical HMAC signature (when a secret is
 // configured), and decodes the payload.
+//
+// Test pings sent from the Infisical dashboard use event "test" and arrive
+// without a signature. Parse accepts them unsigned so the endpoint can respond
+// 200 without erroring; the handler must short-circuit on event == "test".
+// A present-but-wrong signature is still rejected even for test events.
 func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes+1))
 	if err != nil {
@@ -74,16 +79,22 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 		return nil, fmt.Errorf("body too large")
 	}
 
-	if h.secret != "" {
-		if err := VerifySignature(body, h.secret, r.Header.Get(SignatureHeader)); err != nil {
-			return nil, fmt.Errorf("signature: %w", err)
-		}
-	}
-
 	var p Payload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, fmt.Errorf("decode payload: %w", err)
 	}
+
+	sigHeader := r.Header.Get(SignatureHeader)
+	if h.secret != "" {
+		// Unsigned test pings are accepted without a signature; everything else
+		// requires a valid HMAC.
+		if p.Event != "test" || sigHeader != "" {
+			if err := VerifySignature(body, h.secret, sigHeader); err != nil {
+				return nil, fmt.Errorf("signature: %w", err)
+			}
+		}
+	}
+
 	return &p, nil
 }
 

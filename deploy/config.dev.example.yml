@@ -17,6 +17,9 @@ caddy_admin_url: ""
 https_redirect: true
 secrets_provider: "infisical"
 
+infisical_webhook_secret: "dev-infisical-webhook-secret"
+infisical_webhook_debounce: "5s"
+
 # Server TLS + token auth: the agent verifies the orchestrator and authenticates
 # with a token from `shuttle enroll` (no per-agent certs). Certs come from
 # `make certs`.

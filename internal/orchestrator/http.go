@@ -62,6 +62,11 @@ func (s *HTTPServer) handleInfisicalWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "infisical webhook: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if payload.Event == "test" {
+		slog.Info("infisical test ping received")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	s.infisicalDebounce.Trigger(SecretChange{Env: payload.Env(), Path: payload.Path()})
 	slog.Info("infisical change queued", "event", payload.Event, "env", payload.Env(), "path", payload.Path())
 
