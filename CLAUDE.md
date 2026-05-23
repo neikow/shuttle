@@ -56,6 +56,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`). |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
+| `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `shuttle check`. |
 
 ## Request flows
@@ -70,9 +71,19 @@ routes are re-pushed each reconcile.
 **Infisical webhook deploy:** `POST /webhook/infisical` → `infisical.Handler`
 verifies the HMAC signature → `ServicesUsingSecret` syncs the repo and finds the
 services whose resolved secret folders (base or service) exactly match the
-changed (env, path) → `changeDebouncer` coalesces a burst → `Reconcile` of just
+changed (env, path) → `changeDebouncer` coalesces a burst → `ForceDeploy` of just
 the affected services. Folder matching is exact (non-recursive), mirroring
-`renderEnv`'s per-folder reads.
+`renderEnv`'s per-folder reads. `ForceDeploy` (not the SHA-gated `Reconcile`)
+because a secret change does not move the repo SHA, so the diff would be empty
+and nothing would re-render.
+
+**Infisical secret polling:** when `infisical_poll_interval` is set, a
+`SecretPoller` (`secretpoll.go`) ticks on that interval as a fallback for when
+webhooks aren't delivered. Each tick loads the working copy (no git op — the
+drift reconciler keeps it synced), fingerprints every distinct (env, folder) the
+repo's services read (SHA-256 over the sorted key/value set; **values are never
+stored**), and `ForceDeploy`s the services whose fingerprint changed. The first
+pass only seeds fingerprints (no redeploy), so a restart doesn't storm.
 
 **Manual deploy / rollback:** `POST /deploy/{service}` and
 `POST /rollback?service=…&steps=N` use `GitSyncer.DeployAtSHA` (checkout the
@@ -176,6 +187,13 @@ These are deliberate. Don't reverse them without updating this file.
   (non-recursive match, since `renderEnv` reads folders non-recursively) and only
   those are reconciled — no full redeploy. A burst of edits is coalesced over
   `infisical_webhook_debounce` (default 5s) so N rapid changes trigger one pass.
+- **Infisical polling = fingerprint-diff fallback, values never stored.** When
+  webhooks aren't delivered, `infisical_poll_interval` enables `SecretPoller`: it
+  periodically hashes each (env, folder) the repo reads and redeploys the
+  services whose hash changed. Only SHA-256 fingerprints are held in memory — the
+  orchestrator never persists secret plaintext. A secret change doesn't move the
+  repo SHA, so both the webhook and poller paths use `ForceDeploy`, not the
+  SHA-gated `Reconcile`.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
 - **Agent auth = mTLS *or* enrollment token.** Either present a client cert
   (mutual TLS) or a host-scoped bearer token over server-auth TLS. The token path

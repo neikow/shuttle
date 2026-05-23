@@ -69,6 +69,13 @@ func (s *HTTPServer) handleInfisicalWebhook(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "infisical webhook: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	slog.Info("infisical webhook event",
+		"event", payload.Event,
+		"env", payload.Env(),
+		"path", payload.Path(),
+		"changed_by", payload.Project.ChangedBy,
+		"actor_type", payload.Project.ChangedByActorType,
+	)
 	slog.Debug("infisical webhook parsed",
 		"event", payload.Event,
 		"env", payload.Env(),
@@ -133,7 +140,11 @@ func (s *HTTPServer) reconcileSecretChanges(changes []SecretChange) {
 	for svc := range affected {
 		services = append(services, svc)
 	}
-	ids, err := s.syncer.Reconcile(ctx, services)
+	// A secret change does not move the repo SHA, so the SHA-gated Reconcile
+	// would find no work and re-render nothing. ForceDeploy redeploys the
+	// affected services at HEAD regardless of ledger SHA, re-rendering their
+	// .env with the new secret values.
+	ids, err := s.syncer.ForceDeploy(ctx, services)
 	if err != nil {
 		slog.Error("infisical reconcile failed", "err", err)
 		return

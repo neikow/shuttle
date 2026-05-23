@@ -30,9 +30,9 @@ const (
 	// values.
 	//
 	// EventTest is the connectivity ping sent from the Infisical dashboard.
-	EventSecretsModified     = "secrets.modified"
+	EventSecretsModified       = "secrets.modified"
 	EventSecretsRotationFailed = "secrets.rotation-failed"
-	EventTest                = "test"
+	EventTest                  = "test"
 )
 
 // Payload is the subset of an Infisical webhook body we act on.
@@ -49,7 +49,9 @@ type Payload struct {
 		ErrorMessage      string `json:"errorMessage"`
 		TriggeredManually bool   `json:"triggeredManually"`
 	} `json:"project"`
-	Timestamp   string `json:"timestamp"`
+	// Timestamp arrives as a JSON number (epoch ms) in current payloads and as a
+	// string in older ones; RawMessage tolerates both. Unused beyond decode.
+	Timestamp json.RawMessage `json:"timestamp"`
 	// top-level fallbacks (older payload format)
 	Environment string `json:"environment"`
 	SecretPath  string `json:"secretPath"`

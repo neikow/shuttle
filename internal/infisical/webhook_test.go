@@ -84,6 +84,19 @@ func TestParse_missingSignature(t *testing.T) {
 	}
 }
 
+func TestParse_numericTimestamp(t *testing.T) {
+	// Infisical sends timestamp as a JSON number (epoch ms); must not fail decode.
+	body := `{"event":"test","project":{"environment":"dev","secretPath":"/"},"timestamp":1779570210642}`
+	r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	p, err := NewHandler("").Parse(r)
+	if err != nil {
+		t.Fatalf("numeric timestamp rejected: %v", err)
+	}
+	if p.Event != "test" || p.Env() != "dev" {
+		t.Errorf("event=%q env=%q, want test/dev", p.Event, p.Env())
+	}
+}
+
 func TestParse_unsignedTestPing(t *testing.T) {
 	// Infisical test pings arrive without a signature; must be accepted.
 	r := httptest.NewRequest("POST", "/x", strings.NewReader(`{"event":"test"}`))
