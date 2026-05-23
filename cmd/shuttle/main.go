@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/neikow/shuttle/internal/config"
@@ -16,6 +17,11 @@ var rootCmd = &cobra.Command{
 	// after it — just the error (cobra still prints that). Inherited by every
 	// subcommand. `--help` still shows usage on demand.
 	SilenceUsage: true,
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		if debug, _ := cmd.Flags().GetBool("debug"); debug {
+			slog.SetLogLoggerLevel(slog.LevelDebug)
+		}
+	},
 }
 
 func main() {
@@ -26,6 +32,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "shuttle:", err)
 		os.Exit(1)
 	}
+	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug logging")
 	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

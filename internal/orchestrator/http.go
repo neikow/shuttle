@@ -57,11 +57,27 @@ func (s *HTTPServer) EnableInfisicalWebhook(h *infisical.Handler, syncer *GitSyn
 // handleInfisicalWebhook validates the signed payload and queues a debounced
 // redeploy of the affected services, returning 202 immediately.
 func (s *HTTPServer) handleInfisicalWebhook(w http.ResponseWriter, r *http.Request) {
+	slog.Debug("infisical webhook received",
+		"method", r.Method,
+		"content_type", r.Header.Get("Content-Type"),
+		"signature_header", r.Header.Get("x-infisical-signature"),
+		"user_agent", r.Header.Get("User-Agent"),
+	)
 	payload, err := s.infisical.Parse(r)
 	if err != nil {
+		slog.Debug("infisical webhook parse failed", "err", err)
 		http.Error(w, "infisical webhook: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	slog.Debug("infisical webhook parsed",
+		"event", payload.Event,
+		"env", payload.Env(),
+		"path", payload.Path(),
+		"project_env", payload.Project.Environment,
+		"project_path", payload.Project.SecretPath,
+		"top_level_env", payload.Environment,
+		"top_level_path", payload.SecretPath,
+	)
 	if payload.Event == "test" {
 		slog.Info("infisical test ping received")
 		w.WriteHeader(http.StatusOK)

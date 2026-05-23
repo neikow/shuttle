@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -79,19 +80,28 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 		return nil, fmt.Errorf("body too large")
 	}
 
+	slog.Debug("infisical parse: raw body", "body", string(body), "secret_configured", h.secret != "")
+
 	var p Payload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, fmt.Errorf("decode payload: %w", err)
 	}
 
 	sigHeader := r.Header.Get(SignatureHeader)
+	slog.Debug("infisical parse: decoded", "event", p.Event, "sig_header", sigHeader)
+
 	if h.secret != "" {
 		// Unsigned test pings are accepted without a signature; everything else
 		// requires a valid HMAC.
 		if p.Event != "test" || sigHeader != "" {
+			slog.Debug("infisical parse: verifying signature")
 			if err := VerifySignature(body, h.secret, sigHeader); err != nil {
+				slog.Debug("infisical parse: signature verification failed", "err", err)
 				return nil, fmt.Errorf("signature: %w", err)
 			}
+			slog.Debug("infisical parse: signature ok")
+		} else {
+			slog.Debug("infisical parse: skipping signature (unsigned test ping)")
 		}
 	}
 
@@ -99,8 +109,8 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 }
 
 // VerifySignature checks Infisical's x-infisical-signature header, formatted as
-// "t=<timestamp>,v1=<hex-hmac>". The signed message is "<timestamp>.<body>",
-// HMAC-SHA256 with the webhook secret.
+// "t=<timestamp>;<hex-hmac>". The signed message is the raw request body;
+// the timestamp is present for replay detection but is not part of the HMAC.
 func VerifySignature(body []byte, secret, header string) error {
 	ts, sig := parseSignatureHeader(header)
 	if ts == "" || sig == "" {
@@ -110,7 +120,7 @@ func VerifySignature(body []byte, secret, header string) error {
 	if err != nil {
 		return fmt.Errorf("invalid signature hex: %w", err)
 	}
-	want := computeMAC(ts, body, secret)
+	want := computeMAC(body, secret)
 	if subtle.ConstantTimeCompare(got, want) != 1 {
 		return fmt.Errorf("signature mismatch")
 	}
@@ -120,15 +130,18 @@ func VerifySignature(body []byte, secret, header string) error {
 // ComputeHeader builds the signature header value for a timestamp + body, used
 // by tests and clients.
 func ComputeHeader(ts string, body []byte, secret string) string {
-	return fmt.Sprintf("t=%s,v1=%s", ts, hex.EncodeToString(computeMAC(ts, body, secret)))
+	return fmt.Sprintf("t=%s;%s", ts, hex.EncodeToString(computeMAC(body, secret)))
 }
 
 func parseSignatureHeader(header string) (ts, sig string) {
-	// Accept both "," (Infisical) and ";" as field separators.
+	// Accept both "," and ";" as field separators.
+	// Infisical sends either "t=<ts>,v1=<hex>" or "t=<ts>;<hex>" (bare hex,
+	// no "v1=" prefix), so a field with no "=" is treated as the signature.
 	fields := strings.FieldsFunc(header, func(r rune) bool { return r == ',' || r == ';' })
 	for _, f := range fields {
 		k, v, ok := strings.Cut(strings.TrimSpace(f), "=")
 		if !ok {
+			sig = k // bare hex value
 			continue
 		}
 		switch k {
@@ -141,10 +154,8 @@ func parseSignatureHeader(header string) (ts, sig string) {
 	return ts, sig
 }
 
-func computeMAC(ts string, body []byte, secret string) []byte {
+func computeMAC(body []byte, secret string) []byte {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(ts))
-	mac.Write([]byte("."))
 	mac.Write(body)
 	return mac.Sum(nil)
 }
