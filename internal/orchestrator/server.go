@@ -57,6 +57,11 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 	if host == "" {
 		return status.Error(codes.InvalidArgument, "host required")
 	}
+	// When token auth is in effect, the token is scoped to a host; reject a
+	// register that claims a different one.
+	if tokenHost, ok := tokenHostFromContext(stream.Context()); ok && tokenHost != host {
+		return status.Errorf(codes.PermissionDenied, "token scoped to host %q, not %q", tokenHost, host)
+	}
 
 	conn := s.registry.register(host)
 	defer s.registry.unregister(host)

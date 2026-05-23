@@ -163,6 +163,16 @@ func (g *GitSyncer) ForceDeploy(ctx context.Context, services []string) ([]strin
 // LocalDir returns the path of the synced working copy.
 func (g *GitSyncer) LocalDir() string { return g.dir }
 
+// Hosts syncs the IaC repo and returns its declared hosts. Used by the
+// enrollment endpoints to validate the host an agent enrolls as.
+func (g *GitSyncer) Hosts(ctx context.Context) ([]config.Host, error) {
+	repo, _, err := g.syncAndLoad(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return repo.Hosts, nil
+}
+
 // DeployAtSHA checks out the repo at sha, renders the named service's compose +
 // env at that revision, and dispatches a deploy. Used by the manual deploy and
 // rollback HTTP endpoints, which must ship real compose (unlike a bare

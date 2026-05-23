@@ -20,9 +20,19 @@ caddy_admin_url: "http://caddy:2019"
 # means env passthrough is off.
 secrets_provider: "none"
 
-# gRPC mTLS (optional). Unset here => the gRPC transport is insecure (dev only).
+# gRPC TLS (optional). Unset here => the gRPC transport is insecure (dev only).
+#   cert + key      => orchestrator serves TLS (pair with agent_token_auth below).
+#   cert + key + ca => mutual TLS: agents must present a client cert.
 # For the mTLS dev stack use config.mtls.example.yml via docker-compose.mtls.yml
-# (run `make certs` first). To enable manually, set all three:
+# (run `make certs` first). To enable manually:
 # grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
 # grpc_tls_key: /etc/shuttle/certs/orchestrator.key
 # grpc_tls_ca: /etc/shuttle/certs/ca.crt
+
+# Agent token enrollment (optional). When true, agents must present a valid
+# bearer token (minted by `shuttle enroll`) to register. Pair with server TLS
+# above so the token is encrypted in transit. The advertise_* values are baked
+# into the agent command that `shuttle enroll` prints.
+# agent_token_auth: true
+# advertise_addr: "orchestrator.example.com:9090"   # gRPC host:port agents dial
+# advertise_server_name: "orchestrator"             # SAN on the orchestrator cert

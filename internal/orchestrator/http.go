@@ -24,6 +24,7 @@ type HTTPServer struct {
 
 	webhook *webhook.Handler
 	syncer  *GitSyncer
+	enroll  *EnrollOptions
 }
 
 // EnableWebhook registers POST /webhook, which validates the signed payload and

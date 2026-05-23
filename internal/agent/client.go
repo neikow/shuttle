@@ -52,27 +52,51 @@ type Config struct {
 	Orchestrator string // host:port
 	AgentVersion string
 	WorkDir      string // base dir for compose workspaces
-	// TLS fields enable mTLS when all three are set; otherwise the agent dials
-	// insecurely (dev only). ServerName must match a SAN on the orchestrator cert.
+	// TLS fields. cert+key+ca => mutual TLS. ca only => verify the orchestrator
+	// but present no client cert (pairs with token auth). none => insecure (dev).
+	// ServerName must match a SAN on the orchestrator cert.
 	CertFile   string
 	KeyFile    string
 	CAFile     string
 	ServerName string
+	// Token, when set, is sent as a bearer credential to authenticate the agent
+	// (see `shuttle enroll`).
+	Token string
 }
+
+// tokenCreds attaches a bearer token to every RPC. RequireTransportSecurity is
+// false so it also works over the insecure dev channel; production setups pair
+// it with server TLS so the token is encrypted in transit.
+type tokenCreds struct{ token string }
+
+func (t tokenCreds) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + t.token}, nil
+}
+func (t tokenCreds) RequireTransportSecurity() bool { return false }
 
 // Run connects to the orchestrator and processes commands until ctx is cancelled.
 func Run(ctx context.Context, cfg Config, driver Driver) error {
 	creds := insecure.NewCredentials()
-	if cfg.CertFile != "" || cfg.KeyFile != "" || cfg.CAFile != "" {
+	switch {
+	case cfg.CertFile != "" && cfg.KeyFile != "":
 		var err error
 		creds, err = mtls.ClientCreds(cfg.CertFile, cfg.KeyFile, cfg.CAFile, cfg.ServerName)
 		if err != nil {
 			return fmt.Errorf("build mTLS creds: %w", err)
 		}
+	case cfg.CAFile != "":
+		var err error
+		creds, err = mtls.ClientTLSCreds(cfg.CAFile, cfg.ServerName)
+		if err != nil {
+			return fmt.Errorf("build TLS creds: %w", err)
+		}
 	}
-	conn, err := grpc.NewClient(cfg.Orchestrator,
-		grpc.WithTransportCredentials(creds),
-	)
+
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	if cfg.Token != "" {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: cfg.Token}))
+	}
+	conn, err := grpc.NewClient(cfg.Orchestrator, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("dial orchestrator: %w", err)
 	}
