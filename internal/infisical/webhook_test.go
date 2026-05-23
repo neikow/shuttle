@@ -105,12 +105,12 @@ func TestParse_badSignatureTestPing(t *testing.T) {
 func TestVerifySignature_separators(t *testing.T) {
 	body := []byte(`{"a":1}`)
 	secret := "s"
-	// Semicolon separator and reversed field order must still verify.
+	// ComputeHeader emits "t=<ts>;<hex>"; also accept "v1=<hex>,t=<ts>" form.
 	good := ComputeHeader("123", body, secret)
-	parts := strings.Split(strings.TrimPrefix(good, ""), ",")
-	alt := parts[1] + ";" + parts[0] // "v1=...;t=123"
+	parts := strings.SplitN(good, ";", 2) // ["t=123", "<hex>"]
+	alt := "v1=" + parts[1] + "," + parts[0]
 	if err := VerifySignature(body, secret, alt); err != nil {
-		t.Errorf("reordered/semicolon header should verify: %v", err)
+		t.Errorf("v1= prefix + comma separator should verify: %v", err)
 	}
 }
 
@@ -119,7 +119,7 @@ func TestVerifySignature_bareHex(t *testing.T) {
 	body := []byte(`{"event":"secrets.modified"}`)
 	secret := "s"
 	ts := "1779568809550"
-	mac := computeMAC(ts, body, secret)
+	mac := computeMAC(body, secret)
 	header := fmt.Sprintf("t=%s;%x", ts, mac)
 	if err := VerifySignature(body, secret, header); err != nil {
 		t.Errorf("bare hex format should verify: %v", err)

@@ -109,8 +109,8 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 }
 
 // VerifySignature checks Infisical's x-infisical-signature header, formatted as
-// "t=<timestamp>,v1=<hex-hmac>". The signed message is "<timestamp>.<body>",
-// HMAC-SHA256 with the webhook secret.
+// "t=<timestamp>;<hex-hmac>". The signed message is the raw request body;
+// the timestamp is present for replay detection but is not part of the HMAC.
 func VerifySignature(body []byte, secret, header string) error {
 	ts, sig := parseSignatureHeader(header)
 	if ts == "" || sig == "" {
@@ -120,7 +120,7 @@ func VerifySignature(body []byte, secret, header string) error {
 	if err != nil {
 		return fmt.Errorf("invalid signature hex: %w", err)
 	}
-	want := computeMAC(ts, body, secret)
+	want := computeMAC(body, secret)
 	if subtle.ConstantTimeCompare(got, want) != 1 {
 		return fmt.Errorf("signature mismatch")
 	}
@@ -130,7 +130,7 @@ func VerifySignature(body []byte, secret, header string) error {
 // ComputeHeader builds the signature header value for a timestamp + body, used
 // by tests and clients.
 func ComputeHeader(ts string, body []byte, secret string) string {
-	return fmt.Sprintf("t=%s,v1=%s", ts, hex.EncodeToString(computeMAC(ts, body, secret)))
+	return fmt.Sprintf("t=%s;%s", ts, hex.EncodeToString(computeMAC(body, secret)))
 }
 
 func parseSignatureHeader(header string) (ts, sig string) {
@@ -154,10 +154,8 @@ func parseSignatureHeader(header string) (ts, sig string) {
 	return ts, sig
 }
 
-func computeMAC(ts string, body []byte, secret string) []byte {
+func computeMAC(body []byte, secret string) []byte {
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(ts))
-	mac.Write([]byte("."))
 	mac.Write(body)
 	return mac.Sum(nil)
 }
