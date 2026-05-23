@@ -35,7 +35,8 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`). |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
-| `internal/mtls/` | gRPC `ServerCreds`/`ClientCreds` (TLS 1.3, mutual cert verification). |
+| `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
+| `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
 | `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`). |
 
@@ -44,12 +45,14 @@ Always run `make test` before committing. The repo is kept race-clean.
 | File | Responsibility |
 |------|----------------|
 | `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. |
+| `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
+| `enroll.go` | `GET /hosts` + `POST /enroll`: mint host-scoped tokens, build the agent command. |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; `Send(host, cmd)`. |
 | `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/hosts`, `/enroll`). |
 
 ## Request flows
 
@@ -98,6 +101,13 @@ These are deliberate. Don't reverse them without updating this file.
 - **Webhook auth = HMAC `X-Hub-Signature-256` + nonce replay guard (10 min TTL).**
   Matches the GitHub webhook convention; the nonce guard blocks replays.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
+- **Agent auth = mTLS *or* enrollment token.** Either present a client cert
+  (mutual TLS) or a host-scoped bearer token over server-auth TLS. The token path
+  (`shuttle enroll` → `POST /enroll`) avoids per-agent cert distribution: only the
+  orchestrator needs a cert. Tokens are long-lived, revocable, stored as SHA-256
+  hashes, and validated by `TokenStreamInterceptor`, which pins the stream to the
+  token's host so a token can't register a different one. Token over a non-TLS
+  transport works but logs a cleartext warning.
 - **Compose `Driver` is an interface, parameterized by binary + subcommand.**
   The default targets `docker compose`; the `synology` preset points at
   `/usr/local/bin/docker` for DSM Container Manager. New targets are new presets,

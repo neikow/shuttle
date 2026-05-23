@@ -66,8 +66,57 @@ for an insecure dev link. Templates: `deploy/systemd/shuttle-agent.service`,
 | `--work-dir` | `./agent-work` | Where rendered compose files are written. |
 | `--driver` | `compose` | `compose` or `synology`. |
 | `--docker-bin` | — | Override the Docker executable path. |
-| `--cert` / `--key` / `--ca` | — | mTLS material (enables mTLS when set). |
+| `--cert` / `--key` / `--ca` | — | TLS material. cert+key+ca → mutual TLS; ca only → verify the orchestrator and authenticate by token. |
 | `--server-name` | `orchestrator` | Expected SAN on the orchestrator cert. |
+| `--token` | — | Enrollment token (from `shuttle enroll`). |
+
+## Enrolling agents with tokens
+
+Instead of issuing a client cert per agent, the orchestrator can mint a
+host-scoped **enrollment token** and hand you a ready-to-run agent command. This
+is the simplest way to bring up a new host.
+
+### Orchestrator setup
+
+Set in `config.yml`:
+
+```yaml
+agent_token_auth: true
+grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt   # serve TLS so the token
+grpc_tls_key:  /etc/shuttle/certs/orchestrator.key   # is encrypted in transit
+advertise_addr: orchestrator.example.com:9090        # what agents dial
+advertise_server_name: orchestrator                  # SAN on the cert above
+```
+
+With only `cert`+`key` (no `ca`) the orchestrator serves TLS and authenticates
+agents by token — no per-agent certs. Token auth without TLS works but sends the
+token in cleartext (a warning is logged); don't do that in production.
+
+### Enroll a host
+
+`shuttle enroll` talks to the running orchestrator's control plane, lists the
+hosts from the IaC repo, and prints the agent command:
+
+```sh
+shuttle enroll --url https://orchestrator.example.com:8080 --token "$BEARER_TOKEN"
+```
+
+```
+Available hosts:
+  1) web1  (region=eu-west, role=edge)
+Select a host [1]: 1
+
+Enrolled host "web1" (token id 1779…).
+Run the agent with:
+
+  shuttle agent --orchestrator orchestrator.example.com:9090 --host web1 \
+    --token g5R8…63PE --server-name orchestrator
+```
+
+Pass `--host web1` to skip the interactive picker. If the orchestrator uses a
+private CA, add `--ca <path-to-ca.crt>` to the agent command so it can verify the
+server. The token is shown once — treat it as a secret. Tokens are stored hashed
+and scoped to the host; a token presented for any other host is rejected.
 
 ## mTLS certificates
 

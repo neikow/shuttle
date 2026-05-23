@@ -69,7 +69,11 @@ make certs          # generate dev mTLS CA + orchestrator + agent certs
 # Orchestrator (reads config.yml; see deploy/config.example.yml)
 shuttle orchestrator --config /etc/shuttle/config.yml
 
+# Enroll a host: pick from the IaC repo's hosts, get a ready-to-run agent command
+shuttle enroll --url https://orch.example.com:8080 --token "$BEARER_TOKEN"
+
 # Agent (on a managed host; --host must match a name in hosts.yaml)
+shuttle agent --orchestrator orch.example.com:9090 --host web1 --token <token>   # token enrollment
 shuttle agent --orchestrator orch.example.com:9090 --host web1 \
   --cert agent.crt --key agent.key --ca ca.crt          # mTLS (omit for insecure dev)
 
@@ -85,11 +89,15 @@ shuttle agent --driver synology --orchestrator … --host nas1
 | `GET  /deploys`          | bearer | List deploy ledger records               |
 | `POST /deploy/{service}?sha=…` | bearer | Manually deploy a service at a commit |
 | `POST /rollback?service=…&steps=N` | bearer | Roll a service back N deploys |
+| `GET  /hosts`            | bearer | List enrollable hosts (token auth)       |
+| `POST /enroll`           | bearer | Mint an agent enrollment token           |
 | `POST /webhook`          | HMAC   | Git push trigger (signed, replay-guarded)|
 
 Bearer auth uses the static `bearer_token` from config. Webhooks verify an
-`X-Hub-Signature-256` HMAC and reject replays. Full reference:
-[docs/http-api.md](docs/http-api.md).
+`X-Hub-Signature-256` HMAC and reject replays. Agents authenticate with either a
+client cert (mTLS) or a host-scoped enrollment token over server TLS — see
+[docs/operations.md](docs/operations.md#enrolling-agents-with-tokens). Full API
+reference: [docs/http-api.md](docs/http-api.md).
 
 ## IaC repository layout
 

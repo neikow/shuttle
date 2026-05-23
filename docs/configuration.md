@@ -21,15 +21,23 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `webhook_secret` | — | HMAC secret for `POST /webhook`. Required to enable the webhook + reconcile loop. |
 | `caddy_admin_url` | — | Caddy Admin API URL (e.g. `http://caddy:2019`). Empty disables route push. |
 | `secrets_provider` | `none` | `infisical` or `none`. |
-| `grpc_tls_cert` / `grpc_tls_key` / `grpc_tls_ca` | — | gRPC mTLS material. **All three** must be set to require client certs. |
+| `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
+| `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |
+| `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
+| `advertise_addr` | `grpc_addr` | gRPC `host:port` baked into the command `shuttle enroll` prints. |
+| `advertise_server_name` | — | Orchestrator cert SAN added to the enrollment command when TLS is on. |
 
 ### Feature gating
 
 - **Git sync + webhook + drift reconcile** turn on only when *both* `repo_url`
   and `webhook_secret` are set.
 - **Caddy route push** turns on when `caddy_admin_url` is set.
-- **mTLS** turns on when all three `grpc_tls_*` keys are set; otherwise the gRPC
-  transport is insecure and the orchestrator logs a warning.
+- **gRPC transport:** `cert`+`key` → server TLS; adding `ca` → mutual TLS;
+  neither → insecure (a warning is logged).
+- **Token auth** turns on with `agent_token_auth: true`. Pair it with server TLS
+  (`cert`+`key`) so tokens are encrypted in transit. Enrollment endpoints
+  (`GET /hosts`, `POST /enroll`) are served only when token auth *and* git sync
+  are both configured.
 
 ### Flag fallbacks
 
