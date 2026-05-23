@@ -11,6 +11,11 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "shuttle",
 	Short: "Self-hosted git-driven deployment platform",
+	// A RunE failure is a runtime/validation error (e.g. `check` finding a
+	// missing secret), not a misuse of the CLI, so don't dump the usage text
+	// after it — just the error (cobra still prints that). Inherited by every
+	// subcommand. `--help` still shows usage on demand.
+	SilenceUsage: true,
 }
 
 func main() {
