@@ -134,11 +134,14 @@ func ComputeHeader(ts string, body []byte, secret string) string {
 }
 
 func parseSignatureHeader(header string) (ts, sig string) {
-	// Accept both "," (Infisical) and ";" as field separators.
+	// Accept both "," and ";" as field separators.
+	// Infisical sends either "t=<ts>,v1=<hex>" or "t=<ts>;<hex>" (bare hex,
+	// no "v1=" prefix), so a field with no "=" is treated as the signature.
 	fields := strings.FieldsFunc(header, func(r rune) bool { return r == ',' || r == ';' })
 	for _, f := range fields {
 		k, v, ok := strings.Cut(strings.TrimSpace(f), "=")
 		if !ok {
+			sig = k // bare hex value
 			continue
 		}
 		switch k {

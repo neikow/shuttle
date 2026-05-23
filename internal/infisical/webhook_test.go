@@ -1,6 +1,7 @@
 package infisical
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -110,5 +111,17 @@ func TestVerifySignature_separators(t *testing.T) {
 	alt := parts[1] + ";" + parts[0] // "v1=...;t=123"
 	if err := VerifySignature(body, secret, alt); err != nil {
 		t.Errorf("reordered/semicolon header should verify: %v", err)
+	}
+}
+
+func TestVerifySignature_bareHex(t *testing.T) {
+	// Infisical sends "t=<ts>;<hex>" with no "v1=" prefix on the signature.
+	body := []byte(`{"event":"secrets.modified"}`)
+	secret := "s"
+	ts := "1779568809550"
+	mac := computeMAC(ts, body, secret)
+	header := fmt.Sprintf("t=%s;%x", ts, mac)
+	if err := VerifySignature(body, secret, header); err != nil {
+		t.Errorf("bare hex format should verify: %v", err)
 	}
 }
