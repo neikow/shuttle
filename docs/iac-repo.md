@@ -35,7 +35,7 @@ name: whoami              # must equal the directory name
 host: web1                # must reference a host in hosts.yaml
 domains:                  # optional; drive Caddy ingress
   - whoami.example.com
-env_from: production      # optional; secrets environment/scope
+env_from: production      # optional; Infisical environment to read secrets from
 env_schema:               # optional; the only secret keys passed to this service
   - WHOAMI_NAME
 port: 80                  # optional; the Caddy upstream port for this service's domains
@@ -49,6 +49,9 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 - **`host`** must reference a declared host, or the sync fails.
 - **`domains` + `port`** — a service with both gets a Caddy route: each domain
   proxies to `<host>:<port>`. A service missing either is not routed.
+- **`env_from`** selects the Infisical environment (e.g. `production`,
+  `staging`) the service's secrets are read from, overriding the orchestrator's
+  default `INFISICAL_ENV`. Omit it to use that default.
 - **`env_schema`** scopes secrets: the orchestrator passes the service only these
   keys (filtered from the configured secrets provider). Without it, no secrets
   flow to the service.
