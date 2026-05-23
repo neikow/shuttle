@@ -59,6 +59,46 @@ func RoutesFromRepo(repo *config.Repo) ([]CaddyRoute, error) {
 	return routes, nil
 }
 
+// RoutesForHost derives Caddy routes for a single host's sidecar. Unlike
+// RoutesFromRepo (used by the central Caddy), upstreams dial the service NAME,
+// which is the network alias the agent assigns when it joins the service's
+// containers to the shared Caddy network — so Caddy reaches them as
+// "<service>:<port>" on that network.
+func RoutesForHost(repo *config.Repo, host string) ([]CaddyRoute, error) {
+	var routes []CaddyRoute
+	for _, svc := range repo.Services {
+		if svc.Host != host || len(svc.Domains) == 0 || svc.Healthcheck == nil || svc.Healthcheck.Port == 0 {
+			continue
+		}
+		handlers, err := parseSnippet(svc.CaddySnippet)
+		if err != nil {
+			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
+		}
+		upstream := svc.Name + ":" + strconv.Itoa(svc.Healthcheck.Port)
+		for _, domain := range svc.Domains {
+			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
+		}
+	}
+	return routes, nil
+}
+
+// HostCaddyConfigJSON builds the Caddy JSON config a host's sidecar should run,
+// or (nil, false) when the host has no routable services.
+func HostCaddyConfigJSON(repo *config.Repo, host string) ([]byte, bool, error) {
+	routes, err := RoutesForHost(repo, host)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(routes) == 0 {
+		return nil, false, nil
+	}
+	data, err := json.Marshal(buildCaddyConfig(routes))
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
 // parseSnippet decodes a service caddy_snippet into a slice of Caddy HTTP
 // handler objects. Empty snippet yields nil.
 func parseSnippet(snippet string) ([]any, error) {
@@ -117,21 +157,18 @@ func buildCaddyConfig(routes []CaddyRoute) map[string]any {
 		})
 	}
 
+	// No explicit tls block: every route matches specific domains, so Caddy's
+	// automatic HTTPS provisions certs for those hostnames (Let's Encrypt for
+	// public domains, an internal CA for *.localhost). on-demand TLS is avoided
+	// because it requires a separate permission module.
 	return map[string]any{
 		"admin": map[string]any{"disabled": false},
 		"apps": map[string]any{
 			"http": map[string]any{
 				"servers": map[string]any{
 					"shuttle": map[string]any{
-						"listen": []string{":443"},
+						"listen": []string{":80", ":443"},
 						"routes": servers,
-					},
-				},
-			},
-			"tls": map[string]any{
-				"automation": map[string]any{
-					"policies": []any{
-						map[string]any{"on_demand": true},
 					},
 				},
 			},

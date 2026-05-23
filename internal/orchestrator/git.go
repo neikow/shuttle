@@ -121,6 +121,7 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 		return nil, err
 	}
 	g.applyRoutes(ctx, repo)
+	g.dispatchHostCaddyConfigs(repo)
 	current, err := g.store.CurrentSHAs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("current state: %w", err)
@@ -144,6 +145,32 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 		return
 	}
 	slog.Info("caddy routes applied", "count", len(routes))
+}
+
+// dispatchHostCaddyConfigs pushes each host its Caddy ingress config, so an
+// agent running a Caddy sidecar (--caddy) can apply it via CaddyConfigRequest.
+// Hosts with no routable services, or whose agent is not connected, are skipped.
+func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
+	for _, h := range repo.Hosts {
+		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name)
+		if err != nil {
+			slog.Error("build caddy config failed", "host", h.Name, "err", err)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		cmd := &shuttlev1.OrchestratorCommand{
+			Payload: &shuttlev1.OrchestratorCommand_CaddyConfig{
+				CaddyConfig: &shuttlev1.CaddyConfigRequest{ConfigJson: string(cfgJSON)},
+			},
+		}
+		if err := g.registry.Send(h.Name, cmd); err != nil {
+			slog.Debug("skip caddy config push (host not connected)", "host", h.Name, "err", err)
+			continue
+		}
+		slog.Info("caddy config pushed", "host", h.Name)
+	}
 }
 
 // ForceDeploy redeploys the named services at the current repo HEAD regardless

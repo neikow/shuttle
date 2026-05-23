@@ -77,6 +77,51 @@ func TestRoutesFromRepo_badSnippet(t *testing.T) {
 	}
 }
 
+func TestRoutesForHost(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.example.com"}, Healthcheck: &config.Healthcheck{Port: 8080}},
+			{Name: "api", Host: "web2", Domains: []string{"api.example.com"}, Healthcheck: &config.Healthcheck{Port: 80}},
+		},
+	}
+	routes, err := RoutesForHost(repo, "web1")
+	if err != nil {
+		t.Fatalf("RoutesForHost: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("want 1 route for web1, got %d", len(routes))
+	}
+	// Upstream dials the service NAME (network alias), not the host.
+	if routes[0].Upstream != "app:8080" {
+		t.Errorf("upstream = %q, want app:8080", routes[0].Upstream)
+	}
+}
+
+func TestHostCaddyConfigJSON(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.example.com"}, Healthcheck: &config.Healthcheck{Port: 8080}},
+			{Name: "lonely", Host: "web3"}, // no domains -> web3 has no config
+		},
+	}
+
+	data, ok, err := HostCaddyConfigJSON(repo, "web1")
+	if err != nil || !ok {
+		t.Fatalf("web1: ok=%v err=%v", ok, err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, hasApps := cfg["apps"]; !hasApps {
+		t.Errorf("config missing apps: %s", data)
+	}
+
+	if _, ok, _ := HostCaddyConfigJSON(repo, "web3"); ok {
+		t.Error("web3 has no routable services; expected ok=false")
+	}
+}
+
 func TestApplyRoutes(t *testing.T) {
 	var received map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

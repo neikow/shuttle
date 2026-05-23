@@ -80,6 +80,7 @@ dev-repo: build
 	@echo "  ./$(BINARY) orchestrator --config $(DEV_DIR)/orchestrator.yml"
 	@echo "Enroll an agent (new terminal), then run the printed command + --ca certs/ca.crt:"
 	@echo "  ./$(BINARY) enroll --url http://127.0.0.1:8099 --token test-bearer"
+	@echo "  # add --caddy to the agent command to run a managed ingress sidecar"
 	@echo ""
 	@echo "Edit $(DEV_DIR)/iac (hosts.yaml, services/<name>/) and commit;"
 	@echo "the reconciler picks up new commits within ~60s. List deploys:"
