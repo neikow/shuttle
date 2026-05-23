@@ -88,7 +88,7 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 	if h.secret != "" {
 		// Unsigned test pings are accepted without a signature; everything else
 		// requires a valid HMAC.
-		if !(p.Event == "test" && sigHeader == "") {
+		if p.Event != "test" || sigHeader != "" {
 			if err := VerifySignature(body, h.secret, sigHeader); err != nil {
 				return nil, fmt.Errorf("signature: %w", err)
 			}
