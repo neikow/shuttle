@@ -70,7 +70,11 @@ via `ledger.RollbackTarget`.
 
 **Drift heal:** agents report `ContainerState` every ~30s. `DriftReconciler`
 ticks every 60s: SHA drift → `Reconcile`; crashed/missing containers →
-`ForceDeploy`.
+`ForceDeploy`. The agent's deployed-set is in-memory, so on restart it
+reconciles from reality — `seedFromDisk` re-tracks every `<work_dir>/<service>`
+compose workspace, so the report/heal loop resumes for services deployed before
+the restart (recorded SHA is unknown post-restart and left empty; container
+drift keys on status, not SHA).
 
 ## Design decisions & rationale
 

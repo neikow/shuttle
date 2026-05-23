@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -19,7 +20,8 @@ const stateReportInterval = 30 * time.Second
 
 // deployedSet tracks the services this agent has deployed, so it can report
 // their container state for orchestrator drift detection. It survives
-// reconnects across sessions.
+// reconnects across sessions, and is reseeded from on-disk compose workspaces
+// after a process restart (see seedFromDisk).
 type deployedSet struct {
 	mu sync.RWMutex
 	m  map[string]deployedService
@@ -36,6 +38,34 @@ func (s *deployedSet) put(service, workDir, sha string) {
 	s.mu.Lock()
 	s.m[service] = deployedService{workDir: workDir, sha: sha}
 	s.mu.Unlock()
+}
+
+// seedFromDisk reconciles the in-memory set with reality after a restart: the
+// agent loses its deployed map on process exit, but the compose workspaces it
+// wrote persist under baseDir as <baseDir>/<service>/docker-compose.yml. Each
+// such workspace is re-tracked so the state-report loop resumes reporting it
+// (and the orchestrator can heal a service whose container died while the agent
+// was down). The recorded SHA is unknown post-restart and left empty; container
+// drift detection keys on status, not SHA. Returns the number of services seeded.
+func (s *deployedSet) seedFromDisk(baseDir string) int {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		// No workspaces yet (fresh agent) or unreadable dir: nothing to seed.
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		workDir := filepath.Join(baseDir, e.Name())
+		if _, err := os.Stat(filepath.Join(workDir, "docker-compose.yml")); err != nil {
+			continue // not a shuttle compose workspace
+		}
+		s.put(e.Name(), workDir, "")
+		n++
+	}
+	return n
 }
 
 func (s *deployedSet) snapshot() map[string]deployedService {
@@ -108,6 +138,9 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 
 	client := shuttlev1.NewAgentServiceClient(conn)
 	deployed := newDeployedSet()
+	if n := deployed.seedFromDisk(cfg.WorkDir); n > 0 {
+		slog.Info("reconciled deployed services from disk", "count", n, "work_dir", cfg.WorkDir)
+	}
 
 	var caddy *caddySidecar
 	if cfg.CaddyEnabled {
