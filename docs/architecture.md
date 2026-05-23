@@ -93,9 +93,14 @@ auditable.
 
 ## Security model
 
-- **gRPC mTLS** (`internal/mtls`) — TLS 1.3, mutual cert verification. Enabled
-  when the orchestrator config sets `grpc_tls_cert/key/ca`; the agent presents
-  its client cert. Insecure transport is dev-only and logs a warning.
+- **Agent auth** (`internal/mtls`, `internal/token`) — two options over TLS 1.3:
+  - *mTLS:* `grpc_tls_cert/key/ca` set → mutual cert verification; the agent
+    presents a client cert.
+  - *Token enrollment:* `grpc_tls_cert/key` (server TLS) + `agent_token_auth` →
+    the agent verifies the orchestrator and presents a host-scoped bearer token
+    (minted by `shuttle enroll`, stored hashed, revocable). No per-agent certs.
+
+  Insecure transport is dev-only and logs a warning.
 - **Webhook HMAC** — `X-Hub-Signature-256` over the raw body, plus a nonce
   replay guard (10-minute TTL) so a captured request can't be replayed.
 - **HTTP bearer token** — static token from config guards the control-plane

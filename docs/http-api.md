@@ -9,10 +9,15 @@ All responses are JSON.
 | `GET  /deploys` | bearer |
 | `POST /deploy/{service}` | bearer |
 | `POST /rollback` | bearer |
+| `GET  /hosts` | bearer |
+| `POST /enroll` | bearer |
 | `POST /webhook` | HMAC |
 
 **Bearer auth:** send `Authorization: Bearer <bearer_token>`. A missing or wrong
 token returns `401`.
+
+`GET /hosts` and `POST /enroll` exist only when `agent_token_auth` and git sync
+are configured; see [operations.md](operations.md#enrolling-agents-with-tokens).
 
 ---
 
@@ -85,6 +90,35 @@ The orchestrator resolves the target SHA from the ledger (`409` if there is no
 such target), renders that revision's compose, and dispatches it. `202 Accepted`
 with `{ "deploy_id", "host" }`.
 
+## `GET /hosts`
+
+List the hosts declared in the IaC repo (used by `shuttle enroll`):
+
+```json
+[ { "name": "web1", "labels": { "region": "eu-west" } } ]
+```
+
+## `POST /enroll`
+
+Mint a host-scoped agent enrollment token.
+
+- Body: `{ "host": "web1" }` — must reference a host from `GET /hosts`.
+
+`201 Created`:
+
+```json
+{
+  "id": "1779…",
+  "host": "web1",
+  "token": "g5R8…63PE",
+  "command": "shuttle agent --orchestrator … --host web1 --token g5R8…63PE --server-name orchestrator",
+  "tls": true
+}
+```
+
+The plaintext `token` is returned once; only its hash is stored. An unknown host
+returns `404`.
+
 ## `POST /webhook`
 
 Git-push trigger. Enabled only when `repo_url` + `webhook_secret` are configured.
@@ -101,9 +135,11 @@ and posts this request.
 
 | Code | Meaning |
 |------|---------|
-| `200` | OK (healthz, list) |
+| `200` | OK (healthz, list, hosts) |
+| `201` | Enrollment token created |
 | `202` | Deploy/rollback accepted and queued |
 | `400` | Missing required parameter |
 | `401` | Bad/missing bearer token |
+| `404` | Unknown host (enroll) |
 | `409` | No rollback target available |
 | `502` | Could not reach the target agent |
