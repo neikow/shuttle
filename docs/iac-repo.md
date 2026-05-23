@@ -36,6 +36,7 @@ host: web1                # must reference a host in hosts.yaml
 domains:                  # optional; drive Caddy ingress
   - whoami.example.com
 env_from: production      # optional; Infisical environment to read secrets from
+secret_path: /services/whoami  # optional; Infisical folder for this service (absolute)
 env_schema:               # optional; the only secret keys passed to this service
   - WHOAMI_NAME
 port: 80                  # optional; the Caddy upstream port for this service's domains
@@ -52,6 +53,11 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 - **`env_from`** selects the Infisical environment (e.g. `production`,
   `staging`) the service's secrets are read from, overriding the orchestrator's
   default `INFISICAL_ENV`. Omit it to use that default.
+- **`secret_path`** is the Infisical folder this service's secrets are read from,
+  overriding the orchestrator's `secrets_path_template`. Must be absolute. The
+  orchestrator always also reads the shared `secrets_base_path` and merges it
+  under the service folder (service keys win). See
+  [configuration.md](configuration.md#secrets-providers).
 - **`env_schema`** scopes secrets: the orchestrator passes the service only these
   keys (filtered from the configured secrets provider). Without it, no secrets
   flow to the service.

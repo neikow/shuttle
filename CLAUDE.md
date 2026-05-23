@@ -138,11 +138,15 @@ These are deliberate. Don't reverse them without updating this file.
   Caddy's auto-redirect); true → `[:443]` only, so Caddy's automatic HTTPS stands
   up its own :80 server that 308-redirects to HTTPS and answers ACME HTTP-01.
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
-  `Fake` backs tests. `Get`/`GetAll` take a `scope`: a service's `env_from`
-  selects the Infisical environment to read from (empty → the provider's default
-  `INFISICAL_ENV`). The orchestrator then filters by each service's `env_schema`
-  so an agent only ever receives the keys it declares. Both happen at
-  `renderEnv` time, producing the `.env` shipped with the compose file.
+  `Fake` backs tests. `Get`/`GetAll` take a `Scope{Env, Path}`: a service's
+  `env_from` is the environment (empty → `INFISICAL_ENV`), and the folder comes
+  from `config.ResolveSecretsPaths` — a shared `secrets_base_path` (default
+  `/shared`) merged with the service's own folder (`secret_path`, else
+  `secrets_path_template` with `{service}`, else the base). `renderEnv` reads
+  both folders in that environment and merges them (service folder wins), then
+  filters by `env_schema`, producing the `.env` shipped with the compose file.
+  Folder paths must be absolute. The provider stays generic `(env, path) →
+  secrets`; all path *policy* lives in the orchestrator.
 - **Webhook auth = HMAC `X-Hub-Signature-256` + nonce replay guard (10 min TTL).**
   Matches the GitHub webhook convention; the nonce guard blocks replays.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.

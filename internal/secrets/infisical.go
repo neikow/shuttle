@@ -50,21 +50,30 @@ func NewInfisical() (*InfisicalProvider, error) {
 	}, nil
 }
 
-// envFor resolves the Infisical environment for a request: the service's
-// env_from scope when set, otherwise the provider's default environment.
-func (p *InfisicalProvider) envFor(scope string) string {
-	if scope != "" {
-		return scope
+// envFor resolves the Infisical environment for a request: the scope's Env when
+// set, otherwise the provider's default environment.
+func (p *InfisicalProvider) envFor(scope Scope) string {
+	if scope.Env != "" {
+		return scope.Env
 	}
 	return p.environment
 }
 
-func (p *InfisicalProvider) Get(_ context.Context, scope, key string) (string, error) {
+// pathFor resolves the Infisical folder for a request: the scope's Path when
+// set, otherwise the provider's default path.
+func (p *InfisicalProvider) pathFor(scope Scope) string {
+	if scope.Path != "" {
+		return scope.Path
+	}
+	return p.secretPath
+}
+
+func (p *InfisicalProvider) Get(_ context.Context, scope Scope, key string) (string, error) {
 	secret, err := p.client.Secrets().Retrieve(infisical.RetrieveSecretOptions{
 		SecretKey:   key,
 		ProjectID:   p.projectID,
 		Environment: p.envFor(scope),
-		SecretPath:  p.secretPath,
+		SecretPath:  p.pathFor(scope),
 	})
 	if err != nil {
 		return "", fmt.Errorf("infisical get %q: %w", key, err)
@@ -72,11 +81,11 @@ func (p *InfisicalProvider) Get(_ context.Context, scope, key string) (string, e
 	return secret.SecretValue, nil
 }
 
-func (p *InfisicalProvider) GetAll(_ context.Context, scope string) (map[string]string, error) {
+func (p *InfisicalProvider) GetAll(_ context.Context, scope Scope) (map[string]string, error) {
 	res, err := p.client.Secrets().ListSecrets(infisical.ListSecretsOptions{
 		ProjectID:   p.projectID,
 		Environment: p.envFor(scope),
-		SecretPath:  p.secretPath,
+		SecretPath:  p.pathFor(scope),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("infisical list: %w", err)

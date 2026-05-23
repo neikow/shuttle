@@ -119,6 +119,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 			slog.Info("secrets provider enabled", "provider", cfg.SecretsProvider)
 		}
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
+		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
 			syncer.SetHTTPSRedirect(cfg.HTTPSRedirect)

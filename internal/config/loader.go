@@ -23,6 +23,12 @@ func LoadOrchestratorConfig(path string) (*OrchestratorConfig, error) {
 	if cfg.BearerToken == "" {
 		return nil, fmt.Errorf("%s: bearer_token is required", path)
 	}
+	if cfg.SecretsBasePath != "" && !isAbsSecretPath(cfg.SecretsBasePath) {
+		return nil, fmt.Errorf("%s: secrets_base_path %q must be absolute", path, cfg.SecretsBasePath)
+	}
+	if cfg.SecretsPathTemplate != "" && !isAbsSecretPath(cfg.SecretsPathTemplate) {
+		return nil, fmt.Errorf("%s: secrets_path_template %q must be absolute", path, cfg.SecretsPathTemplate)
+	}
 	return &cfg, nil
 }
 
@@ -107,6 +113,9 @@ func loadService(rootDir, dir string) (*Service, error) {
 	if deleteVolumes == "" {
 		deleteVolumes = DeleteVolumesManual
 	}
+	if raw.SecretPath != "" && !isAbsSecretPath(raw.SecretPath) {
+		return nil, fmt.Errorf("secret_path %q must be absolute (start with '/')", raw.SecretPath)
+	}
 	svc := &Service{
 		Name:          raw.Name,
 		Host:          raw.Host,
@@ -116,6 +125,7 @@ func loadService(rootDir, dir string) (*Service, error) {
 		Port:          raw.Port,
 		CaddySnippet:  raw.CaddySnippet,
 		DeleteVolumes: deleteVolumes,
+		SecretPath:    raw.SecretPath,
 	}
 
 	if raw.Remote != nil && hasCompose {
