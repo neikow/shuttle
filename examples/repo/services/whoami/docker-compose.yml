@@ -3,6 +3,4 @@ services:
     image: traefik/whoami:latest
     environment:
       WHOAMI_NAME: ${WHOAMI_NAME:-shuttle}
-    ports:
-      - "8000:80"
     restart: unless-stopped
