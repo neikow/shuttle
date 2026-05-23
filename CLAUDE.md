@@ -39,7 +39,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
 | `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
-| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + Caddy sidecar manager (`caddy.go`). |
+| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`). |
 
 ### `internal/orchestrator/` internals
 
@@ -84,6 +84,19 @@ drift reconciler keeps it synced), fingerprints every distinct (env, folder) the
 repo's services read (SHA-256 over the sorted key/value set; **values are never
 stored**), and `ForceDeploy`s the services whose fingerprint changed. The first
 pass only seeds fingerprints (no redeploy), so a restart doesn't storm.
+
+**Zero-downtime deploy (rolling):** the default for every service
+(`update_policy: rolling`). The agent's `rollingApply` (`rolling.go`): `pull` →
+`compose up -d --no-deps --no-recreate --scale S=2N` (new containers start
+alongside the old) → join the *new* containers to the Caddy network (via the
+`OnNewContainers` hook, so Caddy round-robins to both) → wait until the new ones
+are healthy (Docker healthcheck → `healthy`; none → `running` after a grace) →
+`docker rm -f` the old → settle the replica count. Any failure before the old
+containers are removed aborts, removes the new containers, and leaves the old
+version serving (deploy reported FAILED). Requires the project to run two-up: no
+fixed published host port, no `container_name` — `shuttle check` warns otherwise.
+`update_policy: recreate` opts back into compose's stop-then-start. Rollback
+always uses recreate.
 
 **Manual deploy / rollback:** `POST /deploy/{service}` and
 `POST /rollback?service=…&steps=N` use `GitSyncer.DeployAtSHA` (checkout the
@@ -202,6 +215,16 @@ These are deliberate. Don't reverse them without updating this file.
   hashes, and validated by `TokenStreamInterceptor`, which pins the stream to the
   token's host so a token can't register a different one. Token over a non-TLS
   transport works but logs a cleartext warning.
+- **Zero-downtime is the default, via compose scale not orchestrator magic.**
+  Rolling lives entirely in the agent (`rolling.go`): it leans on the existing
+  sidecar-Caddy model where Caddy dials the `<service>` network alias, so two
+  containers sharing that alias are load-balanced by Docker's DNS — bring up the
+  new, health-gate, cull the old. The orchestrator only passes `update_policy`
+  on the `DeployRequest`. The safety invariant: nothing old is removed until the
+  new is healthy, so a failed deploy never causes downtime. The hard constraint
+  (can't run two-up with a fixed host port or `container_name`) is surfaced as a
+  `shuttle check` warning rather than enforced, because the runtime abort already
+  fails safe. `recreate` remains available per service.
 - **Compose `Driver` is an interface, parameterized by binary + subcommand.**
   The default targets `docker compose`; the `synology` preset points at
   `/usr/local/bin/docker` for DSM Container Manager. New targets are new presets,

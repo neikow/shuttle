@@ -96,6 +96,9 @@ func printServiceCheck(out io.Writer, sc orchestrator.ServiceCheck, hasProvider 
 		_, _ = fmt.Fprintf(out, "  ✓ %s (env=%s, %s + %s): all %d env_schema key(s) present\n",
 			sc.Service, sc.Env, sc.BasePath, sc.ServicePath, len(sc.Schema))
 	}
+	for _, w := range sc.Warnings {
+		_, _ = fmt.Fprintf(out, "  ! %s: %s\n", sc.Service, w)
+	}
 }
 
 func shortSHA(sha string) string {

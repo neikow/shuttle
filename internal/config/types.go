@@ -87,6 +87,9 @@ type Service struct {
 	// SecretPath is the Infisical folder this service's secrets are read from,
 	// overriding the orchestrator's secrets_path_template. Must be absolute.
 	SecretPath string `yaml:"secret_path"`
+	// UpdatePolicy is how the agent applies a deploy: "rolling" (default,
+	// zero-downtime) or "recreate". Canonicalized at load (never empty).
+	UpdatePolicy string
 }
 
 // ServiceSource is either a local compose file or a remote pointer.
@@ -124,5 +127,6 @@ type serviceFile struct {
 	CaddySnippet  string              `yaml:"caddy_snippet"`
 	DeleteVolumes deleteVolumesPolicy `yaml:"delete_volumes"`
 	SecretPath    string              `yaml:"secret_path"`
+	UpdatePolicy  string              `yaml:"update_policy"`
 	Remote        *RemotePointer      `yaml:"remote"`
 }

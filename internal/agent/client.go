@@ -99,7 +99,7 @@ type Config struct {
 	ServerName string
 	// Token, when set, is sent as a bearer credential to authenticate the agent
 	// (see `shuttle enroll`).
-	Token string
+	Token     string
 	DockerBin string // docker executable, shared with the Caddy sidecar
 }
 
@@ -287,15 +287,23 @@ func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
 	logCh, err := driver.Apply(ctx, ApplyParams{
-		Service:     req.Service,
-		ComposeYAML: req.ComposeYaml,
-		Env:         req.Env,
-		WorkDir:     workDir,
+		Service:      req.Service,
+		ComposeYAML:  req.ComposeYaml,
+		Env:          req.Env,
+		WorkDir:      workDir,
+		UpdatePolicy: req.UpdatePolicy,
+		// Rolling: join the new containers to the ingress network before the old
+		// ones are removed, so Caddy keeps a healthy upstream throughout.
+		OnNewContainers: func(ctx context.Context, ids []string) error {
+			return caddy.connectContainers(ctx, ids, req.Service)
+		},
 	})
 	if err == nil {
 		deployed.put(req.Service, workDir, req.Sha)
 	}
 	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	// Belt-and-suspenders for the recreate path (and any container the rolling
+	// hook missed): ensure the live project is attached to the ingress network.
 	connectToCaddy(ctx, caddy, workDir, req.Service, res)
 	return res
 }

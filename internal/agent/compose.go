@@ -25,7 +25,29 @@ type ApplyParams struct {
 	ComposeYAML []byte
 	Env         map[string]string
 	WorkDir     string // directory where compose file is written
+	// UpdatePolicy selects the apply strategy: "recreate" uses compose's
+	// stop-then-start; anything else (incl. empty) uses the zero-downtime
+	// rolling strategy.
+	UpdatePolicy string
+	// HealthTimeout bounds how long the rolling strategy waits for new
+	// containers to become healthy before aborting. Zero uses a default.
+	HealthTimeout time.Duration
+	// OnNewContainers, when set, is called by the rolling strategy with the IDs
+	// of the freshly started containers after they are up but before the old
+	// ones are removed — so the caller can join them to the ingress network.
+	OnNewContainers func(ctx context.Context, ids []string) error
 }
+
+// updatePolicyRecreate selects compose's stop-then-start recreate. Mirrors
+// config.UpdatePolicyRecreate without importing the config package.
+const updatePolicyRecreate = "recreate"
+
+// defaultHealthTimeout bounds the rolling strategy's wait for new containers.
+const defaultHealthTimeout = 90 * time.Second
+
+// noHealthGrace is the settle time given to a new container that defines no
+// healthcheck before "running" is accepted as ready.
+const noHealthGrace = 3 * time.Second
 
 // RollbackParams holds inputs for a compose rollback (same as apply but prior SHA's compose).
 type RollbackParams = ApplyParams
@@ -95,34 +117,44 @@ func (d *ComposeDriver) composeArgs(composePath, envFile string, sub ...string) 
 }
 
 func (d *ComposeDriver) Apply(ctx context.Context, p ApplyParams) (<-chan LogLine, error) {
-	return d.runCompose(ctx, p, []string{"up", "-d", "--remove-orphans", "--pull", "always"})
+	if p.UpdatePolicy == updatePolicyRecreate {
+		return d.runCompose(ctx, p, []string{"up", "-d", "--remove-orphans", "--pull", "always"})
+	}
+	return d.rollingApply(ctx, p)
 }
 
 func (d *ComposeDriver) Rollback(ctx context.Context, p RollbackParams) (<-chan LogLine, error) {
 	return d.runCompose(ctx, p, []string{"up", "-d", "--remove-orphans"})
 }
 
-func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []string) (<-chan LogLine, error) {
-	// Resolve to an absolute path: cmd.Dir is set to the workdir, so a relative
-	// -f / --env-file would be re-resolved against it and double the path.
-	workDir, err := filepath.Abs(p.WorkDir)
+// prepareWorkspace resolves the workdir to an absolute path, creates it, and
+// writes the compose file and .env. cmd.Dir is set to the workdir, so a relative
+// -f / --env-file would be re-resolved against it and double the path — hence
+// the absolute paths.
+func (d *ComposeDriver) prepareWorkspace(p ApplyParams) (workDir, composePath, envFile string, err error) {
+	workDir, err = filepath.Abs(p.WorkDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolve workdir: %w", err)
+		return "", "", "", fmt.Errorf("resolve workdir: %w", err)
 	}
-	if err := os.MkdirAll(workDir, 0700); err != nil {
-		return nil, fmt.Errorf("mkdirall workdir: %w", err)
+	if err = os.MkdirAll(workDir, 0700); err != nil {
+		return "", "", "", fmt.Errorf("mkdirall workdir: %w", err)
 	}
+	composePath = filepath.Join(workDir, "docker-compose.yml")
+	if err = os.WriteFile(composePath, p.ComposeYAML, 0600); err != nil {
+		return "", "", "", fmt.Errorf("write compose: %w", err)
+	}
+	envFile = filepath.Join(workDir, ".env")
+	if err = writeEnvFile(envFile, p.Env); err != nil {
+		return "", "", "", fmt.Errorf("write env: %w", err)
+	}
+	return workDir, composePath, envFile, nil
+}
 
-	composePath := filepath.Join(workDir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, p.ComposeYAML, 0600); err != nil {
-		return nil, fmt.Errorf("write compose: %w", err)
+func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []string) (<-chan LogLine, error) {
+	workDir, composePath, envFile, err := d.prepareWorkspace(p)
+	if err != nil {
+		return nil, err
 	}
-
-	envFile := filepath.Join(workDir, ".env")
-	if err := writeEnvFile(envFile, p.Env); err != nil {
-		return nil, fmt.Errorf("write env: %w", err)
-	}
-
 	cmd := exec.CommandContext(ctx, d.bin, d.composeArgs(composePath, envFile, subCmd...)...)
 	cmd.Dir = workDir
 	return streamCommand(cmd)
