@@ -15,7 +15,7 @@ webhook_secret: "dev-webhook-secret"
 # No Caddy in this loop; set to http://localhost:2019 if you run one.
 caddy_admin_url: ""
 https_redirect: true
-secrets_provider: "none"
+secrets_provider: "infisical"
 
 # Server TLS + token auth: the agent verifies the orchestrator and authenticates
 # with a token from `shuttle enroll` (no per-agent certs). Certs come from
