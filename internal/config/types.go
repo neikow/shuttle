@@ -11,6 +11,7 @@ type OrchestratorConfig struct {
 	RepoDir         string `yaml:"repo_dir"`
 	WebhookSecret   string `yaml:"webhook_secret"`
 	CaddyAdminURL   string `yaml:"caddy_admin_url"`  // e.g. http://caddy:2019; empty disables route push
+	HTTPSRedirect   bool   `yaml:"https_redirect"`   // when true, Caddy serves :443 only and 308-redirects :80 -> HTTPS
 	SecretsProvider string `yaml:"secrets_provider"` // "infisical" | "none" (default)
 	// gRPC TLS. cert+key => the orchestrator serves TLS; adding ca makes it
 	// require+verify client certs (mutual TLS).
@@ -54,16 +55,11 @@ type Service struct {
 	Name         string `yaml:"name"`
 	Host         string `yaml:"host"`
 	Source       ServiceSource
-	Domains      []string     `yaml:"domains"`
-	EnvFrom      string       `yaml:"env_from"`
-	EnvSchema    []string     `yaml:"env_schema"`
-	Healthcheck  *Healthcheck `yaml:"healthcheck"`
-	CaddySnippet string       `yaml:"caddy_snippet"`
-}
-
-type Healthcheck struct {
-	Path string `yaml:"path"`
-	Port int    `yaml:"port"`
+	Domains      []string `yaml:"domains"`
+	EnvFrom      string   `yaml:"env_from"`
+	EnvSchema    []string `yaml:"env_schema"`
+	Port         int      `yaml:"port"` // traffic port Caddy dials for this service's domains
+	CaddySnippet string   `yaml:"caddy_snippet"`
 }
 
 // ServiceSource is either a local compose file or a remote pointer.
@@ -97,7 +93,7 @@ type serviceFile struct {
 	Domains      []string       `yaml:"domains"`
 	EnvFrom      string         `yaml:"env_from"`
 	EnvSchema    []string       `yaml:"env_schema"`
-	Healthcheck  *Healthcheck   `yaml:"healthcheck"`
+	Port         int            `yaml:"port"`
 	CaddySnippet string         `yaml:"caddy_snippet"`
 	Remote       *RemotePointer `yaml:"remote"`
 }

@@ -103,7 +103,7 @@ reference: [docs/http-api.md](docs/http-api.md).
 
 ```
 hosts.yaml                            # hosts + labels
-services/<name>/<name>.yaml           # service def: host, domains, env, healthcheck
+services/<name>/<name>.yaml           # service def: host, domains, env, port
 services/<name>/docker-compose.yml    # local compose  (XOR with a remote pointer)
 ```
 

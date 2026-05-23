@@ -39,8 +39,8 @@ Owns all decision-making and durable state:
    `DeployRequest` to the host's agent.
 4. **Ledger** (`internal/ledger`) — append-only SQLite store of every deploy;
    the source of truth for "what is running" and "what to roll back to."
-5. **Ingress** (`caddy.go`) — derives routes from service `domains` + healthcheck
-   ports and pushes a full config to Caddy's Admin API on each reconcile.
+5. **Ingress** (`caddy.go`) — derives routes from service `domains` + `port`
+   and pushes a full config to Caddy's Admin API on each reconcile.
 6. **Drift reconciler** (`reconcile.go`) — periodically heals both SHA drift
    (repo changed) and container drift (a container crashed/disappeared).
 

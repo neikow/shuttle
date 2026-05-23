@@ -38,9 +38,7 @@ domains:                  # optional; drive Caddy ingress
 env_from: production      # optional; secrets environment/scope
 env_schema:               # optional; the only secret keys passed to this service
   - WHOAMI_NAME
-healthcheck:              # optional; port also becomes the Caddy upstream
-  path: /
-  port: 80
+port: 80                  # optional; the Caddy upstream port for this service's domains
 caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
   [{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]
 ```
@@ -48,9 +46,8 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 ### Field notes
 
 - **`host`** must reference a declared host, or the sync fails.
-- **`domains` + `healthcheck.port`** — a service with both gets a Caddy route:
-  each domain proxies to `<host>:<healthcheck.port>`. A service missing either is
-  not routed.
+- **`domains` + `port`** — a service with both gets a Caddy route: each domain
+  proxies to `<host>:<port>`. A service missing either is not routed.
 - **`env_schema`** scopes secrets: the orchestrator passes the service only these
   keys (filtered from the configured secrets provider). Without it, no secrets
   flow to the service.

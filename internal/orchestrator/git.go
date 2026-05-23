@@ -30,11 +30,17 @@ type GitSyncer struct {
 	registry *Registry
 	secrets  secrets.Provider
 	caddy    *CaddyClient // optional; when set, routes are pushed on each reconcile
+	// httpsRedirect, when true, makes Caddy serve only :443 and auto-redirect
+	// :80 -> HTTPS (308). When false, :80 is served plaintext (no redirect).
+	httpsRedirect bool
 }
 
 // SetCaddy attaches a Caddy admin client; routes derived from the repo are
 // pushed after each reconcile. Call before serving.
 func (g *GitSyncer) SetCaddy(c *CaddyClient) { g.caddy = c }
+
+// SetHTTPSRedirect toggles HTTP->HTTPS redirect in the generated Caddy config.
+func (g *GitSyncer) SetHTTPSRedirect(v bool) { g.httpsRedirect = v }
 
 func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Registry, sec secrets.Provider) *GitSyncer {
 	if branch == "" {
@@ -140,7 +146,7 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 		slog.Error("derive caddy routes failed", "err", err)
 		return
 	}
-	if err := g.caddy.ApplyRoutes(ctx, routes); err != nil {
+	if err := g.caddy.ApplyRoutes(ctx, routes, g.httpsRedirect); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return
 	}
@@ -152,7 +158,7 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 // Hosts with no routable services, or whose agent is not connected, are skipped.
 func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
 	for _, h := range repo.Hosts {
-		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name)
+		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, g.httpsRedirect)
 		if err != nil {
 			slog.Error("build caddy config failed", "host", h.Name, "err", err)
 			continue

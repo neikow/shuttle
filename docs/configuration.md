@@ -20,6 +20,7 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `repo_dir` | `<data_dir>/repo` | Working copy location. |
 | `webhook_secret` | — | HMAC secret for `POST /webhook`. Required to enable the webhook + reconcile loop. |
 | `caddy_admin_url` | — | Caddy Admin API URL (e.g. `http://caddy:2019`). Empty disables route push. |
+| `https_redirect` | `false` | When true, Caddy serves `:443` only and 308-redirects `:80` → HTTPS. When false, `:80` is served plaintext (no redirect). |
 | `secrets_provider` | `none` | `infisical` or `none`. |
 | `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
 | `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |

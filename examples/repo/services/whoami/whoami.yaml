@@ -4,9 +4,7 @@ domains:
   - whoami.localhost
 env_schema:
   - WHOAMI_NAME
-healthcheck:
-  path: /
-  port: 80
+port: 80
 # caddy_snippet: optional JSON array of Caddy HTTP handler objects, injected
 # ahead of the reverse_proxy for this service's domains (headers, rewrites, auth…).
 # caddy_snippet: '[{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]'
