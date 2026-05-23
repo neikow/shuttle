@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -79,19 +80,28 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 		return nil, fmt.Errorf("body too large")
 	}
 
+	slog.Debug("infisical parse: raw body", "body", string(body), "secret_configured", h.secret != "")
+
 	var p Payload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, fmt.Errorf("decode payload: %w", err)
 	}
 
 	sigHeader := r.Header.Get(SignatureHeader)
+	slog.Debug("infisical parse: decoded", "event", p.Event, "sig_header", sigHeader)
+
 	if h.secret != "" {
 		// Unsigned test pings are accepted without a signature; everything else
 		// requires a valid HMAC.
 		if p.Event != "test" || sigHeader != "" {
+			slog.Debug("infisical parse: verifying signature")
 			if err := VerifySignature(body, h.secret, sigHeader); err != nil {
+				slog.Debug("infisical parse: signature verification failed", "err", err)
 				return nil, fmt.Errorf("signature: %w", err)
 			}
+			slog.Debug("infisical parse: signature ok")
+		} else {
+			slog.Debug("infisical parse: skipping signature (unsigned test ping)")
 		}
 	}
 
