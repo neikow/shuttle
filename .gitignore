@@ -5,6 +5,7 @@
 # Local runtime state
 /data/
 /agent-work/
+/.dev/
 *.db
 *.db-wal
 *.db-shm
