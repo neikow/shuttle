@@ -66,12 +66,12 @@ token, and prints the ready-to-run agent command.`,
 		}
 
 		out := cmd.OutOrStdout()
-		fmt.Fprintf(out, "\nEnrolled host %q (token id %s).\n\nRun the agent with:\n\n  %s\n\n",
+		_, _ = fmt.Fprintf(out, "\nEnrolled host %q (token id %s).\n\nRun the agent with:\n\n  %s\n\n",
 			res.Host, res.ID, res.Command)
 		if res.TLS {
-			fmt.Fprintf(out, "TLS is enabled; if the orchestrator uses a private CA, add: --ca <path-to-ca.crt>\n")
+			_, _ = fmt.Fprintf(out, "TLS is enabled; if the orchestrator uses a private CA, add: --ca <path-to-ca.crt>\n")
 		}
-		fmt.Fprintf(out, "Keep the token secret — it is shown only once. Revoke it from the ledger if leaked.\n")
+		_, _ = fmt.Fprintf(out, "Keep the token secret — it is shown only once. Revoke it from the ledger if leaked.\n")
 		return nil
 	},
 }
@@ -89,7 +89,7 @@ func listHosts(ctx context.Context, client *http.Client, baseURL, bearer string)
 }
 
 func pickHost(out io.Writer, hosts []enrollHost) (string, error) {
-	fmt.Fprintln(out, "Available hosts:")
+	_, _ = fmt.Fprintln(out, "Available hosts:")
 	for i, h := range hosts {
 		label := ""
 		if len(h.Labels) > 0 {
@@ -99,9 +99,9 @@ func pickHost(out io.Writer, hosts []enrollHost) (string, error) {
 			}
 			label = "  (" + strings.Join(pairs, ", ") + ")"
 		}
-		fmt.Fprintf(out, "  %d) %s%s\n", i+1, h.Name, label)
+		_, _ = fmt.Fprintf(out, "  %d) %s%s\n", i+1, h.Name, label)
 	}
-	fmt.Fprint(out, "Select a host [1]: ")
+	_, _ = fmt.Fprint(out, "Select a host [1]: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	line, _ := reader.ReadString('\n')
