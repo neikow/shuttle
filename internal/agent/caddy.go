@@ -106,7 +106,14 @@ func (c *caddySidecar) connectProject(ctx context.Context, composePath, service 
 	if err != nil {
 		return fmt.Errorf("list project containers: %w", err)
 	}
-	for _, id := range strings.Fields(out) {
+	return c.connectContainers(ctx, strings.Fields(out), service)
+}
+
+// connectContainers joins the given container IDs to the shared network with
+// alias = service. Re-connecting an already-attached container is ignored. Used
+// by the rolling-update path to route the new containers before culling the old.
+func (c *caddySidecar) connectContainers(ctx context.Context, ids []string, service string) error {
+	for _, id := range ids {
 		_, err := c.docker(ctx, nil, "network", "connect", "--alias", service, c.opts.Network, id)
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return fmt.Errorf("connect %s to %s: %w", id[:12], c.opts.Network, err)

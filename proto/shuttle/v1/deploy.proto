@@ -19,6 +19,10 @@ message DeployRequest {
   string sha = 3;
   map<string, string> env = 4;
   bytes compose_yaml = 5;
+  // update_policy selects how the agent applies the deploy: "rolling" (default,
+  // zero-downtime: bring up new containers, wait healthy, then remove old) or
+  // "recreate" (compose's stop-then-start). Empty means rolling.
+  string update_policy = 6;
 }
 
 message RollbackRequest {

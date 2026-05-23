@@ -116,6 +116,10 @@ func loadService(rootDir, dir string) (*Service, error) {
 	if raw.SecretPath != "" && !isAbsSecretPath(raw.SecretPath) {
 		return nil, fmt.Errorf("secret_path %q must be absolute (start with '/')", raw.SecretPath)
 	}
+	updatePolicy, err := normalizeUpdatePolicy(raw.UpdatePolicy)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
 	svc := &Service{
 		Name:          raw.Name,
 		Host:          raw.Host,
@@ -126,6 +130,7 @@ func loadService(rootDir, dir string) (*Service, error) {
 		CaddySnippet:  raw.CaddySnippet,
 		DeleteVolumes: deleteVolumes,
 		SecretPath:    raw.SecretPath,
+		UpdatePolicy:  updatePolicy,
 	}
 
 	if raw.Remote != nil && hasCompose {

@@ -27,10 +27,14 @@ type ServiceCheck struct {
 	ServicePath string
 	Schema      []string
 	MissingKeys []string
-	Err         error
+	// Warnings are non-fatal advisories (e.g. a rolling-update service whose
+	// compose can't run two instances at once). They don't fail the check.
+	Warnings []string
+	Err      error
 }
 
 // OK reports whether the service passed: no provider error and no missing keys.
+// Warnings do not fail the check.
 func (s ServiceCheck) OK() bool { return s.Err == nil && len(s.MissingKeys) == 0 }
 
 // OK reports whether every service in the report passed.
@@ -57,9 +61,26 @@ func (g *GitSyncer) Check(ctx context.Context) (*CheckReport, error) {
 	}
 	report := &CheckReport{SHA: sha}
 	for _, svc := range repo.Services {
-		report.Services = append(report.Services, g.checkService(ctx, svc))
+		sc := g.checkService(ctx, svc)
+		sc.Warnings = g.rollingCheck(ctx, svc)
+		report.Services = append(report.Services, sc)
 	}
 	return report, nil
+}
+
+// rollingCheck warns when a service using the rolling update policy has a
+// compose file that cannot run two instances at once. Only rolling services are
+// inspected; a compose that can't be fetched/rendered is skipped (the deploy
+// path reports that error).
+func (g *GitSyncer) rollingCheck(ctx context.Context, svc config.Service) []string {
+	if svc.UpdatePolicy == config.UpdatePolicyRecreate {
+		return nil
+	}
+	composeYAML, err := g.renderCompose(ctx, svc)
+	if err != nil {
+		return nil
+	}
+	return rollingWarnings(composeYAML)
 }
 
 // checkService resolves a service's secrets and records which env_schema keys

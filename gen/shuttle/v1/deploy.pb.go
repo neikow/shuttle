@@ -80,12 +80,16 @@ func (DeployStatus) EnumDescriptor() ([]byte, []int) {
 }
 
 type DeployRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeployId      string                 `protobuf:"bytes,1,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
-	Service       string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
-	Sha           string                 `protobuf:"bytes,3,opt,name=sha,proto3" json:"sha,omitempty"`
-	Env           map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ComposeYaml   []byte                 `protobuf:"bytes,5,opt,name=compose_yaml,json=composeYaml,proto3" json:"compose_yaml,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	DeployId    string                 `protobuf:"bytes,1,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
+	Service     string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	Sha         string                 `protobuf:"bytes,3,opt,name=sha,proto3" json:"sha,omitempty"`
+	Env         map[string]string      `protobuf:"bytes,4,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ComposeYaml []byte                 `protobuf:"bytes,5,opt,name=compose_yaml,json=composeYaml,proto3" json:"compose_yaml,omitempty"`
+	// update_policy selects how the agent applies the deploy: "rolling" (default,
+	// zero-downtime: bring up new containers, wait healthy, then remove old) or
+	// "recreate" (compose's stop-then-start). Empty means rolling.
+	UpdatePolicy  string `protobuf:"bytes,6,opt,name=update_policy,json=updatePolicy,proto3" json:"update_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -153,6 +157,13 @@ func (x *DeployRequest) GetComposeYaml() []byte {
 		return x.ComposeYaml
 	}
 	return nil
+}
+
+func (x *DeployRequest) GetUpdatePolicy() string {
+	if x != nil {
+		return x.UpdatePolicy
+	}
+	return ""
 }
 
 type RollbackRequest struct {
@@ -524,13 +535,14 @@ var File_shuttle_v1_deploy_proto protoreflect.FileDescriptor
 const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"\n" +
 	"\x17shuttle/v1/deploy.proto\x12\n" +
-	"shuttle.v1\"\xe9\x01\n" +
+	"shuttle.v1\"\x8e\x02\n" +
 	"\rDeployRequest\x12\x1b\n" +
 	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12\x10\n" +
 	"\x03sha\x18\x03 \x01(\tR\x03sha\x124\n" +
 	"\x03env\x18\x04 \x03(\v2\".shuttle.v1.DeployRequest.EnvEntryR\x03env\x12!\n" +
-	"\fcompose_yaml\x18\x05 \x01(\fR\vcomposeYaml\x1a6\n" +
+	"\fcompose_yaml\x18\x05 \x01(\fR\vcomposeYaml\x12#\n" +
+	"\rupdate_policy\x18\x06 \x01(\tR\fupdatePolicy\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfa\x01\n" +

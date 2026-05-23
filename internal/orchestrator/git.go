@@ -420,11 +420,12 @@ func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step,
 	cmd := &shuttlev1.OrchestratorCommand{
 		Payload: &shuttlev1.OrchestratorCommand_Deploy{
 			Deploy: &shuttlev1.DeployRequest{
-				DeployId:    deployID,
-				Service:     step.Service,
-				Sha:         step.SHA,
-				Env:         env,
-				ComposeYaml: composeYAML,
+				DeployId:     deployID,
+				Service:      step.Service,
+				Sha:          step.SHA,
+				Env:          env,
+				ComposeYaml:  composeYAML,
+				UpdatePolicy: svc.UpdatePolicy,
 			},
 		},
 	}
