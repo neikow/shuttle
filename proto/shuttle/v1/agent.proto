@@ -22,6 +22,7 @@ message OrchestratorCommand {
     DeployRequest deploy = 1;
     RollbackRequest rollback = 2;
     CaddyConfigRequest caddy_config = 3;
+    TeardownRequest teardown = 4;
   }
 }
 

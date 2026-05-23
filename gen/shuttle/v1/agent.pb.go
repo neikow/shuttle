@@ -144,6 +144,7 @@ type OrchestratorCommand struct {
 	//	*OrchestratorCommand_Deploy
 	//	*OrchestratorCommand_Rollback
 	//	*OrchestratorCommand_CaddyConfig
+	//	*OrchestratorCommand_Teardown
 	Payload       isOrchestratorCommand_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -213,6 +214,15 @@ func (x *OrchestratorCommand) GetCaddyConfig() *CaddyConfigRequest {
 	return nil
 }
 
+func (x *OrchestratorCommand) GetTeardown() *TeardownRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*OrchestratorCommand_Teardown); ok {
+			return x.Teardown
+		}
+	}
+	return nil
+}
+
 type isOrchestratorCommand_Payload interface {
 	isOrchestratorCommand_Payload()
 }
@@ -229,11 +239,17 @@ type OrchestratorCommand_CaddyConfig struct {
 	CaddyConfig *CaddyConfigRequest `protobuf:"bytes,3,opt,name=caddy_config,json=caddyConfig,proto3,oneof"`
 }
 
+type OrchestratorCommand_Teardown struct {
+	Teardown *TeardownRequest `protobuf:"bytes,4,opt,name=teardown,proto3,oneof"`
+}
+
 func (*OrchestratorCommand_Deploy) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_Rollback) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_CaddyConfig) isOrchestratorCommand_Payload() {}
+
+func (*OrchestratorCommand_Teardown) isOrchestratorCommand_Payload() {}
 
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -419,11 +435,12 @@ const file_shuttle_v1_agent_proto_rawDesc = "" +
 	"\theartbeat\x18\x02 \x01(\v2\x15.shuttle.v1.HeartbeatH\x00R\theartbeat\x12A\n" +
 	"\rdeploy_result\x18\x03 \x01(\v2\x1a.shuttle.v1.DeployResponseH\x00R\fdeployResult\x12E\n" +
 	"\x0fcontainer_state\x18\x04 \x01(\v2\x1a.shuttle.v1.ContainerStateH\x00R\x0econtainerStateB\t\n" +
-	"\apayload\"\xd5\x01\n" +
+	"\apayload\"\x90\x02\n" +
 	"\x13OrchestratorCommand\x123\n" +
 	"\x06deploy\x18\x01 \x01(\v2\x19.shuttle.v1.DeployRequestH\x00R\x06deploy\x129\n" +
 	"\brollback\x18\x02 \x01(\v2\x1b.shuttle.v1.RollbackRequestH\x00R\brollback\x12C\n" +
-	"\fcaddy_config\x18\x03 \x01(\v2\x1e.shuttle.v1.CaddyConfigRequestH\x00R\vcaddyConfigB\t\n" +
+	"\fcaddy_config\x18\x03 \x01(\v2\x1e.shuttle.v1.CaddyConfigRequestH\x00R\vcaddyConfig\x129\n" +
+	"\bteardown\x18\x04 \x01(\v2\x1b.shuttle.v1.TeardownRequestH\x00R\bteardownB\t\n" +
 	"\apayload\"J\n" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
@@ -463,6 +480,7 @@ var file_shuttle_v1_agent_proto_goTypes = []any{
 	(*DeployRequest)(nil),       // 6: shuttle.v1.DeployRequest
 	(*RollbackRequest)(nil),     // 7: shuttle.v1.RollbackRequest
 	(*CaddyConfigRequest)(nil),  // 8: shuttle.v1.CaddyConfigRequest
+	(*TeardownRequest)(nil),     // 9: shuttle.v1.TeardownRequest
 }
 var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	2, // 0: shuttle.v1.AgentEvent.register:type_name -> shuttle.v1.RegisterRequest
@@ -472,13 +490,14 @@ var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	6, // 4: shuttle.v1.OrchestratorCommand.deploy:type_name -> shuttle.v1.DeployRequest
 	7, // 5: shuttle.v1.OrchestratorCommand.rollback:type_name -> shuttle.v1.RollbackRequest
 	8, // 6: shuttle.v1.OrchestratorCommand.caddy_config:type_name -> shuttle.v1.CaddyConfigRequest
-	0, // 7: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
-	1, // 8: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
-	8, // [8:9] is the sub-list for method output_type
-	7, // [7:8] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	9, // 7: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
+	0, // 8: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
+	1, // 9: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
+	9, // [9:10] is the sub-list for method output_type
+	8, // [8:9] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_agent_proto_init() }
@@ -497,6 +516,7 @@ func file_shuttle_v1_agent_proto_init() {
 		(*OrchestratorCommand_Deploy)(nil),
 		(*OrchestratorCommand_Rollback)(nil),
 		(*OrchestratorCommand_CaddyConfig)(nil),
+		(*OrchestratorCommand_Teardown)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

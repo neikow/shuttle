@@ -32,7 +32,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`). |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
@@ -76,6 +76,15 @@ compose workspace, so the report/heal loop resumes for services deployed before
 the restart (recorded SHA is unknown post-restart and left empty; container
 drift keys on status, not SHA).
 
+**Service removal:** every `Reconcile` marks the repo's services present in
+`service_lifecycle`; a service that was present but is now absent from the repo
+flips to removed. For each removed service whose containers aren't yet down,
+`reconcileRemovals` sends a `TeardownRequest` → agent runs `docker compose down`
+against the persisted workspace and stops tracking it. Teardown is idempotent
+and retried until `registry.Send` succeeds (so an offline host heals when it
+reconnects). Volumes are **kept** here — their deletion is governed separately
+by each service's `delete_volumes` policy (see below).
+
 ## Design decisions & rationale
 
 These are deliberate. Don't reverse them without updating this file.
@@ -92,6 +101,14 @@ These are deliberate. Don't reverse them without updating this file.
 - **SQLite via `modernc.org/sqlite` (pure Go, no CGO), WAL mode.** Single-file
   ledger, static binary, no external DB to operate. The ledger is *append-only*:
   rollback is "redeploy an older recorded SHA," not "mutate state."
+- **Service lifecycle is mutable state, separate from the append-only ledger.**
+  The `deploys` table can't express "no longer desired," and a removed service's
+  config (e.g. its `delete_volumes` policy) is gone from the repo. So a small
+  mutable `service_lifecycle` table records, per service: present/removed, the
+  removal/teardown timestamps, and the last-known volume policy — captured while
+  the service is still in the repo so it survives the removal. Teardown is
+  idempotent (re-`docker compose down` is harmless), so the orchestrator marks
+  progress on `registry.Send` success and retries offline hosts next tick.
 - **git via shell-out, not a Go git library.** Mirrors the agent's
   `docker compose` shell-out and avoids a heavy `go-git` dependency. The git CLI
   is already a hard runtime requirement.

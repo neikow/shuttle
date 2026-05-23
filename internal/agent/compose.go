@@ -37,6 +37,11 @@ type Driver interface {
 	// Status returns a coarse aggregate status ("running", "exited", ...) for the
 	// service's compose project in workDir.
 	Status(ctx context.Context, service, workDir string) (string, error)
+	// Down stops and removes the service's compose project, running against the
+	// compose file already on disk in workDir. removeVolumes adds --volumes so
+	// named volumes are deleted too. A missing workspace is treated as success
+	// (nothing to tear down).
+	Down(ctx context.Context, service, workDir string, removeVolumes bool) (<-chan LogLine, error)
 }
 
 // ComposeDriver shells out to the Docker Compose CLI. The executable and the
@@ -120,7 +125,45 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 
 	cmd := exec.CommandContext(ctx, d.bin, d.composeArgs(composePath, envFile, subCmd...)...)
 	cmd.Dir = workDir
+	return streamCommand(cmd)
+}
 
+// Down stops and removes the service's compose project using the compose file
+// already written to workDir by a prior Apply. It does not render or write any
+// files. A missing workspace means there is nothing to tear down, reported as a
+// closed log channel with no error.
+func (d *ComposeDriver) Down(ctx context.Context, service, workDir string, removeVolumes bool) (<-chan LogLine, error) {
+	workDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workdir: %w", err)
+	}
+	composePath := filepath.Join(workDir, "docker-compose.yml")
+	if _, err := os.Stat(composePath); err != nil {
+		// No workspace on disk: the project was never deployed here or is
+		// already gone. Nothing to do.
+		lines := make(chan LogLine)
+		close(lines)
+		return lines, nil
+	}
+
+	sub := []string{"down", "--remove-orphans"}
+	if removeVolumes {
+		sub = append(sub, "--volumes")
+	}
+	args := append([]string{}, d.compose...)
+	args = append(args, "-f", composePath)
+	args = append(args, sub...)
+	cmd := exec.CommandContext(ctx, d.bin, args...)
+	cmd.Dir = workDir
+	return streamCommand(cmd)
+}
+
+// streamCommand starts cmd and streams its stdout/stderr line-by-line on the
+// returned channel, which closes when the command exits. A non-zero exit is
+// surfaced as a final "[shuttle] compose error" stderr line (matched by
+// containsError) rather than a returned error, so callers see it in the log
+// stream alongside the command output.
+func streamCommand(cmd *exec.Cmd) (<-chan LogLine, error) {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -129,17 +172,14 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 	if err != nil {
 		return nil, err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("docker compose start: %w", err)
 	}
 
 	lines := make(chan LogLine, 64)
-
 	go func() {
 		defer close(lines)
 		done := make(chan struct{}, 2)
-
 		drain := func(scanner *bufio.Scanner, stream string) {
 			for scanner.Scan() {
 				lines <- LogLine{
@@ -150,10 +190,8 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 			}
 			done <- struct{}{}
 		}
-
 		go drain(bufio.NewScanner(stdoutPipe), "stdout")
 		go drain(bufio.NewScanner(stderrPipe), "stderr")
-
 		<-done
 		<-done
 		if err := cmd.Wait(); err != nil {
@@ -164,7 +202,6 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 			}
 		}
 	}()
-
 	return lines, nil
 }
 

@@ -42,6 +42,16 @@ message DeployResponse {
   string error = 4;
 }
 
+// TeardownRequest tells an agent to bring a service down. The agent runs
+// `docker compose down` against the service's persisted compose workspace.
+// remove_volumes adds `--volumes` (used by the volume-purge path); when false,
+// named volumes are kept so the data survives until an explicit purge.
+message TeardownRequest {
+  string deploy_id = 1;
+  string service = 2;
+  bool remove_volumes = 3;
+}
+
 message CaddyConfigRequest {
   string config_json = 1;
 }

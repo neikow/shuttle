@@ -40,6 +40,14 @@ func (s *deployedSet) put(service, workDir, sha string) {
 	s.mu.Unlock()
 }
 
+// remove stops tracking a service, so the state-report loop no longer reports
+// it. Called after a teardown brings the service down.
+func (s *deployedSet) remove(service string) {
+	s.mu.Lock()
+	delete(s.m, service)
+	s.mu.Unlock()
+}
+
 // seedFromDisk reconciles the in-memory set with reality after a restart: the
 // agent loses its deployed map on process exit, but the compose workspaces it
 // wrote persist under baseDir as <baseDir>/<service>/docker-compose.yml. Each
@@ -276,6 +284,8 @@ func handleCommand(
 		}
 		slog.Info("caddy config applied")
 		return nil
+	case *shuttlev1.OrchestratorCommand_Teardown:
+		return executeTeardown(ctx, cfg, stream, driver, deployed, payload.Teardown)
 	default:
 		slog.Warn("unknown command type", "type", fmt.Sprintf("%T", cmd.Payload))
 	}
@@ -315,6 +325,27 @@ func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 	}
 	res := streamDeployResult(stream, req.DeployId, logCh, err)
 	connectToCaddy(ctx, caddy, workDir, req.Service, res)
+	return res
+}
+
+// executeTeardown brings a removed service down via the compose workspace on
+// disk and stops tracking it. With remove_volumes set, named volumes are deleted
+// and the workspace directory is removed; otherwise the workspace is kept so a
+// later volume purge can still run `down --volumes` against it.
+func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.TeardownRequest) error {
+	slog.Info("executing teardown", "deploy_id", req.DeployId, "service", req.Service, "remove_volumes", req.RemoveVolumes)
+	workDir := filepath.Join(cfg.WorkDir, req.Service)
+
+	logCh, err := driver.Down(ctx, req.Service, workDir, req.RemoveVolumes)
+	if err == nil {
+		deployed.remove(req.Service)
+	}
+	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	if res == nil && req.RemoveVolumes {
+		if rmErr := os.RemoveAll(workDir); rmErr != nil {
+			slog.Warn("remove workspace after teardown failed", "service", req.Service, "err", rmErr)
+		}
+	}
 	return res
 }
 

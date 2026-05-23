@@ -66,7 +66,7 @@ arrives on the stream per deploy.
 - **Up (agent → orchestrator):** `AgentEvent` = register | heartbeat |
   deploy_result | container_state.
 - **Down (orchestrator → agent):** `OrchestratorCommand` = deploy | rollback |
-  caddy_config.
+  caddy_config | teardown.
 
 Because the **agent initiates** the connection, managed hosts expose no inbound
 ports. The orchestrator's `Registry` (`registry.go`) tracks live streams by host
@@ -82,6 +82,13 @@ state mutation; it is *redeploying an older recorded SHA*
 (`RollbackTarget` → `DeployAtSHA`). This makes history immutable and rollback
 auditable.
 
+The append-only `deploys` table can't express "no longer desired," so a small
+mutable `service_lifecycle` table tracks whether each service is still in the
+repo. When a service disappears from the repo, `reconcileRemovals` flips it to
+removed and dispatches a `teardown` (the agent runs `docker compose down`
+against the persisted workspace). Named volumes are kept until an explicit
+volume-deletion policy says otherwise.
+
 ## Deploy triggers
 
 | Trigger | Path |
@@ -90,6 +97,7 @@ auditable.
 | Manual | `POST /deploy/{service}` → `DeployAtSHA` at HEAD |
 | Rollback | `POST /rollback` → `RollbackTarget` → `DeployAtSHA` |
 | Drift | `DriftReconciler` tick → `Reconcile` / `ForceDeploy` |
+| Removal | service gone from repo → `reconcileRemovals` → `teardown` (keeps volumes) |
 
 ## Security model
 
