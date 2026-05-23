@@ -527,12 +527,17 @@ func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[stri
 		return all, nil
 	}
 	env := make(map[string]string, len(svc.EnvSchema))
+	var missing []string
 	for _, key := range svc.EnvSchema {
 		if v, ok := all[key]; ok {
 			env[key] = v
 		} else {
-			slog.Warn("env key declared in schema but not in secrets", "service", svc.Name, "key", key)
+			missing = append(missing, key)
 		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("service %q: env keys declared in env_schema but missing from secrets (base %q, service %q): %s",
+			svc.Name, basePath, svcPath, strings.Join(missing, ", "))
 	}
 	return env, nil
 }

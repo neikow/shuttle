@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/neikow/shuttle/internal/config"
@@ -68,6 +69,27 @@ func TestRenderEnv_noTemplateUsesBaseOnly(t *testing.T) {
 	}
 	if len(env) != 1 || env["ONLY"] != "base" {
 		t.Fatalf("env = %v, want only base secrets", env)
+	}
+}
+
+func TestRenderEnv_missingSchemaKeyErrors(t *testing.T) {
+	sec := secrets.NewFake(nil)
+	sec.SetScope(secrets.Scope{Env: "prod", Path: "/shared"}, map[string]string{"API_KEY": "k"})
+
+	syncer := newSecretsSyncer(t, sec, "/shared", "")
+	env, err := syncer.renderEnv(context.Background(), config.Service{
+		Name: "api", EnvFrom: "prod", EnvSchema: []string{"API_KEY", "DB_URL", "MISSING"},
+	})
+	if err == nil {
+		t.Fatalf("want error for missing schema keys, got env %v", env)
+	}
+	for _, want := range []string{"DB_URL", "MISSING"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should name missing key %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "API_KEY") {
+		t.Errorf("error %q should not name present key API_KEY", err)
 	}
 }
 
