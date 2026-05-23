@@ -67,6 +67,40 @@ func TestParse_missingSignature(t *testing.T) {
 	}
 }
 
+func TestParse_unsignedTestPing(t *testing.T) {
+	// Infisical test pings arrive without a signature; must be accepted.
+	r := httptest.NewRequest("POST", "/x", strings.NewReader(`{"event":"test"}`))
+	p, err := NewHandler("whsec").Parse(r)
+	if err != nil {
+		t.Fatalf("unsigned test ping rejected: %v", err)
+	}
+	if p.Event != "test" {
+		t.Errorf("event = %q, want test", p.Event)
+	}
+}
+
+func TestParse_signedTestPing(t *testing.T) {
+	// A signed test ping must still verify correctly.
+	secret := "whsec"
+	body := `{"event":"test"}`
+	sig := ComputeHeader("1700000000", []byte(body), secret)
+	r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	r.Header.Set(SignatureHeader, sig)
+	if _, err := NewHandler(secret).Parse(r); err != nil {
+		t.Fatalf("signed test ping rejected: %v", err)
+	}
+}
+
+func TestParse_badSignatureTestPing(t *testing.T) {
+	// A present-but-wrong signature on a test ping must still be rejected.
+	body := `{"event":"test"}`
+	r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	r.Header.Set(SignatureHeader, "t=1,v1=deadbeef")
+	if _, err := NewHandler("whsec").Parse(r); err == nil {
+		t.Fatal("want signature error for bad-signed test ping")
+	}
+}
+
 func TestVerifySignature_separators(t *testing.T) {
 	body := []byte(`{"a":1}`)
 	secret := "s"
