@@ -55,6 +55,8 @@ A thin executor (`internal/agent`):
 - Streams logs and a final `DeployResponse` back.
 - Sends heartbeats (~30s) and `ContainerState` so the orchestrator can detect
   drift.
+- Manages a **Caddy sidecar** container on a shared Docker network; the
+  orchestrator pushes route config via `CaddyConfigRequest` on each reconcile.
 
 The agent holds no durable state and no secrets at rest — everything it needs
 arrives on the stream per deploy.

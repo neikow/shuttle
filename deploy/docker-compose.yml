@@ -1,12 +1,11 @@
-# Local dev stack: orchestrator + agent. Ingress (Caddy) is run by the agent as
-# a managed sidecar container, not declared here.
+# Local dev stack: orchestrator + agent. The agent automatically runs a Caddy
+# sidecar on a shared `shuttle` docker network and publishes :80/:443.
 # Usage: docker compose -f deploy/docker-compose.yml up --build
 #
 # The orchestrator's HTTP control plane is exposed on :8080 and gRPC on :9090.
-# The agent dials the orchestrator over an INSECURE gRPC channel by default and,
-# with --caddy, runs a Caddy sidecar on a shared `shuttle` docker network and
-# publishes :80/:443. The orchestrator pushes this host's routes to it once git
-# sync is configured (set repo_url + webhook_secret in config.example.yml).
+# The agent dials the orchestrator over an INSECURE gRPC channel by default.
+# The orchestrator pushes this host's routes to Caddy once git sync is
+# configured (set repo_url + webhook_secret in config.example.yml).
 #
 # For mutual-TLS, run `make certs` then layer the override:
 #   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.mtls.yml up --build
@@ -36,7 +35,6 @@ services:
       - "web1"
       - "--work-dir"
       - "/var/lib/shuttle-agent"
-      - "--caddy" # run + manage a Caddy ingress sidecar for this host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock # run compose deploys + the Caddy sidecar
       - agent-work:/var/lib/shuttle-agent
