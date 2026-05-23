@@ -12,7 +12,7 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd)
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

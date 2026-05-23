@@ -104,10 +104,17 @@ func (d *DriftReconciler) Run(ctx context.Context) {
 }
 
 func (d *DriftReconciler) tick(ctx context.Context) {
-	// SHA drift: new commits or previously-failed deploys.
+	// SHA drift: new commits or previously-failed deploys. Also detects services
+	// removed from the repo and tears them down (reconcileRemovals).
 	if _, err := d.syncer.Reconcile(ctx, nil); err != nil {
 		slog.Error("reconcile (sha drift) failed", "err", err)
 		return
+	}
+	// Volume purge: delete volumes of removed services whose deadline passed.
+	if purged, err := d.syncer.PurgeExpiredVolumes(ctx); err != nil {
+		slog.Error("purge expired volumes failed", "err", err)
+	} else if len(purged) > 0 {
+		slog.Info("purged volumes of removed services", "services", purged)
 	}
 	// Container drift: desired services whose containers have crashed.
 	repo, err := config.Load(d.syncer.LocalDir())

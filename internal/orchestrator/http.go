@@ -33,6 +33,19 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.webhook = h
 	s.syncer = syncer
 	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
+	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
+}
+
+// handlePrune force-deletes the volumes of every removed service that still has
+// them (the "manual" delete_volumes policy, and durations not yet elapsed).
+func (s *HTTPServer) handlePrune(w http.ResponseWriter, r *http.Request) {
+	pruned, err := s.syncer.PruneVolumes(r.Context())
+	if err != nil {
+		http.Error(w, "prune: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"pruned": pruned})
 }
 
 func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPServer {

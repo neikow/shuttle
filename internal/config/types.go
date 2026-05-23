@@ -60,6 +60,10 @@ type Service struct {
 	EnvSchema    []string `yaml:"env_schema"`
 	Port         int      `yaml:"port"` // traffic port Caddy dials for this service's domains
 	CaddySnippet string   `yaml:"caddy_snippet"`
+	// DeleteVolumes is the canonical volume-deletion policy when this service is
+	// removed from the repo: "immediate", "manual" (default), or a duration
+	// string (e.g. "7 days") after which volumes are deleted.
+	DeleteVolumes string
 }
 
 // ServiceSource is either a local compose file or a remote pointer.
@@ -88,12 +92,13 @@ type hostsFile struct {
 }
 
 type serviceFile struct {
-	Name         string         `yaml:"name"`
-	Host         string         `yaml:"host"`
-	Domains      []string       `yaml:"domains"`
-	EnvFrom      string         `yaml:"env_from"`
-	EnvSchema    []string       `yaml:"env_schema"`
-	Port         int            `yaml:"port"`
-	CaddySnippet string         `yaml:"caddy_snippet"`
-	Remote       *RemotePointer `yaml:"remote"`
+	Name          string              `yaml:"name"`
+	Host          string              `yaml:"host"`
+	Domains       []string            `yaml:"domains"`
+	EnvFrom       string              `yaml:"env_from"`
+	EnvSchema     []string            `yaml:"env_schema"`
+	Port          int                 `yaml:"port"`
+	CaddySnippet  string              `yaml:"caddy_snippet"`
+	DeleteVolumes deleteVolumesPolicy `yaml:"delete_volumes"`
+	Remote        *RemotePointer      `yaml:"remote"`
 }

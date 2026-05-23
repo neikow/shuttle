@@ -103,14 +103,19 @@ func loadService(rootDir, dir string) (*Service, error) {
 		return nil, fmt.Errorf("decode %s: %w", svcFile, err)
 	}
 
+	deleteVolumes := string(raw.DeleteVolumes)
+	if deleteVolumes == "" {
+		deleteVolumes = DeleteVolumesManual
+	}
 	svc := &Service{
-		Name:         raw.Name,
-		Host:         raw.Host,
-		Domains:      raw.Domains,
-		EnvFrom:      raw.EnvFrom,
-		EnvSchema:    raw.EnvSchema,
-		Port:         raw.Port,
-		CaddySnippet: raw.CaddySnippet,
+		Name:          raw.Name,
+		Host:          raw.Host,
+		Domains:       raw.Domains,
+		EnvFrom:       raw.EnvFrom,
+		EnvSchema:     raw.EnvSchema,
+		Port:          raw.Port,
+		CaddySnippet:  raw.CaddySnippet,
+		DeleteVolumes: deleteVolumes,
 	}
 
 	if raw.Remote != nil && hasCompose {

@@ -92,6 +92,7 @@ shuttle agent --driver synology --orchestrator … --host nas1
 | `GET  /hosts`            | bearer | List enrollable hosts (token auth)       |
 | `POST /enroll`           | bearer | Mint an agent enrollment token           |
 | `POST /webhook`          | HMAC   | Git push trigger (signed, replay-guarded)|
+| `POST /prune`            | bearer | Delete kept volumes of removed services  |
 
 Bearer auth uses the static `bearer_token` from config. Webhooks verify an
 `X-Hub-Signature-256` HMAC and reject replays. Agents authenticate with either a
