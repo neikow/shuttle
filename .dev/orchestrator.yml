@@ -1,0 +1,26 @@
+# Template for `make dev-repo`. The __PLACEHOLDERS__ are substituted with
+# absolute paths when the target writes .dev/orchestrator.yml. Do not run this
+# file directly.
+bearer_token: "test-bearer"
+grpc_addr: ":9099"
+http_addr: ":8099"
+data_dir: /Users/vitaly/Documents/dev/projects/shuttle/.dev/data
+
+# Local IaC repo scaffolded by the target. Edit it (hosts.yaml, services/) and
+# commit; the drift reconciler pulls + reconciles within ~60s.
+repo_url: "file:///Users/vitaly/Documents/dev/projects/shuttle/.dev/iac"
+repo_branch: "main"
+webhook_secret: "dev-webhook-secret"
+
+# No Caddy in this loop; set to http://localhost:2019 if you run one.
+caddy_admin_url: ""
+secrets_provider: "none"
+
+# Server TLS + token auth: the agent verifies the orchestrator and authenticates
+# with a token from `shuttle enroll` (no per-agent certs). Certs come from
+# `make certs`.
+agent_token_auth: true
+advertise_addr: "127.0.0.1:9099"
+advertise_server_name: "orchestrator"
+grpc_tls_cert: /Users/vitaly/Documents/dev/projects/shuttle/certs/orchestrator.crt
+grpc_tls_key: /Users/vitaly/Documents/dev/projects/shuttle/certs/orchestrator.key

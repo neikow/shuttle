@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -161,17 +162,24 @@ func (d *ComposeDriver) runCompose(ctx context.Context, p ApplyParams, subCmd []
 	return lines, nil
 }
 
-// Status runs `docker compose ps` and returns an aggregate status for the
+// Status runs `docker compose ps -a` and returns an aggregate status for the
 // project: "running" if any container is up, otherwise the first reported
-// state, or "stopped" when nothing is listed.
+// state (e.g. "exited" for a crashed container), or "stopped" when nothing is
+// listed. The -a flag includes stopped containers so the drift reconciler can
+// see a crash rather than an empty list.
 func (d *ComposeDriver) Status(ctx context.Context, service, workDir string) (string, error) {
 	composePath := filepath.Join(workDir, "docker-compose.yml")
 	args := append([]string{}, d.compose...)
-	args = append(args, "-f", composePath, "ps", "--format", "{{.State}}")
+	args = append(args, "-f", composePath, "ps", "-a", "--format", "{{.State}}")
 	cmd := exec.CommandContext(ctx, d.bin, args...)
 	cmd.Dir = workDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("docker compose ps: %w: %s", err, msg)
+		}
 		return "", fmt.Errorf("docker compose ps: %w", err)
 	}
 	states := strings.Fields(strings.TrimSpace(string(out)))
