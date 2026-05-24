@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,6 +29,18 @@ func LoadOrchestratorConfig(path string) (*OrchestratorConfig, error) {
 	}
 	if cfg.SecretsPathTemplate != "" && !isAbsSecretPath(cfg.SecretsPathTemplate) {
 		return nil, fmt.Errorf("%s: secrets_path_template %q must be absolute", path, cfg.SecretsPathTemplate)
+	}
+	for i, gc := range cfg.GitCredentials {
+		if gc.RepoPrefix == "" {
+			return nil, fmt.Errorf("%s: git_credentials[%d]: repo_prefix is required", path, i)
+		}
+		if gc.InfisicalKey == "" {
+			return nil, fmt.Errorf("%s: git_credentials[%d]: infisical_key is required", path, i)
+		}
+		if strings.HasPrefix(gc.RepoPrefix, "https://") {
+			return nil, fmt.Errorf("%s: git_credentials[%d]: repo_prefix must not include the scheme (got %q; use %q)",
+				path, i, gc.RepoPrefix, strings.TrimPrefix(gc.RepoPrefix, "https://"))
+		}
 	}
 	return &cfg, nil
 }

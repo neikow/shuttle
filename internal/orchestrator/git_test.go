@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/secrets"
 )
@@ -225,5 +227,82 @@ func TestGitSyncer_Reconcile(t *testing.T) {
 	}
 	if len(again) != 0 {
 		t.Fatalf("expected no dispatch on unchanged SHA, got %d", len(again))
+	}
+}
+
+func TestGitSyncer_rewriteURL(t *testing.T) {
+	cred := config.GitCredential{
+		RepoPrefix:   "github.com/myorg",
+		InfisicalKey: "GITHUB_TOKEN",
+	}
+
+	tests := []struct {
+		name    string
+		syncer  func() *GitSyncer
+		rawURL  string
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "matching prefix injects token",
+			syncer: func() *GitSyncer {
+				sec := secrets.NewFake(map[string]string{"GITHUB_TOKEN": "tok123"})
+				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
+				return g
+			},
+			rawURL: "https://github.com/myorg/repo.git",
+			want:   "https://oauth2:tok123@github.com/myorg/repo.git",
+		},
+		{
+			name: "no matching prefix returns URL unchanged",
+			syncer: func() *GitSyncer {
+				sec := secrets.NewFake(map[string]string{"GITHUB_TOKEN": "tok123"})
+				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
+				return g
+			},
+			rawURL: "https://gitlab.com/other/repo.git",
+			want:   "https://gitlab.com/other/repo.git",
+		},
+		{
+			name: "nil secrets provider returns URL unchanged",
+			syncer: func() *GitSyncer {
+				return &GitSyncer{secrets: nil, gitCreds: []config.GitCredential{cred}}
+			},
+			rawURL: "https://github.com/myorg/repo.git",
+			want:   "https://github.com/myorg/repo.git",
+		},
+		{
+			name: "secrets provider returns ErrNotFound",
+			syncer: func() *GitSyncer {
+				sec := secrets.NewFake(nil) // no keys seeded
+				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
+				return g
+			},
+			rawURL:  "https://github.com/myorg/repo.git",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := tt.syncer()
+			got, err := g.rewriteURL(context.Background(), tt.rawURL)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				var notFound secrets.ErrNotFound
+				if !errors.As(err, &notFound) {
+					t.Fatalf("expected ErrNotFound wrapped in error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("rewriteURL = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

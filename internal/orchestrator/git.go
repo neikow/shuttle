@@ -39,6 +39,7 @@ type GitSyncer struct {
 	// renderEnv via config.ResolveSecretsPaths.
 	secretsBasePath     string
 	secretsPathTemplate string
+	gitCreds            []config.GitCredential
 }
 
 // SetCaddy attaches a Caddy admin client; routes derived from the repo are
@@ -53,6 +54,33 @@ func (g *GitSyncer) SetHTTPSRedirect(v bool) { g.httpsRedirect = v }
 func (g *GitSyncer) SetSecretsPaths(basePath, template string) {
 	g.secretsBasePath = basePath
 	g.secretsPathTemplate = template
+}
+
+// SetGitCredentials attaches per-host/org HTTPS token credentials used to
+// authenticate git operations against private repos. Call before serving.
+func (g *GitSyncer) SetGitCredentials(creds []config.GitCredential) {
+	g.gitCreds = creds
+}
+
+// rewriteURL injects an HTTPS token into rawURL if a matching GitCredential
+// is configured. Returns rawURL unchanged if no match or no secrets provider.
+func (g *GitSyncer) rewriteURL(ctx context.Context, rawURL string) (string, error) {
+	if g.secrets == nil || len(g.gitCreds) == 0 {
+		return rawURL, nil
+	}
+	for _, cred := range g.gitCreds {
+		prefix := "https://" + cred.RepoPrefix
+		if !strings.HasPrefix(rawURL, prefix) {
+			continue
+		}
+		token, err := g.secrets.Get(ctx, secrets.Scope{Env: cred.InfisicalEnv, Path: cred.InfisicalPath}, cred.InfisicalKey)
+		if err != nil {
+			return "", fmt.Errorf("git credential for %q: %w", cred.RepoPrefix, err)
+		}
+		rest := strings.TrimPrefix(rawURL, "https://")
+		return "https://oauth2:" + token + "@" + rest, nil
+	}
+	return rawURL, nil
 }
 
 func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Registry, sec secrets.Provider) *GitSyncer {
@@ -72,8 +100,12 @@ func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Re
 // Sync clones the repo if absent, otherwise fetches and hard-resets to the tip
 // of the configured branch. Returns the checked-out commit SHA.
 func (g *GitSyncer) Sync(ctx context.Context) (string, error) {
+	repoURL, err := g.rewriteURL(ctx, g.repoURL)
+	if err != nil {
+		return "", fmt.Errorf("git credential: %w", err)
+	}
 	if _, err := os.Stat(filepath.Join(g.dir, ".git")); errors.Is(err, os.ErrNotExist) {
-		if err := g.git(ctx, "", "clone", "--branch", g.branch, "--single-branch", g.repoURL, g.dir); err != nil {
+		if err := g.git(ctx, "", "clone", "--branch", g.branch, "--single-branch", repoURL, g.dir); err != nil {
 			return "", fmt.Errorf("clone: %w", err)
 		}
 	} else {
@@ -358,7 +390,9 @@ func (g *GitSyncer) Hosts(ctx context.Context) ([]config.Host, error) {
 // The working copy is left detached at sha; the next Reconcile resets it to the
 // branch tip.
 func (g *GitSyncer) DeployAtSHA(ctx context.Context, service, sha string, triggeredBy ledger.TriggeredBy) (deployID, host string, err error) {
-	// Ensure the repo (and its history) is present.
+	// Ensure the repo (and its history) is present. Sync handles credential
+	// injection for the initial clone; for an existing clone the remote URL
+	// already embeds the token set at clone time.
 	if _, statErr := os.Stat(filepath.Join(g.dir, ".git")); errors.Is(statErr, os.ErrNotExist) {
 		if _, syncErr := g.Sync(ctx); syncErr != nil {
 			return "", "", syncErr
@@ -462,12 +496,16 @@ func (g *GitSyncer) fetchRemoteCompose(ctx context.Context, rp config.RemotePoin
 	if branch == "" {
 		branch = "main"
 	}
+	repoURL, err := g.rewriteURL(ctx, rp.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("git credential: %w", err)
+	}
 	cacheDir := filepath.Join(g.dir+".remotes", sanitizeRepoKey(rp.Repo))
 	if _, err := os.Stat(filepath.Join(cacheDir, ".git")); errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir remote cache: %w", err)
 		}
-		if err := g.git(ctx, "", "clone", "--branch", branch, "--single-branch", "--depth", "1", rp.Repo, cacheDir); err != nil {
+		if err := g.git(ctx, "", "clone", "--branch", branch, "--single-branch", "--depth", "1", repoURL, cacheDir); err != nil {
 			return nil, fmt.Errorf("clone remote %s: %w", rp.Repo, err)
 		}
 	} else {
