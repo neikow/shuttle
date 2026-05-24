@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -30,6 +32,11 @@ type HTTPServer struct {
 	infisical         *infisical.Handler
 	infisicalDebounce *changeDebouncer
 	infisicalDefEnv   string // default env for services with no env_from
+
+	// repoWebhookDeployer is the ForceDeploy implementation used by the
+	// repo-webhook trigger handler. Kept separate so tests can substitute a
+	// stub without needing a real GitSyncer.
+	repoWebhookDeployer func(ctx context.Context, services []string) ([]string, error)
 }
 
 // EnableWebhook registers POST /webhook, which validates the signed payload and
@@ -398,6 +405,84 @@ func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 // newID generates a time-ordered unique ID. Uses context to avoid importing ulid.
 func newID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+// EnableRepoWebhooks registers the repo-webhook management and trigger endpoints.
+func (s *HTTPServer) EnableRepoWebhooks(syncer *GitSyncer) {
+	s.syncer = syncer
+	s.repoWebhookDeployer = syncer.ForceDeploy
+	s.mux.HandleFunc("POST /webhook/repo/{id}", s.handleRepoWebhookTrigger)
+	s.mux.HandleFunc("POST /webhooks/repo", s.bearerAuth(s.handleCreateRepoWebhook))
+	s.mux.HandleFunc("GET /webhooks/repo", s.bearerAuth(s.handleListRepoWebhooks))
+	s.mux.HandleFunc("DELETE /webhooks/repo/{id}", s.bearerAuth(s.handleDeleteRepoWebhook))
+}
+
+// handleRepoWebhookTrigger fires a ForceDeploy for the service bound to the
+// webhook ID. No bearer auth — the 256-bit random ID is the secret.
+func (s *HTTPServer) handleRepoWebhookTrigger(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	service, err := s.ledger.LookupRepoWebhook(r.Context(), id)
+	if err != nil {
+		http.Error(w, "webhook not found", http.StatusNotFound)
+		return
+	}
+	// Drain body (ignore payload; ID entropy is sufficient for auth).
+	_, _ = io.Copy(io.Discard, r.Body)
+
+	deployIDs, err := s.repoWebhookDeployer(r.Context(), []string{service})
+	if err != nil {
+		slog.Error("repo webhook deploy failed", "webhook_id", id, "service", service, "err", err)
+		http.Error(w, "deploy failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	slog.Info("repo webhook triggered", "webhook_id", id, "service", service, "deploy_ids", deployIDs)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{"deploy_ids": deployIDs})
+}
+
+func (s *HTTPServer) handleCreateRepoWebhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Service string `json:"service"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Service == "" {
+		http.Error(w, "service required", http.StatusBadRequest)
+		return
+	}
+	id, err := s.ledger.CreateRepoWebhook(r.Context(), req.Service)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+}
+
+func (s *HTTPServer) handleListRepoWebhooks(w http.ResponseWriter, r *http.Request) {
+	webhooks, err := s.ledger.ListRepoWebhooks(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if webhooks == nil {
+		webhooks = []ledger.RepoWebhook{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(webhooks)
+}
+
+func (s *HTTPServer) handleDeleteRepoWebhook(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.ledger.DeleteRepoWebhook(r.Context(), id); err != nil {
+		if errors.As(err, new(ledger.ErrWebhookNotFound)) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Ensure HTTPServer satisfies http.Handler.

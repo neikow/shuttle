@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 	rootCmd.PersistentFlags().Bool("debug", false, "Enable debug logging")
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd)
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

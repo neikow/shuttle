@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean
+.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -89,3 +89,8 @@ dev-repo: build
 # Remove the scaffolded dev environment (repo, config, ledger data).
 dev-clean:
 	rm -rf $(DEV_DIR)
+
+# Provision Gitea test repo and register a repo webhook with the orchestrator.
+# Requires Gitea running (make dev-gitea) and the orchestrator to be up.
+dev-gitea-webhook-setup:
+	bash deploy/gitea-webhook-setup.sh

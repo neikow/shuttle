@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -114,6 +115,97 @@ func TestSeenNonce(t *testing.T) {
 	seen, err = s.SeenNonce(ctx, "nonce1", ttl)
 	if err != nil || !seen {
 		t.Fatalf("repeat: should be seen=true, got %v err=%v", seen, err)
+	}
+}
+
+func TestRepoWebhook_CreateAndLookup(t *testing.T) {
+	s := openMemory(t)
+	ctx := context.Background()
+
+	id, err := s.CreateRepoWebhook(ctx, "my-service")
+	if err != nil {
+		t.Fatalf("CreateRepoWebhook: %v", err)
+	}
+	if len(id) != 64 {
+		t.Errorf("want 64-char hex ID, got len %d: %s", len(id), id)
+	}
+
+	service, err := s.LookupRepoWebhook(ctx, id)
+	if err != nil {
+		t.Fatalf("LookupRepoWebhook: %v", err)
+	}
+	if service != "my-service" {
+		t.Errorf("want my-service, got %s", service)
+	}
+}
+
+func TestRepoWebhook_LookupNotFound(t *testing.T) {
+	s := openMemory(t)
+	ctx := context.Background()
+
+	_, err := s.LookupRepoWebhook(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected ErrWebhookNotFound, got nil")
+	}
+	var notFound ErrWebhookNotFound
+	if !errors.As(err, &notFound) {
+		t.Errorf("want ErrWebhookNotFound, got %T: %v", err, err)
+	}
+	if notFound.ID != "nonexistent" {
+		t.Errorf("want ID=nonexistent, got %s", notFound.ID)
+	}
+}
+
+func TestRepoWebhook_List(t *testing.T) {
+	s := openMemory(t)
+	ctx := context.Background()
+
+	id1, err := s.CreateRepoWebhook(ctx, "svc-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Small sleep so created_at differs (millisecond resolution).
+	time.Sleep(2 * time.Millisecond)
+	id2, err := s.CreateRepoWebhook(ctx, "svc-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.ListRepoWebhooks(ctx)
+	if err != nil {
+		t.Fatalf("ListRepoWebhooks: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 webhooks, got %d", len(list))
+	}
+	if list[0].ID != id1 || list[0].Service != "svc-a" {
+		t.Errorf("first entry: want id=%s svc=svc-a, got id=%s svc=%s", id1, list[0].ID, list[0].Service)
+	}
+	if list[1].ID != id2 || list[1].Service != "svc-b" {
+		t.Errorf("second entry: want id=%s svc=svc-b, got id=%s svc=%s", id2, list[1].ID, list[1].Service)
+	}
+}
+
+func TestRepoWebhook_Delete(t *testing.T) {
+	s := openMemory(t)
+	ctx := context.Background()
+
+	id, err := s.CreateRepoWebhook(ctx, "to-delete")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteRepoWebhook(ctx, id); err != nil {
+		t.Fatalf("DeleteRepoWebhook: %v", err)
+	}
+
+	// Second delete must return ErrWebhookNotFound.
+	err = s.DeleteRepoWebhook(ctx, id)
+	if err == nil {
+		t.Fatal("expected ErrWebhookNotFound on second delete, got nil")
+	}
+	if !errors.As(err, new(ErrWebhookNotFound)) {
+		t.Errorf("want ErrWebhookNotFound, got %T: %v", err, err)
 	}
 }
 
