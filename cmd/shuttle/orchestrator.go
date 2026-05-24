@@ -121,6 +121,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		}
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
 		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
+		syncer.SetGitCredentials(cfg.GitCredentials)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
 			syncer.SetHTTPSRedirect(cfg.HTTPSRedirect)
@@ -128,6 +129,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		}
 		wh := webhook.NewHandler(cfg.WebhookSecret, store)
 		httpHandler.EnableWebhook(wh, syncer)
+		httpHandler.EnableRepoWebhooks(syncer)
 		slog.Info("webhook enabled", "repo", cfg.RepoURL, "branch", cfg.RepoBranch, "repo_dir", repoDir)
 
 		if cfg.InfisicalWebhookSecret != "" {

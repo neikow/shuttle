@@ -59,12 +59,24 @@ check fails.`,
 		// Check never dispatches or records, so the syncer needs no ledger/registry.
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, nil, nil, secProvider)
 		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
+		syncer.SetGitCredentials(cfg.GitCredentials)
 
 		report, err := syncer.Check(cmd.Context())
 		if err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintf(out, "✓ repo %s synced at %s\n", cfg.RepoURL, shortSHA(report.SHA))
+
+		if len(report.GitCredentials) > 0 {
+			_, _ = fmt.Fprintf(out, "checking %d git credential(s):\n", len(report.GitCredentials))
+			for _, gc := range report.GitCredentials {
+				if gc.Err != nil {
+					_, _ = fmt.Fprintf(out, "  ✗ %s (key=%s): %v\n", gc.RepoPrefix, gc.Key, gc.Err)
+				} else {
+					_, _ = fmt.Fprintf(out, "  ✓ %s (key=%s): token present\n", gc.RepoPrefix, gc.Key)
+				}
+			}
+		}
 
 		if secProvider == nil {
 			_, _ = fmt.Fprintf(out, "! secrets provider not configured; skipping secret checks\n")

@@ -13,8 +13,9 @@ import (
 // pass over the IaC repo. It collects every problem rather than failing on the
 // first, so an operator sees the whole picture in one run.
 type CheckReport struct {
-	SHA      string
-	Services []ServiceCheck
+	SHA            string
+	GitCredentials []GitCredentialCheckResult
+	Services       []ServiceCheck
 }
 
 // ServiceCheck is the per-service outcome of a Check. MissingKeys lists the
@@ -37,14 +38,43 @@ type ServiceCheck struct {
 // Warnings do not fail the check.
 func (s ServiceCheck) OK() bool { return s.Err == nil && len(s.MissingKeys) == 0 }
 
-// OK reports whether every service in the report passed.
+// OK reports whether every service and git credential in the report passed.
 func (r *CheckReport) OK() bool {
+	for _, gc := range r.GitCredentials {
+		if gc.Err != nil {
+			return false
+		}
+	}
 	for _, s := range r.Services {
 		if !s.OK() {
 			return false
 		}
 	}
 	return true
+}
+
+// GitCredentialCheckResult is the per-credential outcome of CheckGitCredentials.
+type GitCredentialCheckResult struct {
+	RepoPrefix string
+	Key        string
+	Err        error
+}
+
+// CheckGitCredentials verifies that every configured git credential's token
+// key exists in the secrets provider. Returns one result per credential.
+func (g *GitSyncer) CheckGitCredentials(ctx context.Context) []GitCredentialCheckResult {
+	var results []GitCredentialCheckResult
+	for _, cred := range g.gitCreds {
+		r := GitCredentialCheckResult{RepoPrefix: cred.RepoPrefix, Key: cred.InfisicalKey}
+		if g.secrets == nil {
+			r.Err = fmt.Errorf("no secrets provider configured")
+		} else {
+			_, err := g.secrets.Get(ctx, secrets.Scope{Env: cred.InfisicalEnv, Path: cred.InfisicalPath}, cred.InfisicalKey)
+			r.Err = err
+		}
+		results = append(results, r)
+	}
+	return results
 }
 
 // Check syncs the IaC repo, loads + validates its config (config.Load enforces
@@ -59,7 +89,7 @@ func (g *GitSyncer) Check(ctx context.Context) (*CheckReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	report := &CheckReport{SHA: sha}
+	report := &CheckReport{SHA: sha, GitCredentials: g.CheckGitCredentials(ctx)}
 	for _, svc := range repo.Services {
 		sc := g.checkService(ctx, svc)
 		sc.Warnings = g.rollingCheck(ctx, svc)

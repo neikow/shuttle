@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean
+.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -89,3 +89,18 @@ dev-repo: build
 # Remove the scaffolded dev environment (repo, config, ledger data).
 dev-clean:
 	rm -rf $(DEV_DIR)
+
+# Start the Gitea dev container for testing private repo auth.
+dev-gitea:
+	docker compose -f deploy/docker-compose.gitea.yml up -d
+	@echo "Gitea running at http://localhost:3000"
+	@echo "Run 'make dev-gitea-setup' to create the test repo"
+
+# Provision the Gitea test user, private repo, and push seed fixtures.
+# Prints the token to store as GITEA_TOKEN in Infisical.
+dev-gitea-setup: dev-gitea
+	bash deploy/gitea-setup.sh
+
+# Stop and remove the Gitea dev container and its volumes.
+dev-gitea-clean:
+	docker compose -f deploy/docker-compose.gitea.yml down -v

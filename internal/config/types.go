@@ -47,6 +47,24 @@ type OrchestratorConfig struct {
 	// AdvertiseServerName is the SAN agents expect on the orchestrator cert,
 	// embedded in the enrollment command when TLS is on.
 	AdvertiseServerName string `yaml:"advertise_server_name"`
+	// GitCredentials lists per-host or per-org HTTPS token credentials used to
+	// authenticate git clone/fetch operations against private repos. Tokens are
+	// resolved from the secrets provider at runtime.
+	GitCredentials []GitCredential `yaml:"git_credentials"`
+}
+
+// GitCredential configures HTTPS token auth for a git host or repo prefix.
+// The token is resolved from the secrets provider at runtime, never stored in config.
+type GitCredential struct {
+	// RepoPrefix matches repo URLs that start with "https://<RepoPrefix>".
+	// Examples: "github.com/myorg" (org-scoped), "github.com" (all repos on host).
+	RepoPrefix string `yaml:"repo_prefix"`
+	// InfisicalKey is the secret key name holding the HTTPS token.
+	InfisicalKey string `yaml:"infisical_key"`
+	// InfisicalEnv and InfisicalPath are optional overrides for the Infisical
+	// lookup scope. When empty, the provider's default env/path are used.
+	InfisicalEnv  string `yaml:"infisical_env"`
+	InfisicalPath string `yaml:"infisical_path"`
 }
 
 // MTLSEnabled reports whether mutual TLS (client-cert verification) is configured.
