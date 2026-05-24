@@ -74,7 +74,7 @@ func runWebhookCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("server returned %d", resp.StatusCode)
 	}
@@ -103,7 +103,7 @@ func runWebhookList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned %d", resp.StatusCode)
 	}
@@ -139,7 +139,7 @@ func runWebhookDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("webhook %s not found", id)
 	}

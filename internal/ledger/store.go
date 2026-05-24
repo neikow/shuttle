@@ -230,7 +230,7 @@ func (s *Store) ListRepoWebhooks(ctx context.Context) ([]RepoWebhook, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list repo webhooks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []RepoWebhook
 	for rows.Next() {
 		var w RepoWebhook
