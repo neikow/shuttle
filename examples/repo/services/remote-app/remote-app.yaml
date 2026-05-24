@@ -1,0 +1,9 @@
+name: remote-app
+host: web1
+# Remote pointer: compose file is fetched from an external git repo at reconcile
+# time. Useful for services maintained in their own repos.
+# Run `make dev-gitea-setup` to seed the local Gitea repo used below.
+remote:
+  repo: http://localhost:3000/shuttle-dev/remote-app.git
+  branch: main
+  path: docker-compose.yml

@@ -3,6 +3,7 @@
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
 DEV_DIR := .dev
+AGENT_WORK_DIR = agent-work
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
@@ -89,6 +90,7 @@ dev-repo: build
 # Remove the scaffolded dev environment (repo, config, ledger data).
 dev-clean:
 	rm -rf $(DEV_DIR)
+	rm -rf $(AGENT_WORK_DIR)
 
 # Start the Gitea dev container for testing private repo auth.
 dev-gitea:
