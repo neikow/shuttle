@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,56 @@ func TestLoad_unknownField(t *testing.T) {
 	_, err := Load(dir)
 	if err == nil {
 		t.Fatal("expected unknown field error, got nil")
+	}
+}
+
+func TestLoadOrchestratorConfig_gitCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "valid credential",
+			body: "bearer_token: tok\ngit_credentials:\n  - repo_prefix: github.com/myorg\n    infisical_key: GITHUB_TOKEN\n",
+		},
+		{
+			name:    "empty repo_prefix",
+			body:    "bearer_token: tok\ngit_credentials:\n  - repo_prefix: \"\"\n    infisical_key: GITHUB_TOKEN\n",
+			wantErr: "repo_prefix is required",
+		},
+		{
+			name:    "empty infisical_key",
+			body:    "bearer_token: tok\ngit_credentials:\n  - repo_prefix: github.com/myorg\n    infisical_key: \"\"\n",
+			wantErr: "infisical_key is required",
+		},
+		{
+			name:    "repo_prefix with https:// scheme",
+			body:    "bearer_token: tok\ngit_credentials:\n  - repo_prefix: https://github.com/myorg\n    infisical_key: GITHUB_TOKEN\n",
+			wantErr: "repo_prefix must not include the scheme",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadOrchestratorConfig(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
 	}
 }
 

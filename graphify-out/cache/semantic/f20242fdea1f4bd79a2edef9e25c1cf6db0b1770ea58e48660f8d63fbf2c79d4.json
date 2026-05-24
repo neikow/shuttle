@@ -1,0 +1,1 @@
+{"nodes": [{"id": "whoami_docker_compose", "label": "whoami docker-compose.yml", "file_type": "document", "source_file": "examples/repo/services/whoami/docker-compose.yml", "source_location": null, "source_url": null, "captured_at": null, "author": null, "contributor": null}], "edges": [], "hyperedges": []}

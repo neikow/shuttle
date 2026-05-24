@@ -21,6 +21,12 @@ infisical_webhook_secret: "dev-infisical-webhook-secret"
 infisical_webhook_debounce: "5s"
 infisical_poll_interval: "30s"
 
+# git_credentials:
+#   - repo_prefix: "github.com/myorg"    # matches https://github.com/myorg/...
+#     infisical_key: GITHUB_TOKEN         # key name in Infisical
+#     # infisical_env: production         # optional; defaults to INFISICAL_ENV
+#     # infisical_path: /shared           # optional; defaults to secrets_base_path
+
 # Server TLS + token auth: the agent verifies the orchestrator and authenticates
 # with a token from `shuttle enroll` (no per-agent certs). Certs come from
 # `make certs`.
