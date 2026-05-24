@@ -1,3 +1,5 @@
 services:
   hello:
     image: traefik/whoami
+    labels:
+      - "shuttle.managed=true"

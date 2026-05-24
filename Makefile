@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean
+.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -104,3 +104,8 @@ dev-gitea-setup: dev-gitea
 # Stop and remove the Gitea dev container and its volumes.
 dev-gitea-clean:
 	docker compose -f deploy/docker-compose.gitea.yml down -v
+
+# Provision Gitea test repo and register a repo webhook with the orchestrator.
+# Requires Gitea running (make dev-gitea) and the orchestrator to be up.
+dev-gitea-webhook-setup:
+	bash deploy/gitea-webhook-setup.sh

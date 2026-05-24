@@ -2,8 +2,11 @@ package ledger
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -175,6 +178,84 @@ func (s *Store) CurrentSHAs(ctx context.Context) (map[string]string, error) {
 		out[service] = sha
 	}
 	return out, rows.Err()
+}
+
+// RepoWebhook is a record in the repo_webhooks table.
+type RepoWebhook struct {
+	ID        string
+	Service   string
+	CreatedAt time.Time
+}
+
+// ErrWebhookNotFound is returned when a webhook ID does not exist.
+type ErrWebhookNotFound struct{ ID string }
+
+func (e ErrWebhookNotFound) Error() string { return "repo webhook not found: " + e.ID }
+
+// CreateRepoWebhook generates a cryptographically random 32-byte hex ID,
+// inserts a webhook record for the given service, and returns the ID.
+func (s *Store) CreateRepoWebhook(ctx context.Context, service string) (string, error) {
+	var buf [32]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", fmt.Errorf("generate webhook id: %w", err)
+	}
+	id := hex.EncodeToString(buf[:])
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO repo_webhooks (id, service, created_at) VALUES (?, ?, ?)`,
+		id, service, time.Now().UnixMilli(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("insert repo webhook: %w", err)
+	}
+	return id, nil
+}
+
+// LookupRepoWebhook returns the service name for the given webhook ID.
+// Returns ErrWebhookNotFound if not found.
+func (s *Store) LookupRepoWebhook(ctx context.Context, id string) (string, error) {
+	var service string
+	err := s.db.QueryRowContext(ctx, `SELECT service FROM repo_webhooks WHERE id = ?`, id).Scan(&service)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrWebhookNotFound{ID: id}
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup repo webhook: %w", err)
+	}
+	return service, nil
+}
+
+// ListRepoWebhooks returns all registered repo webhooks ordered by creation time.
+func (s *Store) ListRepoWebhooks(ctx context.Context) ([]RepoWebhook, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, service, created_at FROM repo_webhooks ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("list repo webhooks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []RepoWebhook
+	for rows.Next() {
+		var w RepoWebhook
+		var ms int64
+		if err := rows.Scan(&w.ID, &w.Service, &ms); err != nil {
+			return nil, fmt.Errorf("scan repo webhook: %w", err)
+		}
+		w.CreatedAt = time.UnixMilli(ms)
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// DeleteRepoWebhook removes the webhook with the given ID.
+// Returns ErrWebhookNotFound if it doesn't exist.
+func (s *Store) DeleteRepoWebhook(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM repo_webhooks WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete repo webhook: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrWebhookNotFound{ID: id}
+	}
+	return nil
 }
 
 func (s *Store) ListDeploys(ctx context.Context, service string, limit int) ([]DeployRecord, error) {
