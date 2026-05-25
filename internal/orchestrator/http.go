@@ -127,6 +127,24 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
 	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
 	s.mux.HandleFunc("GET /plan", s.bearerAuth(s.handlePlan))
+	s.mux.HandleFunc("GET /check", s.bearerAuth(s.handleCheck))
+}
+
+// handleCheck runs the read-only config + secret-availability validation pass
+// against the orchestrator's own repo + secrets provider, returning the report
+// as JSON. Dispatches nothing.
+func (s *HTTPServer) handleCheck(w http.ResponseWriter, r *http.Request) {
+	if s.syncer == nil {
+		http.Error(w, "git sync not configured", http.StatusBadRequest)
+		return
+	}
+	report, err := s.syncer.CheckRef(r.Context(), r.URL.Query().Get("ref"))
+	if err != nil {
+		http.Error(w, "check: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(report)
 }
 
 // handlePlan returns the read-only desired-vs-actual diff (what a reconcile
@@ -136,7 +154,7 @@ func (s *HTTPServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "git sync not configured", http.StatusBadRequest)
 		return
 	}
-	report, err := s.syncer.Plan(r.Context())
+	report, err := s.syncer.PlanRef(r.Context(), r.URL.Query().Get("ref"))
 	if err != nil {
 		http.Error(w, "plan: "+err.Error(), http.StatusInternalServerError)
 		return

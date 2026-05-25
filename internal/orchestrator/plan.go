@@ -43,7 +43,33 @@ func (g *GitSyncer) Plan(ctx context.Context) (PlanReport, error) {
 	if err != nil {
 		return PlanReport{}, err
 	}
+	return g.planFrom(ctx, repo, sha)
+}
 
+// PlanRef is Plan against an arbitrary git ref (branch, tag, refs/pull/N/head,
+// or SHA) instead of the configured branch HEAD, so CI can preview the exact PR
+// branch's diff against the live ledger. ref == "" falls back to Plan. The ref
+// is checked out in isolation, leaving the orchestrator's working tree intact.
+func (g *GitSyncer) PlanRef(ctx context.Context, ref string) (PlanReport, error) {
+	if ref == "" {
+		return g.Plan(ctx)
+	}
+	sib, cleanup, err := g.checkoutRef(ctx, ref)
+	if err != nil {
+		return PlanReport{}, err
+	}
+	defer cleanup()
+	repo, sha, err := sib.loadHead(ctx)
+	if err != nil {
+		return PlanReport{}, err
+	}
+	// Diff against the parent's live ledger, not the throwaway sibling's.
+	return g.planFrom(ctx, repo, sha)
+}
+
+// planFrom builds the report for an already-loaded repo+SHA against the ledger's
+// current SHAs. With no ledger every service shows as "create".
+func (g *GitSyncer) planFrom(ctx context.Context, repo *config.Repo, sha string) (PlanReport, error) {
 	current := map[string]string{}
 	if g.store != nil {
 		cur, err := g.store.CurrentSHAs(ctx)

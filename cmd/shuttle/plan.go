@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,8 +70,12 @@ func planRemote(cmd *cobra.Command, baseURL string) (orchestrator.PlanReport, er
 		return orchestrator.PlanReport{}, fmt.Errorf("--token is required with --url")
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
+	endpoint := baseURL + "/plan"
+	if ref, _ := cmd.Flags().GetString("ref"); ref != "" {
+		endpoint += "?ref=" + url.QueryEscape(ref)
+	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	body, err := doJSON(cmd.Context(), client, http.MethodGet, baseURL+"/plan", bearer, nil)
+	body, err := doJSON(cmd.Context(), client, http.MethodGet, endpoint, bearer, nil)
 	if err != nil {
 		return orchestrator.PlanReport{}, err
 	}
@@ -168,6 +173,7 @@ func renderPlan(out io.Writer, report orchestrator.PlanReport) int {
 func init() {
 	planCmd.Flags().String("url", "", "Orchestrator control-plane URL for a remote plan, e.g. https://orchestrator:8080")
 	planCmd.Flags().String("token", "", "Control-plane bearer token (required with --url)")
+	planCmd.Flags().String("ref", "", "Git ref to plan instead of the orchestrator's branch HEAD (remote mode; branch, tag, refs/pull/N/head, or SHA)")
 	planCmd.Flags().String("config", "config.yml", "Path to orchestrator config (local mode)")
 	planCmd.Flags().String("repo-dir", "", "Existing IaC checkout to plan against (local mode; default: temp clone)")
 	planCmd.Flags().String("data-dir", "", "Data dir holding the ledger for an accurate local diff (default: none → all create)")

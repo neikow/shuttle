@@ -141,6 +141,61 @@ func (g *GitSyncer) syncAndLoad(ctx context.Context) (*config.Repo, string, erro
 	return repo, sha, nil
 }
 
+// loadHead parses the IaC config from the working tree as-is (no sync) and
+// returns it with the checked-out HEAD SHA. Used after checkoutRef has already
+// placed an arbitrary ref in g.dir.
+func (g *GitSyncer) loadHead(ctx context.Context) (*config.Repo, string, error) {
+	repo, err := config.Load(g.dir)
+	if err != nil {
+		return nil, "", fmt.Errorf("load config: %w", err)
+	}
+	sha, err := g.gitOut(ctx, g.dir, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("rev-parse: %w", err)
+	}
+	return repo, strings.TrimSpace(sha), nil
+}
+
+// checkoutRef fetches an arbitrary git ref (branch, tag, refs/pull/N/head, or
+// commit SHA) into an isolated temp checkout and returns a sibling syncer bound
+// to it. Read-only state (store, secrets, credentials, paths) is shared with
+// the parent; only the working dir and branch differ — so planning or checking
+// a ref never disturbs the orchestrator's live working tree (which the drift
+// reconciler and deploy path render from). The caller must invoke cleanup.
+func (g *GitSyncer) checkoutRef(ctx context.Context, ref string) (sib *GitSyncer, cleanup func(), err error) {
+	tmp, err := os.MkdirTemp("", "shuttle-ref-")
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("temp dir: %w", err)
+	}
+	cleanup = func() { _ = os.RemoveAll(tmp) }
+	fail := func(format string, a ...any) (*GitSyncer, func(), error) {
+		cleanup()
+		return nil, func() {}, fmt.Errorf(format, a...)
+	}
+
+	repoURL, err := g.rewriteURL(ctx, g.repoURL)
+	if err != nil {
+		return fail("git credential: %w", err)
+	}
+	if err := g.git(ctx, "", "init", "-q", tmp); err != nil {
+		return fail("init: %w", err)
+	}
+	if err := g.git(ctx, tmp, "remote", "add", "origin", repoURL); err != nil {
+		return fail("remote add: %w", err)
+	}
+	if err := g.git(ctx, tmp, "fetch", "--depth", "1", "origin", ref); err != nil {
+		return fail("fetch %s: %w", ref, err)
+	}
+	if err := g.git(ctx, tmp, "checkout", "-q", "FETCH_HEAD"); err != nil {
+		return fail("checkout %s: %w", ref, err)
+	}
+
+	clone := *g
+	clone.dir = tmp
+	clone.branch = ref
+	return &clone, cleanup, nil
+}
+
 // dispatchPlan dispatches the deploy steps, skipping any not in filter (when
 // filter is non-empty). Returns the dispatched deploy IDs.
 func (g *GitSyncer) dispatchPlan(ctx context.Context, repo *config.Repo, steps []Step, filter map[string]bool) []string {

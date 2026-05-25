@@ -110,6 +110,83 @@ func TestGitSyncer_DeployAtSHA(t *testing.T) {
 	}
 }
 
+func TestGitSyncer_PlanAndCheckRef(t *testing.T) {
+	src := makeSourceRepo(t)
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = src
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(src, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A feature branch adds a second service; main keeps just "app".
+	gitRun("checkout", "-q", "-b", "feature")
+	write("services/extra/extra.yaml", "name: extra\nhost: web1\n")
+	write("services/extra/docker-compose.yml", "services:\n  extra:\n    image: nginx\n")
+	gitRun("add", "-A")
+	gitRun("commit", "-q", "-m", "add extra")
+	gitRun("checkout", "-q", "main")
+
+	store, err := ledger.Open(filepath.Join(t.TempDir(), "led.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	clone := filepath.Join(t.TempDir(), "clone")
+	g := NewGitSyncer(src, "main", clone, store, NewRegistry(), nil)
+
+	// PlanRef against the branch sees both services (empty ledger → all create).
+	rep, err := g.PlanRef(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("PlanRef(feature): %v", err)
+	}
+	got := map[string]PlanAction{}
+	for _, e := range rep.Services {
+		got[e.Service] = e.Action
+	}
+	if got["app"] != PlanCreate || got["extra"] != PlanCreate {
+		t.Fatalf("feature plan = %+v, want app+extra create", rep.Services)
+	}
+
+	// Default (no ref) plans the configured branch HEAD: only "app".
+	base, err := g.PlanRef(context.Background(), "")
+	if err != nil {
+		t.Fatalf("PlanRef(\"\"): %v", err)
+	}
+	if len(base.Services) != 1 || base.Services[0].Service != "app" {
+		t.Fatalf("base plan = %+v, want only app", base.Services)
+	}
+
+	// CheckRef validates the branch's services from its isolated checkout.
+	cr, err := g.CheckRef(context.Background(), "feature")
+	if err != nil {
+		t.Fatalf("CheckRef(feature): %v", err)
+	}
+	if len(cr.Services) != 2 || !cr.OK() {
+		t.Fatalf("check report = %+v, ok=%v", cr.Services, cr.OK())
+	}
+
+	// The orchestrator's live working tree was never switched to the branch.
+	if _, statErr := os.Stat(filepath.Join(clone, "services", "extra")); statErr == nil {
+		t.Fatal("ref checkout leaked into the live working tree")
+	}
+}
+
 func TestGitSyncer_RemoteCompose(t *testing.T) {
 	// Remote repo holding the compose file.
 	remote := t.TempDir()

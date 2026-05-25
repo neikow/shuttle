@@ -1,0 +1,144 @@
+name: Shuttle plan comment
+description: >-
+  Validate an IaC change (shuttle check), ask a running Shuttle orchestrator for
+  the desired-vs-deployed diff (shuttle plan), and post both as a sticky comment
+  on the pull request.
+
+inputs:
+  orchestrator-url:
+    description: Base URL of the running orchestrator control plane (e.g. https://orchestrator:8080).
+    required: true
+  token:
+    description: Control-plane bearer token for the orchestrator (plan + check).
+    required: true
+  ref:
+    description: >-
+      Git ref to validate instead of the orchestrator's branch HEAD. Defaults to
+      this PR's merge-ref (refs/pull/N/head) so the diff reflects the PR branch.
+    required: false
+    default: ${{ github.event.pull_request.number && format('refs/pull/{0}/head', github.event.pull_request.number) || '' }}
+  shuttle-version:
+    description: Shuttle release to use, e.g. "0.1.0". "latest" resolves the newest release.
+    required: false
+    default: latest
+  github-token:
+    description: Token used to upsert the PR comment (needs pull-requests:write).
+    required: false
+    default: ${{ github.token }}
+  fail-on-check:
+    description: Fail the action when `shuttle check` reports problems.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Install shuttle
+      shell: bash
+      env:
+        SHUTTLE_VERSION: ${{ inputs.shuttle-version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux | darwin
+        case "$(uname -m)" in
+          x86_64|amd64) arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
+        esac
+
+        ver="$SHUTTLE_VERSION"
+        if [ "$ver" = "latest" ]; then
+          tag=$(gh release view --repo neikow/shuttle --json tagName --jq .tagName)
+        else
+          tag="v${ver#v}"
+        fi
+        ver="${tag#v}"
+
+        dir="$RUNNER_TEMP/shuttle"
+        mkdir -p "$dir"
+        asset="shuttle_${ver}_${os}_${arch}.tar.gz"
+        echo "Downloading $asset from $tag"
+        gh release download "$tag" --repo neikow/shuttle --pattern "$asset" --dir "$dir"
+        tar -xzf "$dir/$asset" -C "$dir"
+        echo "$dir" >> "$GITHUB_PATH"
+
+    - name: Run check + plan
+      id: run
+      shell: bash
+      env:
+        SHUTTLE_TOKEN: ${{ inputs.token }}
+        ORCH_URL: ${{ inputs.orchestrator-url }}
+        REF: ${{ inputs.ref }}
+      run: |
+        set -uo pipefail
+        check_out="$RUNNER_TEMP/check.txt"
+        plan_out="$RUNNER_TEMP/plan.txt"
+        ref_args=()
+        [ -n "$REF" ] && ref_args=(--ref "$REF")
+
+        shuttle check --url "$ORCH_URL" --token "$SHUTTLE_TOKEN" "${ref_args[@]}" >"$check_out" 2>&1
+        echo "check_status=$?" >> "$GITHUB_OUTPUT"
+
+        shuttle plan --url "$ORCH_URL" --token "$SHUTTLE_TOKEN" "${ref_args[@]}" >"$plan_out" 2>&1
+        echo "plan_status=$?" >> "$GITHUB_OUTPUT"
+
+        echo "check_out=$check_out" >> "$GITHUB_OUTPUT"
+        echo "plan_out=$plan_out" >> "$GITHUB_OUTPUT"
+
+    - name: Upsert PR comment
+      if: ${{ github.event.pull_request.number != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        CHECK_STATUS: ${{ steps.run.outputs.check_status }}
+        PLAN_STATUS: ${{ steps.run.outputs.plan_status }}
+        CHECK_OUT: ${{ steps.run.outputs.check_out }}
+        PLAN_OUT: ${{ steps.run.outputs.plan_out }}
+      run: |
+        set -euo pipefail
+        marker='<!-- shuttle-plan-comment -->'
+
+        check_icon='✅'; [ "$CHECK_STATUS" != "0" ] && check_icon='❌'
+        plan_icon='✅';  [ "$PLAN_STATUS"  != "0" ] && plan_icon='⚠️'
+
+        body="$RUNNER_TEMP/comment.md"
+        {
+          echo "$marker"
+          echo "## Shuttle plan"
+          echo
+          echo "> Diff is **this PR's ref vs the deployed ledger** — what a reconcile would do"
+          echo "> if the PR landed now. (Falls back to the orchestrator's branch HEAD if no ref.)"
+          echo
+          echo "### $check_icon \`shuttle check\`"
+          echo '```'
+          cat "$CHECK_OUT"
+          echo '```'
+          echo
+          echo "### $plan_icon \`shuttle plan\`"
+          echo '```'
+          cat "$PLAN_OUT"
+          echo '```'
+        } > "$body"
+
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty")
+
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F body=@"$body" >/dev/null
+        else
+          gh api --method POST "repos/$REPO/issues/$PR/comments" -F body=@"$body" >/dev/null
+        fi
+
+    - name: Enforce check result
+      if: ${{ inputs.fail-on-check == 'true' }}
+      shell: bash
+      env:
+        CHECK_STATUS: ${{ steps.run.outputs.check_status }}
+      run: |
+        if [ "$CHECK_STATUS" != "0" ]; then
+          echo "::error::shuttle check failed"
+          exit 1
+        fi
