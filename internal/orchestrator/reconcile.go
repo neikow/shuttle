@@ -83,11 +83,15 @@ type DriftReconciler struct {
 	tracker    *StateTracker
 	interval   time.Duration
 	staleAfter time.Duration
+	bus        *EventBus // optional; nil-safe
 }
 
 func NewDriftReconciler(syncer *GitSyncer, tracker *StateTracker, interval, staleAfter time.Duration) *DriftReconciler {
 	return &DriftReconciler{syncer: syncer, tracker: tracker, interval: interval, staleAfter: staleAfter}
 }
+
+// SetEventBus attaches the event bus drift events are published to. Call before Run.
+func (d *DriftReconciler) SetEventBus(b *EventBus) { d.bus = b }
 
 // Run ticks until ctx is cancelled.
 func (d *DriftReconciler) Run(ctx context.Context) {
@@ -127,6 +131,14 @@ func (d *DriftReconciler) tick(ctx context.Context) {
 		return
 	}
 	slog.Warn("container drift detected, redeploying", "services", drifted)
+	for _, svc := range drifted {
+		d.bus.Publish(Event{
+			Type: EventDriftDetected, Service: svc,
+			Message: "container not running; redeploying",
+		})
+	}
+	// The heal itself is dispatched via ForceDeploy → dispatch, which publishes
+	// the resulting deploy.queued events.
 	if _, err := d.syncer.ForceDeploy(ctx, drifted); err != nil {
 		slog.Error("force redeploy failed", "services", drifted, "err", err)
 	}

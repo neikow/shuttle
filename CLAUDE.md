@@ -58,6 +58,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `shuttle check`. |
+| `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Foundation for the (upcoming) notification stream and metrics. |
 
 ## Request flows
 
@@ -229,6 +230,16 @@ These are deliberate. Don't reverse them without updating this file.
   The default targets `docker compose`; the `synology` preset points at
   `/usr/local/bin/docker` for DSM Container Manager. New targets are new presets,
   selected by the agent's `--driver` flag.
+- **In-process event bus, best-effort delivery.** Orchestrator state changes
+  (deploy queued/succeeded/failed, rollback, drift, teardown, volume purge) are
+  published to a single `EventBus` (`events.go`) that notifications and metrics
+  subscribe to — one event model instead of re-instrumenting scattered `slog`
+  sites per feature. Delivery is best-effort: each subscriber has a bounded
+  buffer and a slow consumer has events *dropped* (counted via `Dropped()`),
+  never blocking the deploy path. The bus is ephemeral (a small replay ring for
+  late subscribers); the **ledger remains the source of truth** for deploy
+  history. All methods are nil-safe, so the bus is an optional dependency every
+  publisher holds unconditionally.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

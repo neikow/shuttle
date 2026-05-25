@@ -17,6 +17,7 @@ type AgentServiceServer struct {
 	registry *Registry
 	store    *ledger.Store // optional; when nil, deploy results are not persisted
 	tracker  *StateTracker // optional; when nil, container state is not tracked
+	bus      *EventBus     // optional; nil-safe
 }
 
 func NewAgentServiceServer(registry *Registry, store *ledger.Store) *AgentServiceServer {
@@ -26,6 +27,24 @@ func NewAgentServiceServer(registry *Registry, store *ledger.Store) *AgentServic
 // SetStateTracker attaches a tracker that receives container state reports for
 // drift detection. Call before serving.
 func (s *AgentServiceServer) SetStateTracker(t *StateTracker) { s.tracker = t }
+
+// SetEventBus attaches the event bus deploy results are published to. Call before serving.
+func (s *AgentServiceServer) SetEventBus(b *EventBus) { s.bus = b }
+
+// deployEventType maps a terminal deploy status to its event type, or false if
+// the status is not a terminal result worth emitting.
+func deployEventType(ls ledger.Status) (EventType, bool) {
+	switch ls {
+	case ledger.StatusSuccess:
+		return EventDeploySucceeded, true
+	case ledger.StatusFailed:
+		return EventDeployFailed, true
+	case ledger.StatusRolledBack:
+		return EventDeployRolledBack, true
+	default:
+		return "", false
+	}
+}
 
 // ledgerStatus maps a proto DeployStatus to a ledger Status.
 func ledgerStatus(s shuttlev1.DeployStatus) (ledger.Status, bool) {
@@ -100,11 +119,17 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 				"status", res.Status,
 				"error", res.Error,
 			)
-			if s.store != nil {
-				if ls, ok := ledgerStatus(res.Status); ok {
+			if ls, ok := ledgerStatus(res.Status); ok {
+				if s.store != nil {
 					if err := s.store.MarkStatus(stream.Context(), res.DeployId, ls); err != nil {
 						slog.Error("mark deploy status", "deploy_id", res.DeployId, "err", err)
 					}
+				}
+				if et, emit := deployEventType(ls); emit {
+					s.bus.Publish(Event{
+						Type: et, Host: host, DeployID: res.DeployId,
+						Status: string(ls), Message: res.Error,
+					})
 				}
 			}
 		case *shuttlev1.AgentEvent_ContainerState:
