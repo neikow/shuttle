@@ -28,7 +28,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`. Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
@@ -53,7 +53,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/metrics`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/events`, `/metrics`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). Own registry; low-cardinality labels (type only, no service/host). |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
@@ -251,6 +251,16 @@ These are deliberate. Don't reverse them without updating this file.
   live from the registry/bus at scrape time (`GaugeFunc`/`CounterFunc`); deploy
   duration is a histogram, timed by matching a terminal event to its queued
   event by deploy ID. Uses its own registry, not the global default.
+- **Notifications via SSE, not WebSocket.** `GET /events` streams `EventBus`
+  events as Server-Sent Events (`data: <json>` frames; JSON carries the type so
+  a client filters on one stream). SSE over WebSocket because the feed is
+  one-way (server→client), works over plain HTTP with no extra dependency
+  (stdlib `http.Flusher`), and reconnects natively. On connect the handler
+  replays the bus backlog, then forwards live events; a periodic comment line
+  (`: keep-alive`) stops idle proxies closing the connection. Bearer-authed
+  (events leak service names + SHAs). A slow reader blocks only its own stream —
+  the bus drops its events rather than stalling the deploy path. `shuttle
+  events` is the CLI consumer.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done
