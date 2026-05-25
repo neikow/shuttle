@@ -4,11 +4,16 @@ project_name: shuttle
 before:
   hooks:
     - go mod download
+    # Build the React UI so the embedui tag can embed web/dist.
+    - cd web && npm ci
+    - cd web && npm run build
 
 builds:
   - id: shuttle
     main: ./cmd/shuttle
     binary: shuttle
+    flags:
+      - -tags=embedui
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin]

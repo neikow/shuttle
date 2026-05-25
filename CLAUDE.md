@@ -15,7 +15,10 @@ that powers rollback and drift detection.
 ## Build / test / lint
 
 ```sh
-make build      # version-stamped binary
+make build      # version-stamped binary (no embedded UI)
+make build-ui   # binary WITH the embedded web UI (runs `make web` first, -tags embedui)
+make web        # build the React UI into web/dist (npm ci + vite build)
+make web-dev    # Vite dev server, proxies API to a local orchestrator on :8080
 make test       # go test -race ./internal/...   (unit; this is the default gate)
 make lint       # golangci-lint run ./...         (v2 config — see CI notes below)
 make proto      # buf generate -> gen/            (run after editing proto/)
@@ -40,6 +43,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
 | `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`). |
+| `web/` | React + Vite + TS read-only dashboard (Tailwind v4 + Radix). `embed.go`/`embed_stub.go` gate embedding the built `dist/` behind the `embedui` build tag. Consumes the existing control-plane endpoints. |
 
 ### `internal/orchestrator/` internals
 
@@ -53,13 +57,15 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). |
+| `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
+| `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with the pasted bearer token, so control-plane endpoints stay `bearerAuth`-protected. SPA fallback to `index.html` for client routes. |
 | `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Foundation for the (upcoming) notification stream and metrics. |
 
 ## Request flows
@@ -271,6 +277,20 @@ These are deliberate. Don't reverse them without updating this file.
   (events leak service names + SHAs). A slow reader blocks only its own stream —
   the bus drops its events rather than stalling the deploy path. `shuttle
   events` is the CLI consumer.
+- **Web UI: embedded React SPA, build-tag-gated, read-only v1.** `web/` is a
+  Vite + TS + Tailwind-v4 + Radix dashboard (sharp aesthetic — radius forced near
+  0). It consumes the *existing* control-plane endpoints (`/deploys`, `/events`
+  SSE, `/plan`, `/check`, `/hosts`) — no new read backend. Shipped inside the
+  single binary via `//go:embed` behind the `embedui` build tag (`web/embed.go`
+  vs `embed_stub.go`), so a plain `go build ./...` needs no `web/dist` and the
+  default test/lint gate is unaffected; `make build-ui` and goreleaser build with
+  the tag after `make web`. `ui.go` serves the bundle **unauthenticated** under
+  `/ui/` (SPA fallback to `index.html`) — the API stays `bearerAuth`-protected
+  and the browser app authenticates its own calls with a token the user pastes
+  (kept in `localStorage`), matching the current static-bearer model (OIDC later).
+  SSE auth needs a header, which `EventSource` can't set, so the events view uses
+  `@microsoft/fetch-event-source`. Mutations (deploy/rollback/prune) are
+  deliberately **not** in v1.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,34 @@ type StateTracker struct {
 
 func NewStateTracker() *StateTracker {
 	return &StateTracker{now: time.Now, byHost: make(map[string]map[string]stateReport)}
+}
+
+// ServiceState is the latest reported container state for one service on a host.
+type ServiceState struct {
+	Service    string    `json:"service"`
+	Status     string    `json:"status"`
+	SHA        string    `json:"sha,omitempty"`
+	ReportedAt time.Time `json:"reported_at"`
+}
+
+// Snapshot returns the latest reported service states grouped by host. Nil-safe:
+// a nil tracker yields an empty map.
+func (t *StateTracker) Snapshot() map[string][]ServiceState {
+	out := map[string][]ServiceState{}
+	if t == nil {
+		return out
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for host, svcs := range t.byHost {
+		list := make([]ServiceState, 0, len(svcs))
+		for name, r := range svcs {
+			list = append(list, ServiceState{Service: name, Status: r.status, SHA: r.sha, ReportedAt: r.at})
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].Service < list[j].Service })
+		out[host] = list
+	}
+	return out
 }
 
 // Record stores the latest container state for a service on a host.

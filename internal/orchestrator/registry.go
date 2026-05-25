@@ -14,9 +14,9 @@ const (
 )
 
 type agentConn struct {
-	host      string
-	send      chan *shuttlev1.OrchestratorCommand
-	lastSeen  time.Time
+	host     string
+	send     chan *shuttlev1.OrchestratorCommand
+	lastSeen time.Time
 }
 
 // Registry tracks connected agents.
@@ -90,6 +90,23 @@ func (r *Registry) ConnectedHosts() []string {
 	out := make([]string, 0, len(r.conns))
 	for h := range r.conns {
 		out = append(out, h)
+	}
+	return out
+}
+
+// HostConn is a connected agent's liveness snapshot.
+type HostConn struct {
+	Host     string    `json:"host"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+// Snapshot returns the liveness of every connected agent.
+func (r *Registry) Snapshot() []HostConn {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]HostConn, 0, len(r.conns))
+	for h, c := range r.conns {
+		out = append(out, HostConn{Host: h, LastSeen: c.lastSeen})
 	}
 	return out
 }
