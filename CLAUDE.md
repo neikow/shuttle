@@ -28,7 +28,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`. Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
@@ -53,7 +53,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/events`). `GET /events` is the bearer-authed SSE stream of `EventBus` events. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
@@ -240,6 +240,16 @@ These are deliberate. Don't reverse them without updating this file.
   late subscribers); the **ledger remains the source of truth** for deploy
   history. All methods are nil-safe, so the bus is an optional dependency every
   publisher holds unconditionally.
+- **Notifications via SSE, not WebSocket.** `GET /events` streams `EventBus`
+  events as Server-Sent Events (`data: <json>` frames; JSON carries the type so
+  a client filters on one stream). SSE over WebSocket because the feed is
+  one-way (server→client), works over plain HTTP with no extra dependency
+  (stdlib `http.Flusher`), and reconnects natively. On connect the handler
+  replays the bus backlog, then forwards live events; a periodic comment line
+  (`: keep-alive`) stops idle proxies closing the connection. Bearer-authed
+  (events leak service names + SHAs). A slow reader blocks only its own stream —
+  the bus drops its events rather than stalling the deploy path. `shuttle
+  events` is the CLI consumer.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done
