@@ -76,6 +76,13 @@ func (r *Registry) Send(host string, cmd *shuttlev1.OrchestratorCommand) error {
 	}
 }
 
+// Count returns the number of currently connected agents.
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.conns)
+}
+
 // ConnectedHosts returns the list of currently connected host names.
 func (r *Registry) ConnectedHosts() []string {
 	r.mu.RLock()

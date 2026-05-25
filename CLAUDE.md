@@ -53,7 +53,8 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/metrics`). |
+| `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). Own registry; low-cardinality labels (type only, no service/host). |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
@@ -240,6 +241,16 @@ These are deliberate. Don't reverse them without updating this file.
   late subscribers); the **ledger remains the source of truth** for deploy
   history. All methods are nil-safe, so the bus is an optional dependency every
   publisher holds unconditionally.
+- **Prometheus metrics off the event bus, unauthed `/metrics`.** `Metrics`
+  (`metrics.go`) subscribes to the `EventBus` and turns events into Prometheus
+  metrics. `prometheus/client_golang` (despite the usual minimal-dep bias)
+  because correct histograms + exposition aren't worth hand-rolling. Labels are
+  deliberately **low-cardinality — event type only, never service or host
+  names** — so `/metrics` can be scraped unauthenticated (standard scrape model)
+  without leaking topology. Connected-agent gauge and dropped-event counter read
+  live from the registry/bus at scrape time (`GaugeFunc`/`CounterFunc`); deploy
+  duration is a histogram, timed by matching a terminal event to its queued
+  event by deploy ID. Uses its own registry, not the global default.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

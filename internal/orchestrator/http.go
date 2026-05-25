@@ -44,6 +44,13 @@ type HTTPServer struct {
 // SetEventBus attaches the event bus the control plane publishes to. Call before serving.
 func (s *HTTPServer) SetEventBus(b *EventBus) { s.bus = b }
 
+// EnableMetrics registers GET /metrics, serving Prometheus metrics. Unauthed by
+// design: the exposed metrics are low-cardinality aggregates (no service/host
+// labels), matching the standard scrape model. Call before serving.
+func (s *HTTPServer) EnableMetrics(h http.Handler) {
+	s.mux.Handle("GET /metrics", h)
+}
+
 // EnableWebhook registers POST /webhook, which validates the signed payload and
 // triggers a git sync + reconcile. Call before serving.
 func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
