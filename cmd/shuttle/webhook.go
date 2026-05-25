@@ -12,44 +12,54 @@ import (
 
 var webhookCmd = &cobra.Command{
 	Use:   "webhook",
-	Short: "Manage repo webhooks",
+	Short: "Manage per-service git repo webhooks",
+	Long: `Create, list, and delete per-service repo webhooks on a running orchestrator.
+
+A repo webhook gives your git provider a URL to call on push; the orchestrator
+then reconciles that service. Run 'create' to mint a webhook URL, paste it into
+your provider (GitHub → Settings → Webhooks), and the service auto-deploys on
+push.`,
 }
 
 var webhookCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a repo webhook for a service",
-	RunE:  runWebhookCreate,
+	Short: "Create a repo webhook for a service and print its URL",
+	Example: `  shuttle webhook create --url https://orchestrator:8080 \
+    --token $SHUTTLE_TOKEN --service web`,
+	RunE: runWebhookCreate,
 }
 
 var webhookListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List repo webhooks",
-	RunE:  runWebhookList,
+	Use:     "list",
+	Short:   "List configured repo webhooks",
+	Example: `  shuttle webhook list --url https://orchestrator:8080 --token $SHUTTLE_TOKEN`,
+	RunE:    runWebhookList,
 }
 
 var webhookDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a repo webhook",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWebhookDelete,
+	Use:     "delete <id>",
+	Short:   "Delete a repo webhook by ID",
+	Example: `  shuttle webhook delete 3f9a... --url https://orchestrator:8080 --token $SHUTTLE_TOKEN`,
+	Args:    cobra.ExactArgs(1),
+	RunE:    runWebhookDelete,
 }
 
 func init() {
-	webhookCreateCmd.Flags().String("url", "", "Orchestrator HTTP URL (e.g. https://orchestrator.example.com)")
-	webhookCreateCmd.Flags().String("token", "", "Bearer token")
-	webhookCreateCmd.Flags().String("service", "", "Service name")
-	webhookCreateCmd.Flags().String("base-url", "", "Public base URL for the webhook URL output (e.g. https://orchestrator.example.com)")
+	webhookCreateCmd.Flags().String("url", "", "Orchestrator HTTP URL, e.g. https://orchestrator:8080 (required)")
+	webhookCreateCmd.Flags().String("token", "", "Control-plane bearer token (required)")
+	webhookCreateCmd.Flags().String("service", "", "Service to attach the webhook to (required)")
+	webhookCreateCmd.Flags().String("base-url", "", "Public base URL for the printed webhook URL (defaults to --url)")
 	_ = webhookCreateCmd.MarkFlagRequired("url")
 	_ = webhookCreateCmd.MarkFlagRequired("token")
 	_ = webhookCreateCmd.MarkFlagRequired("service")
 
-	webhookListCmd.Flags().String("url", "", "Orchestrator HTTP URL")
-	webhookListCmd.Flags().String("token", "", "Bearer token")
+	webhookListCmd.Flags().String("url", "", "Orchestrator HTTP URL, e.g. https://orchestrator:8080 (required)")
+	webhookListCmd.Flags().String("token", "", "Control-plane bearer token (required)")
 	_ = webhookListCmd.MarkFlagRequired("url")
 	_ = webhookListCmd.MarkFlagRequired("token")
 
-	webhookDeleteCmd.Flags().String("url", "", "Orchestrator HTTP URL")
-	webhookDeleteCmd.Flags().String("token", "", "Bearer token")
+	webhookDeleteCmd.Flags().String("url", "", "Orchestrator HTTP URL, e.g. https://orchestrator:8080 (required)")
+	webhookDeleteCmd.Flags().String("token", "", "Control-plane bearer token (required)")
 	_ = webhookDeleteCmd.MarkFlagRequired("url")
 	_ = webhookDeleteCmd.MarkFlagRequired("token")
 

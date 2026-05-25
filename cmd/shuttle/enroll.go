@@ -34,7 +34,15 @@ var enrollCmd = &cobra.Command{
 	Short: "Enroll a new agent: pick a host and print its start command",
 	Long: `Talks to a running orchestrator's control plane. Lists the hosts declared
 in the IaC repo, lets you pick one (or pass --host), mints a host-scoped agent
-token, and prints the ready-to-run agent command.`,
+token, and prints the ready-to-run agent command.
+
+The token is shown only once. Run the printed command on the target host to
+start its agent.`,
+	Example: `  # Interactive: list hosts and pick one
+  shuttle enroll --url https://orchestrator:8080 --token $SHUTTLE_TOKEN
+
+  # Non-interactive: enroll a specific host
+  shuttle enroll --url https://orchestrator:8080 --token $SHUTTLE_TOKEN --host web-1`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		baseURL, _ := cmd.Flags().GetString("url")
 		bearer, _ := cmd.Flags().GetString("token")
@@ -155,9 +163,9 @@ func doJSON(ctx context.Context, client *http.Client, method, url, bearer string
 }
 
 func init() {
-	enrollCmd.Flags().String("url", "", "Orchestrator control-plane URL (e.g. https://orchestrator:8080)")
-	enrollCmd.Flags().String("token", "", "Control-plane bearer token")
-	enrollCmd.Flags().String("host", "", "Host to enroll (skips the interactive picker)")
+	enrollCmd.Flags().String("url", "", "Orchestrator control-plane URL, e.g. https://orchestrator:8080 (required)")
+	enrollCmd.Flags().String("token", "", "Control-plane bearer token (required)")
+	enrollCmd.Flags().String("host", "", "Host to enroll; skips the interactive picker")
 	_ = enrollCmd.MarkFlagRequired("url")
 	_ = enrollCmd.MarkFlagRequired("token")
 }
