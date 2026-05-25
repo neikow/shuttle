@@ -13,35 +13,36 @@ import (
 // pass over the IaC repo. It collects every problem rather than failing on the
 // first, so an operator sees the whole picture in one run.
 type CheckReport struct {
-	SHA            string
-	GitCredentials []GitCredentialCheckResult
-	Services       []ServiceCheck
+	SHA            string                     `json:"sha"`
+	HasProvider    bool                       `json:"has_provider"`
+	GitCredentials []GitCredentialCheckResult `json:"git_credentials,omitempty"`
+	Services       []ServiceCheck             `json:"services,omitempty"`
 }
 
 // ServiceCheck is the per-service outcome of a Check. MissingKeys lists the
 // env_schema keys absent from the resolved secrets; Err records a provider
 // failure (e.g. an Infisical fetch error) that prevented the check.
 type ServiceCheck struct {
-	Service     string
-	Env         string
-	BasePath    string
-	ServicePath string
-	Schema      []string
-	MissingKeys []string
+	Service     string   `json:"service"`
+	Env         string   `json:"env,omitempty"`
+	BasePath    string   `json:"base_path,omitempty"`
+	ServicePath string   `json:"service_path,omitempty"`
+	Schema      []string `json:"schema,omitempty"`
+	MissingKeys []string `json:"missing_keys,omitempty"`
 	// Warnings are non-fatal advisories (e.g. a rolling-update service whose
 	// compose can't run two instances at once). They don't fail the check.
-	Warnings []string
-	Err      error
+	Warnings []string `json:"warnings,omitempty"`
+	Err      string   `json:"error,omitempty"`
 }
 
 // OK reports whether the service passed: no provider error and no missing keys.
 // Warnings do not fail the check.
-func (s ServiceCheck) OK() bool { return s.Err == nil && len(s.MissingKeys) == 0 }
+func (s ServiceCheck) OK() bool { return s.Err == "" && len(s.MissingKeys) == 0 }
 
 // OK reports whether every service and git credential in the report passed.
 func (r *CheckReport) OK() bool {
 	for _, gc := range r.GitCredentials {
-		if gc.Err != nil {
+		if gc.Err != "" {
 			return false
 		}
 	}
@@ -55,9 +56,9 @@ func (r *CheckReport) OK() bool {
 
 // GitCredentialCheckResult is the per-credential outcome of CheckGitCredentials.
 type GitCredentialCheckResult struct {
-	RepoPrefix string
-	Key        string
-	Err        error
+	RepoPrefix string `json:"repo_prefix"`
+	Key        string `json:"key"`
+	Err        string `json:"error,omitempty"`
 }
 
 // CheckGitCredentials verifies that every configured git credential's token
@@ -67,10 +68,9 @@ func (g *GitSyncer) CheckGitCredentials(ctx context.Context) []GitCredentialChec
 	for _, cred := range g.gitCreds {
 		r := GitCredentialCheckResult{RepoPrefix: cred.RepoPrefix, Key: cred.InfisicalKey}
 		if g.secrets == nil {
-			r.Err = fmt.Errorf("no secrets provider configured")
-		} else {
-			_, err := g.secrets.Get(ctx, secrets.Scope{Env: cred.InfisicalEnv, Path: cred.InfisicalPath}, cred.InfisicalKey)
-			r.Err = err
+			r.Err = "no secrets provider configured"
+		} else if _, err := g.secrets.Get(ctx, secrets.Scope{Env: cred.InfisicalEnv, Path: cred.InfisicalPath}, cred.InfisicalKey); err != nil {
+			r.Err = err.Error()
 		}
 		results = append(results, r)
 	}
@@ -89,13 +89,40 @@ func (g *GitSyncer) Check(ctx context.Context) (*CheckReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	report := &CheckReport{SHA: sha, GitCredentials: g.CheckGitCredentials(ctx)}
+	return g.checkRepo(ctx, repo, sha), nil
+}
+
+// CheckRef is Check against an arbitrary git ref (branch, tag, refs/pull/N/head,
+// or SHA) instead of the configured branch HEAD, so CI can validate the exact PR
+// branch. ref == "" falls back to Check. The ref is checked out in isolation,
+// leaving the orchestrator's working tree intact.
+func (g *GitSyncer) CheckRef(ctx context.Context, ref string) (*CheckReport, error) {
+	if ref == "" {
+		return g.Check(ctx)
+	}
+	sib, cleanup, err := g.checkoutRef(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	repo, sha, err := sib.loadHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Render/validate from the sibling's tree (renderCompose reads its dir).
+	return sib.checkRepo(ctx, repo, sha), nil
+}
+
+// checkRepo validates an already-loaded repo+SHA: git-credential availability,
+// per-service env_schema resolution, and rolling-update warnings.
+func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string) *CheckReport {
+	report := &CheckReport{SHA: sha, HasProvider: g.secrets != nil, GitCredentials: g.CheckGitCredentials(ctx)}
 	for _, svc := range repo.Services {
 		sc := g.checkService(ctx, svc)
 		sc.Warnings = g.rollingCheck(ctx, svc)
 		report.Services = append(report.Services, sc)
 	}
-	return report, nil
+	return report
 }
 
 // rollingCheck warns when a service using the rolling update policy has a
@@ -126,13 +153,13 @@ func (g *GitSyncer) checkService(ctx context.Context, svc config.Service) Servic
 
 	all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
 	if err != nil {
-		sc.Err = fmt.Errorf("secrets (base %q): %w", basePath, err)
+		sc.Err = fmt.Sprintf("secrets (base %q): %v", basePath, err)
 		return sc
 	}
 	if svcPath != basePath {
 		specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
 		if err != nil {
-			sc.Err = fmt.Errorf("secrets (service %q): %w", svcPath, err)
+			sc.Err = fmt.Sprintf("secrets (service %q): %v", svcPath, err)
 			return sc
 		}
 		maps.Copy(all, specific) // service-specific keys override the shared base

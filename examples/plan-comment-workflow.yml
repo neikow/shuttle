@@ -1,0 +1,30 @@
+# Drop into an IaC repo as .github/workflows/shuttle-plan.yml
+#
+# On every PR: validate the change and post the orchestrator's diff as a comment.
+# Both `check` and `plan` run remotely against the orchestrator, so the IaC repo's
+# CI needs no copy of the orchestrator config — only a URL + token.
+#
+# Required repo settings:
+#   secrets.SHUTTLE_TOKEN  — control-plane bearer token
+#   vars.SHUTTLE_URL       — orchestrator control-plane URL
+#
+# The action defaults to validating this PR's ref (refs/pull/N/head) against the
+# live ledger, so the diff reflects the PR branch — not just the deployed branch.
+name: Shuttle plan
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: neikow/shuttle/.github/actions/plan-comment@v1
+        with:
+          orchestrator-url: ${{ vars.SHUTTLE_URL }}
+          token: ${{ secrets.SHUTTLE_TOKEN }}
+          shuttle-version: latest
