@@ -41,8 +41,83 @@ type HTTPServer struct {
 	repoWebhookDeployer func(ctx context.Context, services []string) ([]string, error)
 }
 
-// SetEventBus attaches the event bus the control plane publishes to. Call before serving.
-func (s *HTTPServer) SetEventBus(b *EventBus) { s.bus = b }
+// SetEventBus attaches the event bus the control plane publishes to and, when
+// non-nil, registers the SSE event stream at GET /events. Call before serving.
+func (s *HTTPServer) SetEventBus(b *EventBus) {
+	s.bus = b
+	if b != nil {
+		s.mux.HandleFunc("GET /events", s.bearerAuth(s.handleEvents))
+	}
+}
+
+// sseHeartbeat is how often an idle stream emits a comment line, keeping proxies
+// and load balancers from closing the connection.
+const sseHeartbeat = 25 * time.Second
+
+// handleEvents streams orchestrator events to the client as Server-Sent Events.
+// On connect it replays the bus backlog, then forwards live events until the
+// client disconnects. Each event is one `data: <json>` frame; the JSON carries
+// the type, so a client filters on `.type` from a single EventSource.
+func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sub, backlog := s.bus.Subscribe()
+	defer sub.Close()
+
+	for _, ev := range backlog {
+		if err := writeSSE(w, ev); err != nil {
+			return
+		}
+	}
+	flusher.Flush()
+
+	ctx := r.Context()
+	heartbeat := time.NewTicker(sseHeartbeat)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, open := <-sub.C:
+			if !open {
+				return
+			}
+			if err := writeSSE(w, ev); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// writeSSE encodes one event as an SSE data frame.
+func writeSSE(w io.Writer, ev Event) error {
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+	return err
+}
+
+// EnableMetrics registers GET /metrics, serving Prometheus metrics. Unauthed by
+// design: the exposed metrics are low-cardinality aggregates (no service/host
+// labels), matching the standard scrape model. Call before serving.
+func (s *HTTPServer) EnableMetrics(h http.Handler) {
+	s.mux.Handle("GET /metrics", h)
+}
 
 // EnableWebhook registers POST /webhook, which validates the signed payload and
 // triggers a git sync + reconcile. Call before serving.
@@ -51,6 +126,23 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.syncer = syncer
 	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
 	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
+	s.mux.HandleFunc("GET /plan", s.bearerAuth(s.handlePlan))
+}
+
+// handlePlan returns the read-only desired-vs-actual diff (what a reconcile
+// would do) as JSON. Dispatches nothing.
+func (s *HTTPServer) handlePlan(w http.ResponseWriter, r *http.Request) {
+	if s.syncer == nil {
+		http.Error(w, "git sync not configured", http.StatusBadRequest)
+		return
+	}
+	report, err := s.syncer.Plan(r.Context())
+	if err != nil {
+		http.Error(w, "plan: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(report)
 }
 
 // EnableInfisicalWebhook registers POST /webhook/infisical, which authenticates
