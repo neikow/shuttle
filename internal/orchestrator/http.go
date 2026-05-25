@@ -112,6 +112,13 @@ func writeSSE(w io.Writer, ev Event) error {
 	return err
 }
 
+// EnableMetrics registers GET /metrics, serving Prometheus metrics. Unauthed by
+// design: the exposed metrics are low-cardinality aggregates (no service/host
+// labels), matching the standard scrape model. Call before serving.
+func (s *HTTPServer) EnableMetrics(h http.Handler) {
+	s.mux.Handle("GET /metrics", h)
+}
+
 // EnableWebhook registers POST /webhook, which validates the signed payload and
 // triggers a git sync + reconcile. Call before serving.
 func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
