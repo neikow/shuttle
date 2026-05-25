@@ -13,6 +13,7 @@ export default defineConfig({
   server: {
     // Dev: proxy API calls to a local orchestrator so the SPA works without CORS.
     proxy: {
+      "/overview": "http://localhost:8080",
       "/deploys": "http://localhost:8080",
       "/plan": "http://localhost:8080",
       "/check": "http://localhost:8080",
