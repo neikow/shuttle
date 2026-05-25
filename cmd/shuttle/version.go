@@ -11,7 +11,7 @@ var Commit = "unknown"
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Print version",
+	Short: "Print the shuttle version and build commit",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("shuttle %s (%s)\n", Version, Commit)
 	},

@@ -27,7 +27,19 @@ import (
 
 var orchestratorCmd = &cobra.Command{
 	Use:   "orchestrator",
-	Short: "Run the Shuttle orchestrator",
+	Short: "Run the orchestrator: watch the IaC repo and dispatch deploys",
+	Long: `Runs the central control plane. It opens a gRPC server for agents to dial
+into, an HTTP control plane (deploy/rollback/webhook/enroll), watches the IaC
+git repo, and reconciles desired state against the deploy ledger.
+
+Most settings live in the config file (default ./config.yml). The --addr,
+--http-addr, and --data-dir flags only fill in values the config file leaves
+empty, so the config file always wins.`,
+	Example: `  # Run with the default ./config.yml
+  shuttle orchestrator
+
+  # Point at an explicit config and data directory
+  shuttle orchestrator --config /etc/shuttle/config.yml --data-dir /var/lib/shuttle`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configPath, _ := cmd.Flags().GetString("config")
 		cfg, err := config.LoadOrchestratorConfig(configPath)
@@ -252,8 +264,8 @@ func stopGRPC(grpcServer *grpc.Server, timeout time.Duration) bool {
 }
 
 func init() {
-	orchestratorCmd.Flags().String("config", "config.yml", "Path to config file")
-	orchestratorCmd.Flags().String("addr", ":9090", "gRPC listen address")
-	orchestratorCmd.Flags().String("http-addr", ":8080", "HTTP listen address")
-	orchestratorCmd.Flags().String("data-dir", "./data", "Data directory for SQLite ledger")
+	orchestratorCmd.Flags().String("config", "config.yml", "Path to the orchestrator config file")
+	orchestratorCmd.Flags().String("addr", ":9090", "gRPC listen address for agents (if unset in config)")
+	orchestratorCmd.Flags().String("http-addr", ":8080", "HTTP control-plane listen address (if unset in config)")
+	orchestratorCmd.Flags().String("data-dir", "./data", "Directory for the SQLite deploy ledger (if unset in config)")
 }

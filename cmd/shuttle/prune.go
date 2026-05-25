@@ -21,6 +21,7 @@ var pruneCmd = &cobra.Command{
 volumes of every service that has been removed from the IaC repo but whose
 volumes were kept (the default "manual" delete_volumes policy, or a duration
 that has not yet elapsed). This is irreversible.`,
+	Example: `  shuttle prune --url https://orchestrator:8080 --token $SHUTTLE_TOKEN`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		baseURL, _ := cmd.Flags().GetString("url")
 		bearer, _ := cmd.Flags().GetString("token")
@@ -53,6 +54,8 @@ that has not yet elapsed). This is irreversible.`,
 }
 
 func init() {
-	pruneCmd.Flags().String("url", "", "Orchestrator control-plane URL (e.g. https://orchestrator:8080)")
-	pruneCmd.Flags().String("token", "", "Control-plane bearer token")
+	pruneCmd.Flags().String("url", "", "Orchestrator control-plane URL, e.g. https://orchestrator:8080 (required)")
+	pruneCmd.Flags().String("token", "", "Control-plane bearer token (required)")
+	_ = pruneCmd.MarkFlagRequired("url")
+	_ = pruneCmd.MarkFlagRequired("token")
 }
