@@ -76,6 +76,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	defer func() { _ = store.Close() }()
 
 	registry := orchestrator.NewRegistry()
+	bus := orchestrator.NewEventBus()
 
 	var grpcOpts []grpc.ServerOption
 	switch {
@@ -108,6 +109,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	tracker := orchestrator.NewStateTracker()
 	agentServer := orchestrator.NewAgentServiceServer(registry, store)
 	agentServer.SetStateTracker(tracker)
+	agentServer.SetEventBus(bus)
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 	shuttlev1.RegisterAgentServiceServer(grpcServer, agentServer)
@@ -119,6 +121,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	}
 
 	httpHandler := orchestrator.NewHTTPServer(cfg.BearerToken, store, registry)
+	httpHandler.SetEventBus(bus)
 	if cfg.RepoURL != "" && cfg.WebhookSecret != "" {
 		repoDir := cfg.RepoDir
 		if repoDir == "" {
@@ -134,6 +137,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
 		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
 		syncer.SetGitCredentials(cfg.GitCredentials)
+		syncer.SetEventBus(bus)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
 			syncer.SetHTTPSRedirect(cfg.HTTPSRedirect)
@@ -175,6 +179,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		}
 
 		reconciler := orchestrator.NewDriftReconciler(syncer, tracker, 60*time.Second, 90*time.Second)
+		reconciler.SetEventBus(bus)
 		go reconciler.Run(ctx)
 		slog.Info("drift reconciler started", "interval", "60s")
 

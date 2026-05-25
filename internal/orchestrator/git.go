@@ -40,7 +40,11 @@ type GitSyncer struct {
 	secretsBasePath     string
 	secretsPathTemplate string
 	gitCreds            []config.GitCredential
+	bus                 *EventBus // optional; nil-safe
 }
+
+// SetEventBus attaches the event bus this syncer publishes to. Call before serving.
+func (g *GitSyncer) SetEventBus(b *EventBus) { g.bus = b }
 
 // SetCaddy attaches a Caddy admin client; routes derived from the repo are
 // pushed after each reconcile. Call before serving.
@@ -234,6 +238,10 @@ func (g *GitSyncer) reconcileRemovals(ctx context.Context, repo *config.Repo) {
 			continue
 		}
 		slog.Info("service teardown dispatched", "service", sl.Service, "host", sl.Host)
+		g.bus.Publish(Event{
+			Type: EventServiceRemoved, Service: sl.Service, Host: sl.Host,
+			Message: "containers torn down (volumes kept)",
+		})
 	}
 }
 
@@ -307,6 +315,10 @@ func (g *GitSyncer) dispatchPurges(ctx context.Context, services []ledger.Servic
 			continue
 		}
 		slog.Info("service volumes purged", "service", sl.Service, "host", sl.Host)
+		g.bus.Publish(Event{
+			Type: EventVolumesPurged, Service: sl.Service, Host: sl.Host,
+			Message: "named volumes deleted",
+		})
 		purged = append(purged, sl.Service)
 	}
 	return purged
@@ -465,9 +477,23 @@ func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step,
 	}
 	if err := g.registry.Send(step.Host, cmd); err != nil {
 		_ = g.store.MarkStatus(ctx, deployID, ledger.StatusFailed)
+		g.bus.Publish(Event{
+			Type: EventDeployFailed, Service: step.Service, Host: step.Host,
+			DeployID: deployID, SHA: step.SHA, Status: string(ledger.StatusFailed),
+			Message: "send to agent failed",
+		})
 		return "", fmt.Errorf("send to agent: %w", err)
 	}
 	slog.Info("deploy dispatched", "deploy_id", deployID, "service", step.Service, "host", step.Host, "sha", step.SHA)
+	queuedType := EventDeployQueued
+	if triggeredBy == ledger.TriggeredByRollback {
+		queuedType = EventRollbackQueued
+	}
+	g.bus.Publish(Event{
+		Type: queuedType, Service: step.Service, Host: step.Host,
+		DeployID: deployID, SHA: step.SHA, Status: string(ledger.StatusPending),
+		Detail: map[string]string{"triggered_by": string(triggeredBy)},
+	})
 	return deployID, nil
 }
 

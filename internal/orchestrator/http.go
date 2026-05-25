@@ -33,11 +33,16 @@ type HTTPServer struct {
 	infisicalDebounce *changeDebouncer
 	infisicalDefEnv   string // default env for services with no env_from
 
+	bus *EventBus // optional; nil-safe
+
 	// repoWebhookDeployer is the ForceDeploy implementation used by the
 	// repo-webhook trigger handler. Kept separate so tests can substitute a
 	// stub without needing a real GitSyncer.
 	repoWebhookDeployer func(ctx context.Context, services []string) ([]string, error)
 }
+
+// SetEventBus attaches the event bus the control plane publishes to. Call before serving.
+func (s *HTTPServer) SetEventBus(b *EventBus) { s.bus = b }
 
 // EnableWebhook registers POST /webhook, which validates the signed payload and
 // triggers a git sync + reconcile. Call before serving.
@@ -271,11 +276,20 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.registry.Send(host, cmd); err != nil {
 		_ = s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
+		s.bus.Publish(Event{
+			Type: EventDeployFailed, Service: service, Host: host, DeployID: deployID,
+			SHA: sha, Status: string(ledger.StatusFailed), Message: "send to agent failed",
+		})
 		http.Error(w, "send to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	slog.Info("deploy queued", "deploy_id", deployID, "service", service, "host", host)
+	s.bus.Publish(Event{
+		Type: EventDeployQueued, Service: service, Host: host, DeployID: deployID,
+		SHA: sha, Status: string(ledger.StatusPending),
+		Detail: map[string]string{"triggered_by": string(ledger.TriggeredByManual)},
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(map[string]string{"deploy_id": deployID})
@@ -346,10 +360,19 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.registry.Send(host, cmd); err != nil {
 		_ = s.ledger.MarkStatus(r.Context(), deployID, ledger.StatusFailed)
+		s.bus.Publish(Event{
+			Type: EventDeployFailed, Service: service, Host: host, DeployID: deployID,
+			SHA: targetSHA, Status: string(ledger.StatusFailed), Message: "send rollback to agent failed",
+		})
 		http.Error(w, "send rollback to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
+	s.bus.Publish(Event{
+		Type: EventRollbackQueued, Service: service, Host: host, DeployID: deployID,
+		SHA: targetSHA, Status: string(ledger.StatusPending),
+		Detail: map[string]string{"triggered_by": string(ledger.TriggeredByRollback)},
+	})
 	slog.Info("rollback queued", "deploy_id", deployID, "service", service, "target_sha", targetSHA)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
