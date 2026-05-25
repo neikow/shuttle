@@ -51,6 +51,23 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.syncer = syncer
 	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
 	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
+	s.mux.HandleFunc("GET /plan", s.bearerAuth(s.handlePlan))
+}
+
+// handlePlan returns the read-only desired-vs-actual diff (what a reconcile
+// would do) as JSON. Dispatches nothing.
+func (s *HTTPServer) handlePlan(w http.ResponseWriter, r *http.Request) {
+	if s.syncer == nil {
+		http.Error(w, "git sync not configured", http.StatusBadRequest)
+		return
+	}
+	report, err := s.syncer.Plan(r.Context())
+	if err != nil {
+		http.Error(w, "plan: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(report)
 }
 
 // EnableInfisicalWebhook registers POST /webhook/infisical, which authenticates

@@ -53,7 +53,8 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/plan`). |
+| `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
@@ -240,6 +241,15 @@ These are deliberate. Don't reverse them without updating this file.
   late subscribers); the **ledger remains the source of truth** for deploy
   history. All methods are nil-safe, so the bus is an optional dependency every
   publisher holds unconditionally.
+- **`plan` is read-only and dual-mode.** `shuttle plan` previews what a
+  reconcile would do (`create`/`update`/`unchanged`/`remove` per service)
+  without dispatching. Remote mode (`GET /plan`, bearer) asks the running
+  orchestrator so the diff is against the live ledger; local mode (`--config`)
+  clones the repo and diffs against the ledger at `--data-dir` — with no ledger
+  (CI) every service is `create`. The diff core (`buildPlanReport`) is pure
+  (repo + current SHAs → report), so it reuses the same `ledger.CurrentSHAs`
+  the reconcile path uses, keeping plan and apply consistent. `--exit-code`
+  exits 2 on a non-empty plan for CI gating.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done
