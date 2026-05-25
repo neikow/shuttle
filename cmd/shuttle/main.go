@@ -62,9 +62,10 @@ func main() {
 	enrollCmd.GroupID = "ops"
 	pruneCmd.GroupID = "ops"
 	webhookCmd.GroupID = "ops"
+	eventsCmd.GroupID = "ops"
 	checkCmd.GroupID = "tools"
 	versionCmd.GroupID = "tools"
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd)
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd, eventsCmd)
 	silenceUsageOnRun(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
