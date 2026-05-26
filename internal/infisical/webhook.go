@@ -3,6 +3,7 @@
 package infisical
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -13,10 +14,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
 	maxBodyBytes = 1 << 20 // 1 MiB
+	// nonceTTL bounds how long a signed webhook body is remembered for replay
+	// rejection. Matches the repo webhook's window.
+	nonceTTL = 10 * time.Minute
 	// SignatureHeader is the HMAC signature Infisical sends with each webhook.
 	SignatureHeader = "x-infisical-signature"
 
@@ -77,14 +82,25 @@ func (p *Payload) Path() string {
 	}
 }
 
+// NonceStore records replay-prevention nonces with a TTL, returning true if the
+// nonce was already seen. Satisfied by the ledger store.
+type NonceStore interface {
+	SeenNonce(ctx context.Context, nonce string, ttl time.Duration) (bool, error)
+}
+
 // Handler authenticates and decodes Infisical webhooks. When secret is empty
 // signature verification is skipped (Infisical webhooks may be unsigned), but
 // callers are expected to require a secret in production.
 type Handler struct {
 	secret string
+	nonces NonceStore // optional; when set, signed webhooks are replay-guarded
 }
 
 func NewHandler(secret string) *Handler { return &Handler{secret: secret} }
+
+// SetNonceStore attaches a replay-prevention store. Once set, a signed webhook
+// whose body was already seen within the TTL is rejected. Call before serving.
+func (h *Handler) SetNonceStore(n NonceStore) { h.nonces = n }
 
 // Parse reads the body, verifies the Infisical HMAC signature (when a secret is
 // configured), and decodes the payload.
@@ -125,9 +141,33 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 		} else {
 			slog.Debug("infisical parse: skipping signature (unsigned test ping)")
 		}
+
+		// Replay guard: the signature covers only the body, so a captured signed
+		// webhook could otherwise be replayed indefinitely (the t= timestamp is
+		// not part of the HMAC and is attacker-controlled). Reject a body already
+		// seen within the TTL. Skipped for unsigned test pings.
+		if h.nonces != nil && p.Event != EventTest {
+			seen, err := h.nonces.SeenNonce(r.Context(), bodyNonce(body), nonceTTL)
+			if err != nil {
+				return nil, fmt.Errorf("nonce check: %w", err)
+			}
+			if seen {
+				return nil, fmt.Errorf("replay detected")
+			}
+		}
 	}
 
 	return &p, nil
+}
+
+// bodyNonce derives a replay nonce from the request body. The "infisical/"
+// domain prefix separates these nonces from the repo webhook's (both share the
+// ledger's nonce table).
+func bodyNonce(body []byte) string {
+	h := sha256.New()
+	h.Write([]byte("infisical/"))
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 // VerifySignature checks Infisical's x-infisical-signature header, formatted as

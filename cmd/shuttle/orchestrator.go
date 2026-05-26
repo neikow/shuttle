@@ -162,8 +162,10 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 				}
 				debounce = d
 			}
+			infisicalHandler := infisical.NewHandler(cfg.InfisicalWebhookSecret)
+			infisicalHandler.SetNonceStore(store)
 			httpHandler.EnableInfisicalWebhook(
-				infisical.NewHandler(cfg.InfisicalWebhookSecret),
+				infisicalHandler,
 				syncer, debounce, os.Getenv("INFISICAL_ENV"),
 			)
 			slog.Info("infisical webhook enabled", "debounce", debounce)
