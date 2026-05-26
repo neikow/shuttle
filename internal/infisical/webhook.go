@@ -118,7 +118,7 @@ func (h *Handler) Parse(r *http.Request) (*Payload, error) {
 		return nil, fmt.Errorf("body too large")
 	}
 
-	slog.Debug("infisical parse: raw body", "body", string(body), "secret_configured", h.secret != "")
+	slog.Debug("infisical parse: read body", "bytes", len(body), "secret_configured", h.secret != "")
 
 	var p Payload
 	if err := json.Unmarshal(body, &p); err != nil {

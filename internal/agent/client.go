@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -401,21 +402,8 @@ func streamDeployResult(stream shuttlev1.AgentService_RegisterClient, deployID s
 	})
 }
 
+// containsError reports whether a log line carries the synthetic marker that
+// emitErr writes when a compose operation fails.
 func containsError(text string) bool {
-	lower := text
-	// docker compose error indicator in log output.
-	return len(lower) > 0 && (containsAny(lower, "[shuttle] compose error"))
-}
-
-func containsAny(s string, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s, sub))
-}
-
-func containsStr(s, sub string) bool {
-	for i := range s {
-		if i+len(sub) <= len(s) && s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(text, "[shuttle] compose error")
 }
