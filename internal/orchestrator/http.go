@@ -33,7 +33,8 @@ type HTTPServer struct {
 	infisicalDebounce *changeDebouncer
 	infisicalDefEnv   string // default env for services with no env_from
 
-	bus *EventBus // optional; nil-safe
+	bus          *EventBus     // optional; nil-safe
+	stateTracker *StateTracker // optional; nil-safe (powers GET /overview)
 
 	// repoWebhookDeployer is the ForceDeploy implementation used by the
 	// repo-webhook trigger handler. Kept separate so tests can substitute a
@@ -294,6 +295,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 		mux:      http.NewServeMux(),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /overview", s.bearerAuth(s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.bearerAuth(s.handleListDeploys))
 	s.mux.HandleFunc("POST /deploy/{service}", s.bearerAuth(s.handleDeploy))
 	s.mux.HandleFunc("POST /rollback", s.bearerAuth(s.handleRollback))

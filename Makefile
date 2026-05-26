@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
+.PHONY: build build-ui web web-install web-dev test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -10,6 +10,22 @@ LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/shuttle
+
+# Build the binary with the embedded web UI (runs the frontend build first).
+build-ui: web
+	go build -tags embedui -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/shuttle
+
+# Install the production frontend deps.
+web-install:
+	cd web && npm ci
+
+# Build the React UI into web/dist (consumed by the embedui build tag).
+web: web-install
+	cd web && npm run build
+
+# Run the Vite dev server (proxies API calls to a local orchestrator on :8080).
+web-dev:
+	cd web && npm run dev
 
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/shuttle

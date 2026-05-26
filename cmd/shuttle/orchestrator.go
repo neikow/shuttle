@@ -125,6 +125,8 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	metrics := orchestrator.NewMetrics(bus, registry)
 	go metrics.Run(ctx, bus)
 	httpHandler.EnableMetrics(metrics.Handler())
+	httpHandler.SetStateTracker(tracker)
+	httpHandler.EnableUI()
 	if cfg.RepoURL != "" && cfg.WebhookSecret != "" {
 		repoDir := cfg.RepoDir
 		if repoDir == "" {
