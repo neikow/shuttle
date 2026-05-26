@@ -83,15 +83,21 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 	}
 
 	conn := s.registry.register(host)
-	defer s.registry.unregister(host)
+	defer s.registry.unregister(conn)
 	slog.Info("agent connected", "host", host, "version", reg.AgentVersion)
 
-	// Fan-out: send commands from registry channel to stream.
+	// Fan-out: send commands from the registry channel to the stream until the
+	// connection is retired (evicted, unregistered, or displaced by a reconnect).
 	go func() {
-		for cmd := range conn.send {
-			if err := stream.Send(cmd); err != nil {
-				slog.Error("send to agent failed", "host", host, "err", err)
+		for {
+			select {
+			case <-conn.done:
 				return
+			case cmd := <-conn.send:
+				if err := stream.Send(cmd); err != nil {
+					slog.Error("send to agent failed", "host", host, "err", err)
+					return
+				}
 			}
 		}
 	}()

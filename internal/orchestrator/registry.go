@@ -14,10 +14,19 @@ const (
 )
 
 type agentConn struct {
-	host     string
-	send     chan *shuttlev1.OrchestratorCommand
-	lastSeen time.Time
+	host string
+	send chan *shuttlev1.OrchestratorCommand
+	// done is closed exactly once when this connection is retired (evicted,
+	// unregistered, or displaced by a reconnect). The fan-out goroutine selects
+	// on it to stop, and Send selects on it so it never writes to a retired
+	// connection. The send channel is never closed, so a concurrent Send can
+	// never panic on a closed channel.
+	done      chan struct{}
+	closeOnce sync.Once
+	lastSeen  time.Time
 }
+
+func (c *agentConn) close() { c.closeOnce.Do(func() { close(c.done) }) }
 
 // Registry tracks connected agents.
 type Registry struct {
@@ -31,25 +40,35 @@ func NewRegistry() *Registry {
 	return r
 }
 
+// register adds a connection for host and returns it. If host already has a
+// connection (a stale stream that has not yet torn down), that one is retired
+// first so its fan-out goroutine stops and it is no longer addressable.
 func (r *Registry) register(host string) *agentConn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if old, ok := r.conns[host]; ok {
+		old.close()
+	}
 	conn := &agentConn{
 		host:     host,
 		send:     make(chan *shuttlev1.OrchestratorCommand, 16),
+		done:     make(chan struct{}),
 		lastSeen: time.Now(),
 	}
 	r.conns[host] = conn
 	return conn
 }
 
-func (r *Registry) unregister(host string) {
+// unregister retires conn and removes it from the registry, but only if it is
+// still the current connection for its host. A connection that was already
+// displaced by a reconnect is retired without disturbing its replacement.
+func (r *Registry) unregister(conn *agentConn) {
 	r.mu.Lock()
-	if conn, ok := r.conns[host]; ok {
-		close(conn.send)
-		delete(r.conns, host)
+	if cur, ok := r.conns[conn.host]; ok && cur == conn {
+		delete(r.conns, conn.host)
 	}
 	r.mu.Unlock()
+	conn.close()
 }
 
 func (r *Registry) touch(host string) {
@@ -69,8 +88,15 @@ func (r *Registry) Send(host string, cmd *shuttlev1.OrchestratorCommand) error {
 		return fmt.Errorf("agent %q not connected", host)
 	}
 	select {
+	case <-conn.done:
+		return fmt.Errorf("agent %q not connected", host)
+	default:
+	}
+	select {
 	case conn.send <- cmd:
 		return nil
+	case <-conn.done:
+		return fmt.Errorf("agent %q not connected", host)
 	default:
 		return fmt.Errorf("agent %q send buffer full", host)
 	}
@@ -118,7 +144,7 @@ func (r *Registry) evictLoop() {
 		r.mu.Lock()
 		for host, conn := range r.conns {
 			if time.Since(conn.lastSeen) > evictAfter {
-				close(conn.send)
+				conn.close()
 				delete(r.conns, host)
 			}
 		}
