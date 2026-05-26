@@ -83,22 +83,45 @@ shuttle agent --driver synology --orchestrator … --host nas1
 
 ## HTTP control plane
 
-| Method & path            | Auth   | Purpose                                  |
-|--------------------------|--------|------------------------------------------|
-| `GET  /healthz`          | none   | Liveness probe                           |
-| `GET  /deploys`          | bearer | List deploy ledger records               |
-| `POST /deploy/{service}?sha=…` | bearer | Manually deploy a service at a commit |
-| `POST /rollback?service=…&steps=N` | bearer | Roll a service back N deploys |
-| `GET  /hosts`            | bearer | List enrollable hosts (token auth)       |
-| `POST /enroll`           | bearer | Mint an agent enrollment token           |
-| `POST /webhook`          | HMAC   | Git push trigger (signed, replay-guarded)|
-| `POST /prune`            | bearer | Delete kept volumes of removed services  |
+| Method & path                      | Auth   | Purpose                                          |
+|------------------------------------|--------|--------------------------------------------------|
+| `GET  /healthz`                    | none   | Liveness probe                                   |
+| `GET  /metrics`                    | none   | Prometheus metrics                               |
+| `GET  /deploys`                    | bearer | List deploy ledger records                       |
+| `POST /deploy/{service}?sha=…`     | bearer | Manually deploy a service at a commit            |
+| `POST /rollback?service=…&steps=N` | bearer | Roll a service back N deploys                    |
+| `GET  /overview`                   | bearer | Host + service health snapshot (backs the UI)    |
+| `GET  /plan`                       | bearer | Desired-vs-actual diff (no deploy)               |
+| `GET  /check`                      | bearer | Validate config + secrets (no deploy)            |
+| `GET  /events`                     | bearer | SSE stream of orchestrator events                |
+| `GET  /hosts`                      | bearer | List enrollable hosts (token auth)               |
+| `POST /enroll`                     | bearer | Mint an agent enrollment token                   |
+| `POST /webhook`                    | HMAC   | Git push trigger (signed, replay-guarded)        |
+| `POST /webhook/infisical`          | HMAC   | Infisical secret-change trigger                  |
+| `POST /webhook/repo/{id}`          | ID     | Service-specific deploy webhook (ID = secret)    |
+| `POST /webhooks/repo`              | bearer | Create a service-specific deploy webhook         |
+| `GET  /webhooks/repo`              | bearer | List service-specific deploy webhooks            |
+| `DELETE /webhooks/repo/{id}`       | bearer | Delete a service-specific deploy webhook         |
+| `POST /prune`                      | bearer | Delete kept volumes of removed services          |
 
 Bearer auth uses the static `bearer_token` from config. Webhooks verify an
 `X-Hub-Signature-256` HMAC and reject replays. Agents authenticate with either a
 client cert (mTLS) or a host-scoped enrollment token over server TLS — see
 [docs/operations.md](docs/operations.md#enrolling-agents-with-tokens). Full API
 reference: [docs/http-api.md](docs/http-api.md).
+
+## Web UI
+
+Build the binary with the embedded dashboard:
+
+```sh
+make build-ui   # runs make web, then embeds web/dist (-tags embedui)
+```
+
+The UI is served under `/ui/` (unauthenticated static bundle; the browser
+authenticates its own API calls with the bearer token you paste into the UI).
+During development, `make web-dev` starts a Vite dev server that proxies API
+requests to a local orchestrator on `:8080`.
 
 ## IaC repository layout
 
