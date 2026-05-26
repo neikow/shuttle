@@ -1,11 +1,60 @@
 package infisical
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fakeNonces is an in-memory NonceStore: it returns true the second time a
+// nonce is seen within the (ignored) TTL.
+type fakeNonces struct{ seen map[string]bool }
+
+func (f *fakeNonces) SeenNonce(_ context.Context, nonce string, _ time.Duration) (bool, error) {
+	if f.seen[nonce] {
+		return true, nil
+	}
+	f.seen[nonce] = true
+	return false, nil
+}
+
+func TestParse_replayRejected(t *testing.T) {
+	secret := "whsec"
+	body := `{"event":"secrets.modified","project":{"environment":"prod","secretPath":"/services/api"}}`
+	sig := ComputeHeader("1700000000", []byte(body), secret)
+
+	h := NewHandler(secret)
+	h.SetNonceStore(&fakeNonces{seen: map[string]bool{}})
+
+	r1 := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	r1.Header.Set(SignatureHeader, sig)
+	if _, err := h.Parse(r1); err != nil {
+		t.Fatalf("first delivery rejected: %v", err)
+	}
+
+	r2 := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+	r2.Header.Set(SignatureHeader, sig)
+	if _, err := h.Parse(r2); err == nil {
+		t.Fatal("replayed delivery should be rejected")
+	}
+}
+
+func TestParse_replayGuardSkipsTestPing(t *testing.T) {
+	h := NewHandler("whsec")
+	h.SetNonceStore(&fakeNonces{seen: map[string]bool{}})
+
+	body := `{"event":"test"}`
+	// Unsigned test pings are accepted repeatedly (no replay guard applied).
+	for i := range 2 {
+		r := httptest.NewRequest("POST", "/x", strings.NewReader(body))
+		if _, err := h.Parse(r); err != nil {
+			t.Fatalf("test ping %d rejected: %v", i, err)
+		}
+	}
+}
 
 func TestParse_signedRoundTrip(t *testing.T) {
 	secret := "whsec"
