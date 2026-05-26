@@ -229,3 +229,15 @@ func TestDeleteRepoWebhook_unauthorized(t *testing.T) {
 		t.Errorf("want 401, got %d", w.Code)
 	}
 }
+
+func TestNewID_unique(t *testing.T) {
+	const n = 10000
+	seen := make(map[string]struct{}, n)
+	for range n {
+		id := newID()
+		if _, dup := seen[id]; dup {
+			t.Fatalf("duplicate id minted: %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+}

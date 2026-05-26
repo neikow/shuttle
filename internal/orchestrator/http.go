@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
@@ -537,9 +538,15 @@ func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// newID generates a time-ordered unique ID. Uses context to avoid importing ulid.
+// idCounter disambiguates IDs minted within the same nanosecond.
+var idCounter atomic.Uint64
+
+// newID generates a time-ordered unique ID. The nanosecond timestamp keeps IDs
+// roughly sortable; a monotonic counter suffix guarantees uniqueness even when
+// several IDs are minted in the same nanosecond (e.g. a ForceDeploy loop over
+// many services), which would otherwise collide on the ledger's primary key.
 func newID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), idCounter.Add(1))
 }
 
 // EnableRepoWebhooks registers the repo-webhook management and trigger endpoints.
