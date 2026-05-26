@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
@@ -42,6 +43,12 @@ type GitSyncer struct {
 	secretsPathTemplate string
 	gitCreds            []config.GitCredential
 	bus                 *EventBus // optional; nil-safe
+
+	// liveRepoCfg is loaded from orchestrator.yaml in the IaC repo on every
+	// sync. It provides runtime overrides for a subset of bootstrap settings
+	// without requiring an orchestrator restart. Nil means no file present.
+	// Written atomically by syncAndLoad; read atomically everywhere else.
+	liveRepoCfg atomic.Pointer[config.RepoOrchestratorConfig]
 }
 
 // SetEventBus attaches the event bus this syncer publishes to. Call before serving.
@@ -76,10 +83,17 @@ func (g *GitSyncer) SetGitCredentials(creds []config.GitCredential) {
 // credential's repo prefix so it is not sent to any other remote a single
 // command might contact.
 func (g *GitSyncer) credEnv(ctx context.Context, rawURL string) ([]string, error) {
-	if g.secrets == nil || len(g.gitCreds) == 0 {
+	if g.secrets == nil {
 		return nil, nil
 	}
-	for _, cred := range g.gitCreds {
+	creds := g.gitCreds
+	if rc := g.liveRepoCfg.Load(); rc != nil && rc.GitCredentials != nil {
+		creds = rc.GitCredentials
+	}
+	if len(creds) == 0 {
+		return nil, nil
+	}
+	for _, cred := range creds {
 		if !strings.HasPrefix(rawURL, "https://"+cred.RepoPrefix) {
 			continue
 		}
@@ -139,7 +153,9 @@ func (g *GitSyncer) Sync(ctx context.Context) (string, error) {
 }
 
 // syncAndLoad syncs the repo and parses the IaC config, returning the parsed
-// repo and the checked-out SHA.
+// repo and the checked-out SHA. It also refreshes the live repo config from
+// orchestrator.yaml (if present), making any overrides available immediately
+// within the same reconcile cycle.
 func (g *GitSyncer) syncAndLoad(ctx context.Context) (*config.Repo, string, error) {
 	sha, err := g.Sync(ctx)
 	if err != nil {
@@ -149,7 +165,25 @@ func (g *GitSyncer) syncAndLoad(ctx context.Context) (*config.Repo, string, erro
 	if err != nil {
 		return nil, "", fmt.Errorf("load config: %w", err)
 	}
+	g.refreshRepoConfig()
 	return repo, sha, nil
+}
+
+// refreshRepoConfig reads orchestrator.yaml from the synced repo and atomically
+// updates the live override. A parse error is logged and the previous value is
+// kept so a bad commit never blocks deploys.
+func (g *GitSyncer) refreshRepoConfig() {
+	cfg, ok, err := config.LoadRepoOrchestratorConfig(g.dir)
+	if !ok {
+		g.liveRepoCfg.Store(nil)
+		return
+	}
+	if err != nil {
+		slog.Warn("orchestrator.yaml invalid; keeping previous repo config", "err", err)
+		return
+	}
+	g.liveRepoCfg.Store(cfg)
+	slog.Debug("repo orchestrator config applied", "caddy_admin_url", cfg.CaddyAdminURL)
 }
 
 // loadHead parses the IaC config from the working tree as-is (no sync) and
@@ -201,10 +235,29 @@ func (g *GitSyncer) checkoutRef(ctx context.Context, ref string) (sib *GitSyncer
 		return fail("checkout %s: %w", ref, err)
 	}
 
-	clone := *g
-	clone.dir = tmp
-	clone.branch = ref
-	return &clone, cleanup, nil
+	// Build a sibling syncer that shares all read-only state with the parent
+	// but points at the temp checkout. Struct copy is avoided because GitSyncer
+	// contains atomic.Pointer (no-copy type); fields are assigned explicitly.
+	clone := &GitSyncer{
+		repoURL:             g.repoURL,
+		branch:              ref,
+		dir:                 tmp,
+		store:               g.store,
+		registry:            g.registry,
+		secrets:             g.secrets,
+		caddy:               g.caddy,
+		httpsRedirect:       g.httpsRedirect,
+		secretsBasePath:     g.secretsBasePath,
+		secretsPathTemplate: g.secretsPathTemplate,
+		gitCreds:            g.gitCreds,
+		bus:                 g.bus,
+	}
+	// Share the parent's live repo config so ref-based plan/check also picks
+	// up any orchestrator.yaml overrides that are already in effect.
+	if rc := g.liveRepoCfg.Load(); rc != nil {
+		clone.liveRepoCfg.Store(rc)
+	}
+	return clone, cleanup, nil
 }
 
 // dispatchPlan dispatches the deploy steps, skipping any not in filter (when
@@ -391,8 +444,19 @@ func (g *GitSyncer) dispatchPurges(ctx context.Context, services []ledger.Servic
 }
 
 // applyRoutes pushes the repo's desired routes to Caddy when configured.
+// Live repo config overrides (orchestrator.yaml) take precedence over bootstrap.
 func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
-	if g.caddy == nil {
+	caddy := g.caddy
+	httpsRedirect := g.httpsRedirect
+	if rc := g.liveRepoCfg.Load(); rc != nil {
+		if rc.CaddyAdminURL != "" {
+			caddy = NewCaddyClient(rc.CaddyAdminURL)
+		}
+		if rc.HTTPSRedirect != nil {
+			httpsRedirect = *rc.HTTPSRedirect
+		}
+	}
+	if caddy == nil {
 		return
 	}
 	routes, err := RoutesFromRepo(repo)
@@ -400,7 +464,7 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 		slog.Error("derive caddy routes failed", "err", err)
 		return
 	}
-	if err := g.caddy.ApplyRoutes(ctx, routes, g.httpsRedirect); err != nil {
+	if err := caddy.ApplyRoutes(ctx, routes, httpsRedirect); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return
 	}
@@ -411,8 +475,12 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 // agent running a Caddy sidecar (--caddy) can apply it via CaddyConfigRequest.
 // Hosts with no routable services, or whose agent is not connected, are skipped.
 func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
+	httpsRedirect := g.httpsRedirect
+	if rc := g.liveRepoCfg.Load(); rc != nil && rc.HTTPSRedirect != nil {
+		httpsRedirect = *rc.HTTPSRedirect
+	}
 	for _, h := range repo.Hosts {
-		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, g.httpsRedirect)
+		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect)
 		if err != nil {
 			slog.Error("build caddy config failed", "host", h.Name, "err", err)
 			continue
@@ -646,7 +714,17 @@ func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[stri
 	if g.secrets == nil {
 		return nil, nil
 	}
-	basePath, svcPath := config.ResolveSecretsPaths(g.secretsBasePath, g.secretsPathTemplate, svc.SecretPath, svc.Name)
+	secretsBase := g.secretsBasePath
+	secretsTemplate := g.secretsPathTemplate
+	if rc := g.liveRepoCfg.Load(); rc != nil {
+		if rc.SecretsBasePath != "" {
+			secretsBase = rc.SecretsBasePath
+		}
+		if rc.SecretsPathTemplate != "" {
+			secretsTemplate = rc.SecretsPathTemplate
+		}
+	}
+	basePath, svcPath := config.ResolveSecretsPaths(secretsBase, secretsTemplate, svc.SecretPath, svc.Name)
 
 	all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
 	if err != nil {
