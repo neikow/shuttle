@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -66,25 +67,35 @@ func (g *GitSyncer) SetGitCredentials(creds []config.GitCredential) {
 	g.gitCreds = creds
 }
 
-// rewriteURL injects an HTTPS token into rawURL if a matching GitCredential
-// is configured. Returns rawURL unchanged if no match or no secrets provider.
-func (g *GitSyncer) rewriteURL(ctx context.Context, rawURL string) (string, error) {
+// credEnv returns the process environment that authenticates a git operation
+// against rawURL when a matching GitCredential is configured, or nil if there is
+// no match (or no secrets provider). The token is injected as a one-shot
+// http.extraHeader via GIT_CONFIG_* env vars rather than embedded in the remote
+// URL, so it is never written to the clone's .git/config on disk and never
+// appears in the process argument list. The header is scoped to the
+// credential's repo prefix so it is not sent to any other remote a single
+// command might contact.
+func (g *GitSyncer) credEnv(ctx context.Context, rawURL string) ([]string, error) {
 	if g.secrets == nil || len(g.gitCreds) == 0 {
-		return rawURL, nil
+		return nil, nil
 	}
 	for _, cred := range g.gitCreds {
-		prefix := "https://" + cred.RepoPrefix
-		if !strings.HasPrefix(rawURL, prefix) {
+		if !strings.HasPrefix(rawURL, "https://"+cred.RepoPrefix) {
 			continue
 		}
 		token, err := g.secrets.Get(ctx, secrets.Scope{Env: cred.InfisicalEnv, Path: cred.InfisicalPath}, cred.InfisicalKey)
 		if err != nil {
-			return "", fmt.Errorf("git credential for %q: %w", cred.RepoPrefix, err)
+			return nil, fmt.Errorf("git credential for %q: %w", cred.RepoPrefix, err)
 		}
-		rest := strings.TrimPrefix(rawURL, "https://")
-		return "https://oauth2:" + token + "@" + rest, nil
+		auth := base64.StdEncoding.EncodeToString([]byte("oauth2:" + token))
+		key := "http.https://" + cred.RepoPrefix + ".extraHeader"
+		return []string{
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=" + key,
+			"GIT_CONFIG_VALUE_0=Authorization: Basic " + auth,
+		}, nil
 	}
-	return rawURL, nil
+	return nil, nil
 }
 
 func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Registry, sec secrets.Provider) *GitSyncer {
@@ -104,16 +115,16 @@ func NewGitSyncer(repoURL, branch, dir string, store *ledger.Store, registry *Re
 // Sync clones the repo if absent, otherwise fetches and hard-resets to the tip
 // of the configured branch. Returns the checked-out commit SHA.
 func (g *GitSyncer) Sync(ctx context.Context) (string, error) {
-	repoURL, err := g.rewriteURL(ctx, g.repoURL)
+	env, err := g.credEnv(ctx, g.repoURL)
 	if err != nil {
 		return "", fmt.Errorf("git credential: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(g.dir, ".git")); errors.Is(err, os.ErrNotExist) {
-		if err := g.git(ctx, "", "clone", "--branch", g.branch, "--single-branch", repoURL, g.dir); err != nil {
+		if err := g.gitEnv(ctx, "", env, "clone", "--branch", g.branch, "--single-branch", g.repoURL, g.dir); err != nil {
 			return "", fmt.Errorf("clone: %w", err)
 		}
 	} else {
-		if err := g.git(ctx, g.dir, "fetch", "origin", g.branch); err != nil {
+		if err := g.gitEnv(ctx, g.dir, env, "fetch", "origin", g.branch); err != nil {
 			return "", fmt.Errorf("fetch: %w", err)
 		}
 		if err := g.git(ctx, g.dir, "reset", "--hard", "origin/"+g.branch); err != nil {
@@ -173,17 +184,17 @@ func (g *GitSyncer) checkoutRef(ctx context.Context, ref string) (sib *GitSyncer
 		return nil, func() {}, fmt.Errorf(format, a...)
 	}
 
-	repoURL, err := g.rewriteURL(ctx, g.repoURL)
+	env, err := g.credEnv(ctx, g.repoURL)
 	if err != nil {
 		return fail("git credential: %w", err)
 	}
 	if err := g.git(ctx, "", "init", "-q", tmp); err != nil {
 		return fail("init: %w", err)
 	}
-	if err := g.git(ctx, tmp, "remote", "add", "origin", repoURL); err != nil {
+	if err := g.git(ctx, tmp, "remote", "add", "origin", g.repoURL); err != nil {
 		return fail("remote add: %w", err)
 	}
-	if err := g.git(ctx, tmp, "fetch", "--depth", "1", "origin", ref); err != nil {
+	if err := g.gitEnv(ctx, tmp, env, "fetch", "--depth", "1", "origin", ref); err != nil {
 		return fail("fetch %s: %w", ref, err)
 	}
 	if err := g.git(ctx, tmp, "checkout", "-q", "FETCH_HEAD"); err != nil {
@@ -457,15 +468,21 @@ func (g *GitSyncer) Hosts(ctx context.Context) ([]config.Host, error) {
 // The working copy is left detached at sha; the next Reconcile resets it to the
 // branch tip.
 func (g *GitSyncer) DeployAtSHA(ctx context.Context, service, sha string, triggeredBy ledger.TriggeredBy) (deployID, host string, err error) {
-	// Ensure the repo (and its history) is present. Sync handles credential
-	// injection for the initial clone; for an existing clone the remote URL
-	// already embeds the token set at clone time.
+	// Ensure the repo (and its history) is present. Credentials are injected per
+	// invocation via credEnv (never persisted in the remote URL), so an existing
+	// clone's fetch must carry them too.
 	if _, statErr := os.Stat(filepath.Join(g.dir, ".git")); errors.Is(statErr, os.ErrNotExist) {
 		if _, syncErr := g.Sync(ctx); syncErr != nil {
 			return "", "", syncErr
 		}
-	} else if fetchErr := g.git(ctx, g.dir, "fetch", "origin", g.branch); fetchErr != nil {
-		return "", "", fmt.Errorf("fetch: %w", fetchErr)
+	} else {
+		env, credErr := g.credEnv(ctx, g.repoURL)
+		if credErr != nil {
+			return "", "", fmt.Errorf("git credential: %w", credErr)
+		}
+		if fetchErr := g.gitEnv(ctx, g.dir, env, "fetch", "origin", g.branch); fetchErr != nil {
+			return "", "", fmt.Errorf("fetch: %w", fetchErr)
+		}
 	}
 	if coErr := g.git(ctx, g.dir, "checkout", sha); coErr != nil {
 		return "", "", fmt.Errorf("checkout %s: %w", sha, coErr)
@@ -577,7 +594,7 @@ func (g *GitSyncer) fetchRemoteCompose(ctx context.Context, rp config.RemotePoin
 	if branch == "" {
 		branch = "main"
 	}
-	repoURL, err := g.rewriteURL(ctx, rp.Repo)
+	env, err := g.credEnv(ctx, rp.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("git credential: %w", err)
 	}
@@ -586,11 +603,11 @@ func (g *GitSyncer) fetchRemoteCompose(ctx context.Context, rp config.RemotePoin
 		if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir remote cache: %w", err)
 		}
-		if err := g.git(ctx, "", "clone", "--branch", branch, "--single-branch", "--depth", "1", repoURL, cacheDir); err != nil {
+		if err := g.gitEnv(ctx, "", env, "clone", "--branch", branch, "--single-branch", "--depth", "1", rp.Repo, cacheDir); err != nil {
 			return nil, fmt.Errorf("clone remote %s: %w", rp.Repo, err)
 		}
 	} else {
-		if err := g.git(ctx, cacheDir, "fetch", "--depth", "1", "origin", branch); err != nil {
+		if err := g.gitEnv(ctx, cacheDir, env, "fetch", "--depth", "1", "origin", branch); err != nil {
 			return nil, fmt.Errorf("fetch remote %s: %w", rp.Repo, err)
 		}
 		if err := g.git(ctx, cacheDir, "reset", "--hard", "origin/"+branch); err != nil {
@@ -663,9 +680,18 @@ func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[stri
 }
 
 func (g *GitSyncer) git(ctx context.Context, dir string, args ...string) error {
+	return g.gitEnv(ctx, dir, nil, args...)
+}
+
+// gitEnv runs git with extraEnv appended to the process environment. Used to
+// inject credential config (see credEnv) without writing it to disk or args.
+func (g *GitSyncer) gitEnv(ctx context.Context, dir string, extraEnv []string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
