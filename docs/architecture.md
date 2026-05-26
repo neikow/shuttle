@@ -100,6 +100,52 @@ volume-deletion policy says otherwise.
 | Rollback | `POST /rollback` → `RollbackTarget` → `DeployAtSHA` |
 | Drift | `DriftReconciler` tick → `Reconcile` / `ForceDeploy` |
 | Removal | service gone from repo → `reconcileRemovals` → `teardown` (keeps volumes) |
+| Infisical webhook | `POST /webhook/infisical` (HMAC) → `ServicesUsingSecret` → debounced `ForceDeploy` |
+| Infisical poll | `SecretPoller` tick → fingerprint diff → `ForceDeploy` changed services |
+| Service webhook | `POST /webhook/repo/{id}` (ID = secret) → `ForceDeploy` bound service |
+
+## Event bus
+
+`EventBus` (`internal/orchestrator/events.go`) is an in-process pub/sub for
+orchestrator state changes. Publishers include the deploy path, the drift
+reconciler, teardown, and volume purge. Subscribers include metrics and the SSE
+event stream.
+
+Delivery is best-effort: each subscriber has a bounded buffer and slow consumers
+have events dropped (counted via `Dropped()`) rather than blocking the deploy
+path. A small replay ring lets late subscribers catch up on connect. All methods
+are nil-safe.
+
+Event types: `deploy.queued`, `deploy.succeeded`, `deploy.failed`,
+`deploy.rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`,
+`volumes.purged`.
+
+## Observability
+
+### Prometheus metrics (`GET /metrics`)
+
+`Metrics` (`metrics.go`) subscribes to the `EventBus` and exposes metrics via
+`prometheus/client_golang`. The endpoint is unauthed (standard scrape model).
+Labels are deliberately low-cardinality (event type only — never service or host
+names) so scraping doesn't leak topology. Uses its own registry, not the global
+default.
+
+### SSE event stream (`GET /events`)
+
+`GET /events` replays the bus backlog on connect and then streams live events as
+Server-Sent Events (`data: <json>`). One-way, bearer-authed, reconnects natively.
+A periodic `: keep-alive` comment stops idle proxies closing the connection.
+`shuttle events` is the CLI consumer.
+
+## Web UI
+
+`web/` is a Vite + TypeScript + Tailwind v4 + Radix read-only dashboard embedded
+in the binary via `//go:embed` behind the `embedui` build tag. Built with
+`make build-ui`; a plain `go build ./...` needs no `web/dist`. Served under `/ui/`
+(unauthenticated static bundle — the browser app authenticates its own API calls
+with a bearer token stored in `localStorage`). Uses `@microsoft/fetch-event-source`
+for the SSE events view (since `EventSource` cannot set headers). Mutations
+(deploy/rollback/prune) are deliberately not in v1.
 
 ## Security model
 

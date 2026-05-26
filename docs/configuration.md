@@ -24,6 +24,10 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `secrets_provider` | `none` | `infisical` or `none`. |
 | `secrets_base_path` | `/shared` | Shared Infisical folder merged under every service. Must be absolute. |
 | `secrets_path_template` | — | Per-service folder derived from name, e.g. `/services/{service}` (`{service}` is substituted). Must be absolute. A service's `secret_path` overrides it. |
+| `infisical_webhook_secret` | — | HMAC secret for `POST /webhook/infisical`. Required to enable Infisical secret-change webhooks. |
+| `infisical_webhook_debounce` | `5s` | How long to coalesce a burst of Infisical changes before triggering a redeploy. Accepts Go duration syntax (`5s`, `1m`, …). |
+| `infisical_poll_interval` | — | Enable periodic Infisical secret fingerprint polling as a fallback when webhooks aren't delivered. Accepts Go duration syntax (`1m`, `5m`, …). Empty disables polling. |
+| `git_credentials` | — | List of per-repo/org HTTPS token credentials. See [Git credentials](#git-credentials) below. |
 | `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
 | `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |
 | `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
@@ -41,6 +45,8 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
   (`cert`+`key`) so tokens are encrypted in transit. Enrollment endpoints
   (`GET /hosts`, `POST /enroll`) are served only when token auth *and* git sync
   are both configured.
+- **Infisical webhook** turns on when `infisical_webhook_secret` is set.
+- **Infisical polling** turns on when `infisical_poll_interval` is set.
 
 ### Flag fallbacks
 
@@ -77,6 +83,28 @@ must be absolute. `none` (the default provider) means no secret injection.
 Example: `secrets_base_path: /shared`, `secrets_path_template: /services/{service}`,
 and a service `api` with `env_from: production` reads `production` secrets from
 `/shared` + `/services/api`, the latter overriding the former.
+
+## Git credentials
+
+`git_credentials` allows the orchestrator to authenticate to private HTTPS git
+repos (the IaC repo or remote compose pointers) using tokens stored in Infisical.
+Each entry specifies the repo prefix and where to fetch the token:
+
+```yaml
+git_credentials:
+  - repo_prefix: github.com/myorg   # no scheme; matches any HTTPS URL with this prefix
+    infisical_key: GITHUB_TOKEN     # secret key to fetch from Infisical
+    infisical_env: production       # optional; overrides INFISICAL_ENV
+    infisical_path: /shared         # optional; Infisical folder for this key
+```
+
+The `repo_prefix` must not include the scheme (`https://` is stripped). On each
+git operation the orchestrator fetches the token from Infisical and passes it via
+`git -c http.<url>.extraHeader=Authorization:Bearer <token>`. Requires
+`secrets_provider: infisical`.
+
+`shuttle check` reports the status of every configured credential (whether the
+token resolved successfully) alongside the service validation results.
 
 ## mTLS certificates
 

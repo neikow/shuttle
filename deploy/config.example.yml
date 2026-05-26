@@ -56,3 +56,12 @@ secrets_provider: "none"
 # agent_token_auth: true
 # advertise_addr: "orchestrator.example.com:9090"   # gRPC host:port agents dial
 # advertise_server_name: "orchestrator"             # SAN on the orchestrator cert
+
+# Per-repo/org HTTPS git credentials (optional). Fetches tokens from Infisical
+# and injects them for private repo access (IaC repo + remote compose pointers).
+# repo_prefix must not include the scheme. Requires secrets_provider: infisical.
+# git_credentials:
+#   - repo_prefix: github.com/myorg
+#     infisical_key: GITHUB_TOKEN
+#     # infisical_env: production     # defaults to INFISICAL_ENV
+#     # infisical_path: /shared       # defaults to INFISICAL_SECRET_PATH

@@ -40,6 +40,7 @@ secret_path: /services/whoami  # optional; Infisical folder for this service (ab
 env_schema:               # optional; the only secret keys passed to this service
   - WHOAMI_NAME
 port: 80                  # optional; the Caddy upstream port for this service's domains
+update_policy: rolling    # optional; "rolling" (default) or "recreate"
 delete_volumes: manual    # optional; volume deletion policy on removal (default: manual)
 caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
   [{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]
@@ -61,6 +62,13 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 - **`env_schema`** scopes secrets: the orchestrator passes the service only these
   keys (filtered from the configured secrets provider). Without it, no secrets
   flow to the service.
+- **`update_policy`** controls how the agent applies a new deploy:
+  - `rolling` (default) — zero-downtime: brings up new containers alongside the
+    old, waits until they are healthy, then removes the old. Requires the service
+    to run two-up (no fixed host port, no `container_name`). `shuttle check` warns
+    if these constraints are violated.
+  - `recreate` — stop-then-start (compose default). Simpler but causes a brief
+    outage. Always used for rollbacks.
 - **`caddy_snippet`** must be a JSON array of Caddy HTTP handler objects. They are
   injected *ahead of* the `reverse_proxy` handler for the service's domains
   (headers, rewrites, auth, …). Invalid JSON is a hard error.

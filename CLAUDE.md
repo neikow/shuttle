@@ -35,7 +35,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo. |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
@@ -57,7 +57,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/hosts`, `/enroll`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
@@ -173,6 +173,7 @@ These are deliberate. Don't reverse them without updating this file.
 - **git via shell-out, not a Go git library.** Mirrors the agent's
   `docker compose` shell-out and avoids a heavy `go-git` dependency. The git CLI
   is already a hard runtime requirement.
+- **`git_credentials` — per-repo HTTPS tokens from Infisical, injected at call time.** Private IaC repos and remote compose pointers need authentication without storing credentials on disk. Each `git_credentials` entry specifies a `repo_prefix` and the Infisical key to fetch; `GitSyncer.SetGitCredentials` injects the token via `git -c http.<url>.extraHeader=Authorization:Bearer <token>` at each git operation. The token is fetched fresh every call (no caching) so rotation in Infisical takes effect immediately. `CheckGitCredentials` validates all entries during `shuttle check`.
 - **Caddy for ingress (Admin API at `:2019`).** Per-host Caddy instance with
   automatic Let's Encrypt. Routes are derived from service `domains` + `port`
   and pushed as a full config each reconcile (declarative, no drift).
@@ -277,6 +278,7 @@ These are deliberate. Don't reverse them without updating this file.
   (events leak service names + SHAs). A slow reader blocks only its own stream —
   the bus drops its events rather than stalling the deploy path. `shuttle
   events` is the CLI consumer.
+- **Service-specific deploy webhooks — 256-bit ID as the secret, no HMAC.** `POST /webhooks/repo` creates a webhook scoped to one service, returning a random 256-bit ID stored in the ledger (`repo_webhooks` table). `POST /webhook/repo/{id}` triggers a `ForceDeploy` of the bound service with no additional auth — the ID entropy is sufficient. This is the simplest integration point for external systems (container registries, third-party CI) that need to trigger a single-service redeploy without exposing the orchestrator bearer token. Managed via `EnableRepoWebhooks` (called only when git sync is configured).
 - **Web UI: embedded React SPA, build-tag-gated, read-only v1.** `web/` is a
   Vite + TS + Tailwind-v4 + Radix dashboard (sharp aesthetic — radius forced near
   0). It consumes the *existing* control-plane endpoints (`/deploys`, `/events`
