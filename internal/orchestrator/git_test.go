@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -307,7 +308,7 @@ func TestGitSyncer_Reconcile(t *testing.T) {
 	}
 }
 
-func TestGitSyncer_rewriteURL(t *testing.T) {
+func TestGitSyncer_credEnv(t *testing.T) {
 	cred := config.GitCredential{
 		RepoPrefix:   "github.com/myorg",
 		InfisicalKey: "GITHUB_TOKEN",
@@ -317,43 +318,45 @@ func TestGitSyncer_rewriteURL(t *testing.T) {
 		name    string
 		syncer  func() *GitSyncer
 		rawURL  string
-		want    string
+		want    []string // nil => expect no credential env
 		wantErr bool
 	}{
 		{
-			name: "matching prefix injects token",
+			name: "matching prefix injects scoped extraHeader env",
 			syncer: func() *GitSyncer {
 				sec := secrets.NewFake(map[string]string{"GITHUB_TOKEN": "tok123"})
-				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
-				return g
+				return &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
 			},
 			rawURL: "https://github.com/myorg/repo.git",
-			want:   "https://oauth2:tok123@github.com/myorg/repo.git",
+			// base64("oauth2:tok123") = b2F1dGgyOnRvazEyMw==
+			want: []string{
+				"GIT_CONFIG_COUNT=1",
+				"GIT_CONFIG_KEY_0=http.https://github.com/myorg.extraHeader",
+				"GIT_CONFIG_VALUE_0=Authorization: Basic b2F1dGgyOnRvazEyMw==",
+			},
 		},
 		{
-			name: "no matching prefix returns URL unchanged",
+			name: "no matching prefix returns no credential env",
 			syncer: func() *GitSyncer {
 				sec := secrets.NewFake(map[string]string{"GITHUB_TOKEN": "tok123"})
-				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
-				return g
+				return &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
 			},
 			rawURL: "https://gitlab.com/other/repo.git",
-			want:   "https://gitlab.com/other/repo.git",
+			want:   nil,
 		},
 		{
-			name: "nil secrets provider returns URL unchanged",
+			name: "nil secrets provider returns no credential env",
 			syncer: func() *GitSyncer {
 				return &GitSyncer{secrets: nil, gitCreds: []config.GitCredential{cred}}
 			},
 			rawURL: "https://github.com/myorg/repo.git",
-			want:   "https://github.com/myorg/repo.git",
+			want:   nil,
 		},
 		{
 			name: "secrets provider returns ErrNotFound",
 			syncer: func() *GitSyncer {
 				sec := secrets.NewFake(nil) // no keys seeded
-				g := &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
-				return g
+				return &GitSyncer{secrets: sec, gitCreds: []config.GitCredential{cred}}
 			},
 			rawURL:  "https://github.com/myorg/repo.git",
 			wantErr: true,
@@ -363,7 +366,7 @@ func TestGitSyncer_rewriteURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := tt.syncer()
-			got, err := g.rewriteURL(context.Background(), tt.rawURL)
+			got, err := g.credEnv(context.Background(), tt.rawURL)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -377,8 +380,14 @@ func TestGitSyncer_rewriteURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got != tt.want {
-				t.Fatalf("rewriteURL = %q, want %q", got, tt.want)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("credEnv = %v, want %v", got, tt.want)
+			}
+			// The token must never leak into the remote URL or process args.
+			for _, e := range got {
+				if strings.Contains(e, "tok123") && !strings.HasPrefix(e, "GIT_CONFIG_VALUE_0=") {
+					t.Fatalf("token leaked outside the header value: %q", e)
+				}
 			}
 		})
 	}
