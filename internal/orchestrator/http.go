@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -530,12 +532,22 @@ func writeDeployError(w http.ResponseWriter, err error) {
 func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || auth[7:] != s.token {
+		if !strings.HasPrefix(auth, "Bearer ") || !constantTimeEqual(auth[len("Bearer "):], s.token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
+}
+
+
+// constantTimeEqual compares two secrets without leaking their length or content
+// through timing. Both sides are hashed to a fixed-size digest first, so the
+// comparison is constant-time regardless of input length.
+func constantTimeEqual(a, b string) bool {
+	ha := sha256.Sum256([]byte(a))
+	hb := sha256.Sum256([]byte(b))
+	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
 // idCounter disambiguates IDs minted within the same nanosecond.
