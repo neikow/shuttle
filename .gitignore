@@ -17,6 +17,9 @@
 /config.yml
 /config.local.yml
 
+# Generated graphify knowledge graph output
+/graphify-out/
+
 # OS / editor
 .DS_Store
 
