@@ -1,5 +1,27 @@
 # Configuration reference
 
+Shuttle uses a **two-tier config split**:
+
+| Tier | File | Where | When it takes effect |
+|------|------|--------|----------------------|
+| Bootstrap | `config.yml` | Orchestrator server | Restart required |
+| Repo-managed | `orchestrator.yaml` | IaC git repo | Next reconcile after push |
+
+`config.yml` holds the secrets needed to *start* the orchestrator — bearer
+token, repo URL, webhook secret, TLS keypairs, gRPC/HTTP addresses. These cannot
+live in git because the orchestrator must read them before it can clone the repo.
+
+`orchestrator.yaml` in the IaC repo holds settings that change without
+reinstalling — Caddy config, secrets paths, git credentials. Keys present in
+`orchestrator.yaml` override their `config.yml` counterparts on every reconcile.
+If the file is absent, config.yml values stand. A parse error is logged and the
+old values are kept — a bad commit never blocks deploys.
+
+`shuttle init` generates both files interactively (see
+[operations.md](operations.md#bootstrap-with-shuttle-init)).
+
+---
+
 The orchestrator reads a YAML config file (`--config`, default `config.yml`).
 Parsing is **strict** — unknown keys are rejected. `bearer_token` is required;
 everything else has a default or disables a feature when empty.
@@ -113,3 +135,41 @@ token resolved successfully) alongside the service validation results.
 IP:127.0.0.1`; the agent's `--server-name` (default `orchestrator`) must match
 one of them. For production, issue certs from your own CA with the same SAN
 discipline. See [operations.md](operations.md).
+
+## Repo-managed config (`orchestrator.yaml`)
+
+Place this file in the root of the IaC git repo to override the bootstrap
+settings without restarting the orchestrator. Changes take effect on the next
+reconcile after the commit lands on the tracked branch.
+
+```yaml
+# orchestrator.yaml — checked into the IaC repo, not the server.
+# All keys are optional; omit a key to keep the config.yml value.
+
+caddy_admin_url: "http://caddy:2019"
+https_redirect: false
+
+secrets_base_path: "/shared"
+secrets_path_template: "/services/{service}"
+
+git_credentials:
+  - repo_prefix: github.com/myorg
+    infisical_key: GITHUB_TOKEN
+    infisical_env: production
+    infisical_path: /shared
+```
+
+| Key | Overrides | Purpose |
+|-----|-----------|---------|
+| `caddy_admin_url` | `caddy_admin_url` in `config.yml` | Caddy Admin API URL. |
+| `https_redirect` | `https_redirect` in `config.yml` | HTTPS redirect toggle. Explicitly set to `false` to force plaintext on `:80`; omit to keep the bootstrap value. |
+| `secrets_base_path` | `secrets_base_path` in `config.yml` | Shared Infisical folder. |
+| `secrets_path_template` | `secrets_path_template` in `config.yml` | Per-service Infisical folder template. |
+| `git_credentials` | `git_credentials` in `config.yml` | Per-repo HTTPS tokens from Infisical. |
+
+**Parse errors** (unknown keys, bad YAML) are logged; old settings are kept. The
+orchestrator never stalls a deploy waiting for a fixed config file.
+
+`shuttle init` scaffolds a commented `orchestrator.yaml` alongside the rest of
+the IaC repo. See [iac-repo.md](iac-repo.md#orchestratoryaml) for the full
+layout.
