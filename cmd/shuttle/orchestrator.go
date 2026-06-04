@@ -209,6 +209,14 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	httpServer := &http.Server{
 		Addr:    cfg.HTTPAddr,
 		Handler: httpHandler,
+		// ReadHeaderTimeout is the Slowloris defense: bound how long a client
+		// may dribble request headers. ReadTimeout/IdleTimeout cap whole-request
+		// and keep-alive idle time. WriteTimeout is deliberately left unset (0):
+		// GET /events streams Server-Sent Events for the lifetime of the client,
+		// and a WriteTimeout would sever those long-lived responses.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 2)
