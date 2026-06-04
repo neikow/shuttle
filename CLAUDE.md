@@ -245,7 +245,15 @@ These are deliberate. Don't reverse them without updating this file.
   later plain `shuttle agent` auto-loads them, so restarts need no secret on the
   command line. Redeem failures (unknown / expired / already-used) return an
   undifferentiated 401. The legacy direct `shuttle agent --token` path is
-  unchanged for mTLS and manual setups.
+  unchanged for mTLS and manual setups. `shuttle enroll` resolves its URL +
+  bearer token by precedence (`resolveEnrollCreds`): explicit `--url`/`--token`
+  flags > `--config` (the orchestrator's `config.yml`, reading
+  `advertise_control_url` + `bearer_token`) > `SHUTTLE_URL`/`SHUTTLE_TOKEN` env
+  (a local `.env` works, since `main` loads it). `advertise_control_url` must be
+  the externally reachable URL — it is both the endpoint enroll calls (and pins)
+  and the `redeem-url` baked into the join command — so it can't reuse
+  `http_addr`. On the orchestrator host, `shuttle enroll --config config.yml
+  --host web-1` then needs no secret on the command line.
 - **Zero-downtime is the default, via compose scale not orchestrator magic.**
   Rolling lives entirely in the agent (`rolling.go`): it leans on the existing
   sidecar-Caddy model where Caddy dials the `<service>` network alias, so two

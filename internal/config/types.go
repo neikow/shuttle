@@ -47,6 +47,12 @@ type OrchestratorConfig struct {
 	// AdvertiseServerName is the SAN agents expect on the orchestrator cert,
 	// embedded in the enrollment command when TLS is on.
 	AdvertiseServerName string `yaml:"advertise_server_name"`
+	// AdvertiseControlURL is the publicly reachable control-plane URL (e.g.
+	// https://orchestrator.example.com:8080). `shuttle enroll --config` reads it
+	// to fill --url: the value is both the endpoint enroll calls and the
+	// redeem-url baked into the join command, so it must be the externally
+	// reachable URL, not http_addr (which is just the local listen address).
+	AdvertiseControlURL string `yaml:"advertise_control_url"`
 	// GitCredentials lists per-host or per-org HTTPS token credentials used to
 	// authenticate git clone/fetch operations against private repos. Tokens are
 	// resolved from the secrets provider at runtime.
