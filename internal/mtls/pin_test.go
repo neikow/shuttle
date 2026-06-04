@@ -38,7 +38,9 @@ func TestPinnedHTTPClientMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	if _, err := client.Get(ts.URL); err == nil {
+	resp, err := client.Get(ts.URL)
+	if err == nil {
+		_ = resp.Body.Close()
 		t.Fatal("mismatched pin must fail the connection")
 	}
 }
@@ -53,7 +55,9 @@ func TestPinnedHTTPClientEmptyPinUsesSystemRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
-	if _, err := client.Get(ts.URL); err == nil {
+	resp, err := client.Get(ts.URL)
+	if err == nil {
+		_ = resp.Body.Close()
 		t.Fatal("empty pin must still verify against system roots (untrusted cert should fail)")
 	}
 }
