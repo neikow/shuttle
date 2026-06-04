@@ -8,9 +8,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
+	"sort"
+	"strings"
 	"time"
 
-	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
 
@@ -73,13 +75,65 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// runMigrations applies every embedded *.sql migration in filename order inside
+// a single transaction. The migrations are written idempotently
+// (CREATE ... IF NOT EXISTS), so replaying the full set on each open is safe and
+// no version table is needed — matching the prior goose WithNoVersioning() mode
+// without the dependency. Only the "+goose Up" section of each file is executed.
 func runMigrations(db *sql.DB) error {
-	goose.SetBaseFS(embedMigrations)
-	goose.SetLogger(goose.NopLogger())
-	if err := goose.SetDialect("sqlite3"); err != nil {
+	ctx := context.Background()
+	names, err := fs.Glob(embedMigrations, "*.sql")
+	if err != nil {
 		return err
 	}
-	return goose.Up(db, ".", goose.WithNoVersioning())
+	sort.Strings(names)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, name := range names {
+		raw, err := embedMigrations.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		stmt := strings.TrimSpace(upSection(string(raw)))
+		if stmt == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// upSection extracts the statements between "-- +goose Up" and "-- +goose Down"
+// (or end of file), dropping any "-- +goose" annotation lines. Files have no
+// Down section that runs here; the markers are kept only so the .sql files stay
+// readable as standalone migrations.
+func upSection(content string) string {
+	var out []string
+	inUp := false
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "-- +goose Up"):
+			inUp = true
+			continue
+		case strings.HasPrefix(trimmed, "-- +goose Down"):
+			inUp = false
+			continue
+		case strings.HasPrefix(trimmed, "-- +goose"):
+			continue
+		}
+		if inUp {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func (s *Store) RecordDeploy(ctx context.Context, r DeployRecord) error {
