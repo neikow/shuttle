@@ -66,6 +66,9 @@ make certs          # generate dev mTLS CA + orchestrator + agent certs
 ## Run
 
 ```sh
+# Bootstrap a new environment (interactive wizard)
+shuttle init
+
 # Orchestrator (reads config.yml; see deploy/config.example.yml)
 shuttle orchestrator --config /etc/shuttle/config.yml
 
@@ -127,12 +130,16 @@ requests to a local orchestrator on `:8080`.
 
 ```
 hosts.yaml                            # hosts + labels
+orchestrator.yaml                     # repo-managed orchestrator overrides (optional)
 services/<name>/<name>.yaml           # service def: host, domains, env, port
 services/<name>/docker-compose.yml    # local compose  (XOR with a remote pointer)
 ```
 
-See [docs/iac-repo.md](docs/iac-repo.md) for the schema, and `examples/repo/`
-for a working sample.
+`orchestrator.yaml` lets you change Caddy settings, secrets paths, and Git
+credentials via a git commit — no orchestrator restart needed. See
+[docs/iac-repo.md](docs/iac-repo.md) for the full schema and
+[docs/configuration.md](docs/configuration.md#repo-managed-config-orchestratoryaml)
+for the config split. `examples/repo/` has a working sample.
 
 ## Documentation
 

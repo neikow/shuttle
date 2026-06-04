@@ -7,6 +7,7 @@ lives in [`examples/repo/`](../examples/repo).
 
 ```
 hosts.yaml                            # the hosts Shuttle may deploy to
+orchestrator.yaml                     # repo-managed orchestrator overrides (optional)
 services/
   <name>/
     <name>.yaml                       # service definition (file name matches dir)
@@ -14,6 +15,27 @@ services/
 ```
 
 Parsing is strict (unknown keys rejected) and validated on every sync.
+
+## `orchestrator.yaml`
+
+Optional file in the repo root that overrides selected `config.yml` settings on
+each reconcile — no orchestrator restart needed. See
+[configuration.md](configuration.md#repo-managed-config-orchestratoryaml) for
+the full key reference and override semantics.
+
+```yaml
+# All keys are optional.
+caddy_admin_url: "http://caddy:2019"
+https_redirect: false
+secrets_base_path: "/shared"
+secrets_path_template: "/services/{service}"
+git_credentials:
+  - repo_prefix: github.com/myorg
+    infisical_key: GITHUB_TOKEN
+```
+
+A parse error is logged and old values are kept — a bad commit never blocks
+deploys. `shuttle init` writes a commented starter file.
 
 ## `hosts.yaml`
 

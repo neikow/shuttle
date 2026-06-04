@@ -31,10 +31,10 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
-| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`) and `Load` (the IaC repo). |
+| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
@@ -146,6 +146,8 @@ These are deliberate. Don't reverse them without updating this file.
 
 - **Single Go binary, two subcommands.** One artifact to ship and version; the
   orchestrator/agent split is a runtime flag, not a separate build.
+- **Two-tier config split: `config.yml` (bootstrap) vs `orchestrator.yaml` (repo-managed).** Settings needed to *start* the orchestrator (bearer token, repo URL, webhook secret, TLS) can't live in git — the orchestrator can't clone the repo without them. Everything that changes at runtime without a restart (Caddy, secrets paths, git credentials) lives in `orchestrator.yaml` in the IaC repo, reloaded atomically on each reconcile via `atomic.Pointer[RepoOrchestratorConfig]`. A parse error keeps old values and never blocks deploys — a broken commit is recoverable with a revert push. `shuttle init` scaffolds both files.
+- **`shuttle init` as the blessed bootstrap path.** Auto-generates bearer token and webhook secret (32-byte `crypto/rand`, hex-encoded); writes `config.yml` and `.env` at mode 0600; scaffolds the IaC repo idempotently (second run never overwrites user-edited files); optionally wires GitHub Actions. Separating the wizard (`promptInitOptions`) from the applier (`applyInit`) keeps the logic fully unit-testable without stdin.
 - **gRPC bidi stream, agent dials out.** Agents open the connection to the
   orchestrator, so managed hosts need *no* inbound firewall holes. Commands flow
   down the same stream that heartbeats and state flow up.

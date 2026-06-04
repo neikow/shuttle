@@ -29,6 +29,35 @@ The overlay swaps in `config.mtls.example.yml` (which sets `grpc_tls_*`) and
 passes the agent its client cert/key/CA. The orchestrator then requires and
 verifies client certs; an insecure agent is rejected.
 
+## Bootstrap with `shuttle init`
+
+`shuttle init` is an interactive wizard that sets up a complete orchestrator
+environment in one command. Run it once on the orchestrator server:
+
+```sh
+shuttle init [--dir /etc/shuttle]
+```
+
+It prompts for:
+
+- Orchestrator addresses, gRPC transport (insecure / server TLS + token / mTLS)
+- Bearer token and webhook secret (auto-generated if left blank)
+- IaC repo directory to scaffold, and an optional remote URL
+- Secrets provider (none or Infisical, with credentials written to `.env`)
+- Caddy admin URL and HTTPS-redirect toggle
+- Whether to write GitHub Actions workflows (deploy-on-push + PR plan-comment)
+
+Outputs:
+
+| File | Location | Notes |
+|------|----------|-------|
+| `config.yml` | `--dir` (default `.`) | Mode 0600; bootstrap secrets never go in git |
+| `.env` | `--dir` | Mode 0600; Infisical creds; loaded at startup |
+| IaC git repo | prompted path | `hosts.yaml`, `services/`, `orchestrator.yaml`, optional `.github/workflows/` |
+
+Running `shuttle init` a second time in the same directory is safe — existing
+files are never overwritten.
+
 ## Running on real hosts
 
 ### Orchestrator
