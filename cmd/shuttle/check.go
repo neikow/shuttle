@@ -76,7 +76,7 @@ func checkRemote(cmd *cobra.Command, baseURL string) (*orchestrator.CheckReport,
 		endpoint += "?ref=" + url.QueryEscape(ref)
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	body, err := doJSON(cmd.Context(), client, http.MethodGet, endpoint, bearer, nil)
+	body, _, err := doJSON(cmd.Context(), client, http.MethodGet, endpoint, bearer, nil)
 	if err != nil {
 		return nil, err
 	}

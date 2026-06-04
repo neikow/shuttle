@@ -75,7 +75,7 @@ func planRemote(cmd *cobra.Command, baseURL string) (orchestrator.PlanReport, er
 		endpoint += "?ref=" + url.QueryEscape(ref)
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	body, err := doJSON(cmd.Context(), client, http.MethodGet, endpoint, bearer, nil)
+	body, _, err := doJSON(cmd.Context(), client, http.MethodGet, endpoint, bearer, nil)
 	if err != nil {
 		return orchestrator.PlanReport{}, err
 	}

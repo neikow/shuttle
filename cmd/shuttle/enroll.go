@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/neikow/shuttle/internal/mtls"
 	"github.com/spf13/cobra"
 )
 
@@ -21,23 +22,30 @@ type enrollHost struct {
 	Labels map[string]string `json:"labels"`
 }
 
+// enrollResult mirrors the orchestrator's /enroll response: a single-use,
+// short-lived join token bound to the chosen host.
 type enrollResult struct {
-	ID      string `json:"id"`
-	Host    string `json:"host"`
-	Token   string `json:"token"`
-	Command string `json:"command"`
-	TLS     bool   `json:"tls"`
+	ID           string `json:"id"`
+	Host         string `json:"host"`
+	JoinToken    string `json:"join_token"`
+	ExpiresAtUMS int64  `json:"expires_at_unix_ms"`
 }
 
 var enrollCmd = &cobra.Command{
 	Use:   "enroll",
-	Short: "Enroll a new agent: pick a host and print its start command",
+	Short: "Enroll a new agent: pick a host and print its one-line join command",
 	Long: `Talks to a running orchestrator's control plane. Lists the hosts declared
-in the IaC repo, lets you pick one (or pass --host), mints a host-scoped agent
-token, and prints the ready-to-run agent command.
+in the IaC repo, lets you pick one (or pass --host), mints a short-lived,
+single-use join token bound to that host, and prints a ready-to-run
+'shuttle agent join' command.
 
-The token is shown only once. Run the printed command on the target host to
-start its agent.`,
+The powerful control-plane bearer token never leaves this machine — only the
+scoped, expiring join token is carried to the target host. When the control
+plane is reached over HTTPS, the command embeds a --pin of the orchestrator's
+certificate (trust-on-first-use) so the host needs no CA file.
+
+Run the printed command once on the target host. It exchanges the join token
+for a long-lived agent credential and starts the agent.`,
 	Example: `  # Interactive: list hosts and pick one
   shuttle enroll --url https://orchestrator:8080 --token $SHUTTLE_TOKEN
 
@@ -68,24 +76,38 @@ start its agent.`,
 			}
 		}
 
-		res, err := enrollHostReq(ctx, client, baseURL, bearer, host)
+		res, pin, err := enrollHostReq(ctx, client, baseURL, bearer, host)
 		if err != nil {
 			return err
 		}
 
+		joinCommand := buildJoinCommand(baseURL, res.JoinToken, pin)
 		out := cmd.OutOrStdout()
-		_, _ = fmt.Fprintf(out, "\nEnrolled host %q (token id %s).\n\nRun the agent with:\n\n  %s\n\n",
-			res.Host, res.ID, res.Command)
-		if res.TLS {
-			_, _ = fmt.Fprintf(out, "TLS is enabled; if the orchestrator uses a private CA, add: --ca <path-to-ca.crt>\n")
+		_, _ = fmt.Fprintf(out, "\nMinted join token for host %q (id %s), expires %s.\n\nRun this once on the host:\n\n  %s\n\n",
+			res.Host, res.ID, time.UnixMilli(res.ExpiresAtUMS).Format(time.RFC3339), joinCommand)
+		if pin == "" {
+			_, _ = fmt.Fprintf(out, "WARNING: the control plane was not reached over HTTPS, so the join token\n"+
+				"will travel without a pinned, encrypted channel. Prefer an https:// --url.\n")
 		}
-		_, _ = fmt.Fprintf(out, "Keep the token secret — it is shown only once. Revoke it from the ledger if leaked.\n")
+		_, _ = fmt.Fprintf(out, "The join token is single-use and expires; it is shown only once.\n")
 		return nil
 	},
 }
 
+func buildJoinCommand(redeemURL, joinToken, pin string) string {
+	parts := []string{
+		"shuttle agent join",
+		"--redeem-url " + redeemURL,
+		"--token " + joinToken,
+	}
+	if pin != "" {
+		parts = append(parts, "--pin "+pin)
+	}
+	return strings.Join(parts, " ")
+}
+
 func listHosts(ctx context.Context, client *http.Client, baseURL, bearer string) ([]enrollHost, error) {
-	body, err := doJSON(ctx, client, http.MethodGet, baseURL+"/hosts", bearer, nil)
+	body, _, err := doJSON(ctx, client, http.MethodGet, baseURL+"/hosts", bearer, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -124,27 +146,32 @@ func pickHost(out io.Writer, hosts []enrollHost) (string, error) {
 	return hosts[n-1].Name, nil
 }
 
-func enrollHostReq(ctx context.Context, client *http.Client, baseURL, bearer, host string) (*enrollResult, error) {
+// enrollHostReq mints a join token and, when the control plane was reached over
+// TLS, returns the orchestrator certificate's pin (computed from the live peer
+// cert over this already-authenticated channel — trust-on-first-use).
+func enrollHostReq(ctx context.Context, client *http.Client, baseURL, bearer, host string) (*enrollResult, string, error) {
 	reqBody, _ := json.Marshal(map[string]string{"host": host})
-	body, err := doJSON(ctx, client, http.MethodPost, baseURL+"/enroll", bearer, reqBody)
+	body, pin, err := doJSON(ctx, client, http.MethodPost, baseURL+"/enroll", bearer, reqBody)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var res enrollResult
 	if err := json.Unmarshal(body, &res); err != nil {
-		return nil, fmt.Errorf("decode enroll response: %w", err)
+		return nil, "", fmt.Errorf("decode enroll response: %w", err)
 	}
-	return &res, nil
+	return &res, pin, nil
 }
 
-func doJSON(ctx context.Context, client *http.Client, method, url, bearer string, body []byte) ([]byte, error) {
+// doJSON performs the request and returns the body plus, when the response came
+// over TLS, the server certificate pin (so the caller can embed it for TOFU).
+func doJSON(ctx context.Context, client *http.Client, method, url, bearer string, body []byte) ([]byte, string, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, rdr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	if body != nil {
@@ -152,14 +179,18 @@ func doJSON(ctx context.Context, client *http.Client, method, url, bearer string
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", method, url, err)
+		return nil, "", fmt.Errorf("%s %s: %w", method, url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s %s: %s: %s", method, url, resp.Status, strings.TrimSpace(string(data)))
+		return nil, "", fmt.Errorf("%s %s: %s: %s", method, url, resp.Status, strings.TrimSpace(string(data)))
 	}
-	return data, nil
+	pin := ""
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		pin = mtls.SPKIPin(resp.TLS.PeerCertificates[0])
+	}
+	return data, pin, nil
 }
 
 func init() {

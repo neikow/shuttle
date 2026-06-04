@@ -176,10 +176,27 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 			if advertiseAddr == "" {
 				advertiseAddr = cfg.GRPCAddr
 			}
+			// Hand the redeeming agent the material it needs to trust the gRPC
+			// server: the CA when one is configured, otherwise the self-signed
+			// server cert (which acts as its own root). This removes the need to
+			// distribute a CA file to each host.
+			caPEM := ""
+			if cfg.ServerTLSEnabled() {
+				src := cfg.GRPCTLSCA
+				if src == "" {
+					src = cfg.GRPCTLSCert
+				}
+				if b, rerr := os.ReadFile(src); rerr == nil {
+					caPEM = string(b)
+				} else {
+					slog.Warn("could not read gRPC cert/CA for enrollment handoff; agents must supply --ca", "path", src, "err", rerr)
+				}
+			}
 			httpHandler.EnableEnrollment(orchestrator.EnrollOptions{
 				AdvertiseAddr: advertiseAddr,
 				ServerName:    cfg.AdvertiseServerName,
 				TLS:           cfg.ServerTLSEnabled(),
+				CAPEM:         caPEM,
 				Hosts:         syncer.Hosts,
 			})
 			slog.Info("agent enrollment endpoints enabled", "advertise_addr", advertiseAddr)
