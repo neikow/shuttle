@@ -16,7 +16,10 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          # 1.26 carries the stdlib security fixes (crypto/x509, crypto/tls,
+          # html/template, net/http, net/textproto) that govulncheck flags on
+          # older patch lines. The module's go directive (1.25.x) is unchanged.
+          go-version: "1.26"
           cache: true
 
       - name: Download modules
@@ -27,6 +30,13 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Vulncheck
+        # Gate on known vulnerabilities the code actually reaches. Bumps to the
+        # Go toolchain or a flagged dependency are required to keep this green.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
       - name: Unit tests
         run: go test -count=1 -race ./internal/... ./cmd/...
