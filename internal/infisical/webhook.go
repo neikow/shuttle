@@ -189,12 +189,6 @@ func VerifySignature(body []byte, secret, header string) error {
 	return nil
 }
 
-// ComputeHeader builds the signature header value for a timestamp + body, used
-// by tests and clients.
-func ComputeHeader(ts string, body []byte, secret string) string {
-	return fmt.Sprintf("t=%s;%s", ts, hex.EncodeToString(computeMAC(body, secret)))
-}
-
 func parseSignatureHeader(header string) (ts, sig string) {
 	// Accept both "," and ";" as field separators.
 	// Infisical sends either "t=<ts>,v1=<hex>" or "t=<ts>;<hex>" (bare hex,

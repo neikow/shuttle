@@ -26,11 +26,6 @@ func VerifySignature(body []byte, secret, headerValue string) error {
 	return nil
 }
 
-// ComputeHeader returns the X-Hub-Signature-256 header value for body+secret.
-func ComputeHeader(body []byte, secret string) string {
-	return signaturePrefix + hex.EncodeToString(computeMAC(body, []byte(secret)))
-}
-
 func computeMAC(body, secret []byte) []byte {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write(body)
