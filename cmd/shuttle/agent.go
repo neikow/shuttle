@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/neikow/shuttle/internal/agent"
@@ -15,14 +17,15 @@ var agentCmd = &cobra.Command{
 host needs no inbound firewall holes), then receives finished Compose files and
 runs them with Docker Compose, reporting container state back for drift healing.
 
-Authenticate one of two ways:
+Authenticate one of these ways:
 
-  • Enrollment token (simplest): pass --token from 'shuttle enroll'. Add --ca if
-    the orchestrator uses a private CA.
-  • Mutual TLS: pass --cert, --key, and --ca.
-
-The easiest path is to run 'shuttle enroll' on the orchestrator, which prints a
-ready-to-run agent command for the chosen host.`,
+  • Join (simplest): run the 'shuttle agent join' command printed by
+    'shuttle enroll'. It redeems a single-use join token, persists the agent
+    credential and orchestrator CA under --work-dir, and starts the agent. Later
+    restarts use a plain 'shuttle agent --orchestrator <addr> --host <host>',
+    which auto-loads the persisted token and CA.
+  • Enrollment token: pass --token directly. Add --ca for a private CA.
+  • Mutual TLS: pass --cert, --key, and --ca.`,
 	Example: `  # Start with an enrollment token (command printed by 'shuttle enroll')
   shuttle agent --orchestrator orchestrator:9090 --host web-1 --token <token>
 
@@ -47,6 +50,22 @@ ready-to-run agent command for the chosen host.`,
 		driver, err := agent.NewDriver(driverName, dockerBin)
 		if err != nil {
 			return err
+		}
+
+		// After a `shuttle agent join`, the token and orchestrator CA are
+		// persisted under --work-dir. A plain restart with no --token/--ca
+		// transparently reuses them, so the systemd unit needs only the static
+		// --orchestrator and --host.
+		if tok == "" {
+			if b, rerr := os.ReadFile(filepath.Join(workDir, agentTokenFile)); rerr == nil {
+				tok = string(b)
+			}
+		}
+		if ca == "" {
+			caPath := filepath.Join(workDir, orchestratorCA)
+			if _, serr := os.Stat(caPath); serr == nil {
+				ca = caPath
+			}
 		}
 
 		cfg := agent.Config{
@@ -82,4 +101,6 @@ func init() {
 	agentCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
 	_ = agentCmd.MarkFlagRequired("orchestrator")
 	_ = agentCmd.MarkFlagRequired("host")
+
+	agentCmd.AddCommand(joinCmd)
 }

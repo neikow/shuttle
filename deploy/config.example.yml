@@ -56,6 +56,9 @@ secrets_provider: "none"
 # agent_token_auth: true
 # advertise_addr: "orchestrator.example.com:9090"   # gRPC host:port agents dial
 # advertise_server_name: "orchestrator"             # SAN on the orchestrator cert
+# advertise_control_url: "https://orchestrator.example.com:8080"  # public control-plane URL;
+#                                                    # `shuttle enroll --config` reads it (+ bearer_token)
+#                                                    # so you can run `shuttle enroll --host web-1`
 
 # Per-repo/org HTTPS git credentials (optional). Fetches tokens from Infisical
 # and injects them for private repo access (IaC repo + remote compose pointers).

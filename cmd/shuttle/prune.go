@@ -31,7 +31,7 @@ that has not yet elapsed). This is irreversible.`,
 		baseURL = strings.TrimRight(baseURL, "/")
 		client := &http.Client{Timeout: 30 * time.Second}
 
-		body, err := doJSON(cmd.Context(), client, http.MethodPost, baseURL+"/prune", bearer, nil)
+		body, _, err := doJSON(cmd.Context(), client, http.MethodPost, baseURL+"/prune", bearer, nil)
 		if err != nil {
 			return err
 		}

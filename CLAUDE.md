@@ -31,16 +31,16 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks. |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
-| `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). |
-| `internal/token/` | Agent enrollment token mint (256-bit) + SHA-256 hash. |
+| `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). `pin.go`: `SPKIPin` + `PinnedHTTPClient` for trust-on-first-use cert pinning during `agent join`. |
+| `internal/token/` | Agent enrollment + join token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
 | `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`). |
 | `web/` | React + Vite + TS read-only dashboard (Tailwind v4 + Radix). `embed.go`/`embed_stub.go` gate embedding the built `dist/` behind the `embedui` build tag. Consumes the existing control-plane endpoints. |
@@ -51,13 +51,13 @@ Always run `make test` before committing. The repo is kept race-clean.
 |------|----------------|
 | `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
-| `enroll.go` | `GET /hosts` + `POST /enroll`: mint host-scoped tokens, build the agent command. |
+| `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; `Send(host, cmd)`. |
 | `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
@@ -222,11 +222,38 @@ These are deliberate. Don't reverse them without updating this file.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
 - **Agent auth = mTLS *or* enrollment token.** Either present a client cert
   (mutual TLS) or a host-scoped bearer token over server-auth TLS. The token path
-  (`shuttle enroll` → `POST /enroll`) avoids per-agent cert distribution: only the
+  avoids per-agent cert distribution: only the
   orchestrator needs a cert. Tokens are long-lived, revocable, stored as SHA-256
   hashes, and validated by `TokenStreamInterceptor`, which pins the stream to the
   token's host so a token can't register a different one. Token over a non-TLS
   transport works but logs a cleartext warning.
+- **SSH-like enrollment = single-use join token + cert-pin TOFU.** The token is
+  minted and consumed in two steps so the operator's powerful control-plane
+  bearer never reaches the target host. `shuttle enroll` (bearer-authed
+  `POST /enroll`) mints a **short-lived, single-use join token** bound to the host
+  (`ledger.join_tokens`, hashed at rest, default 15 min TTL) and prints a single
+  `shuttle agent join` one-liner. The enroll client computes the orchestrator's
+  certificate **pin** (`mtls.SPKIPin` — base64 SHA-256 of the SubjectPublicKeyInfo)
+  from the live TLS peer cert over its already-authenticated channel and embeds it
+  as `--pin`. On the host, `shuttle agent join` redeems the join token at the
+  unauthenticated `POST /enroll/redeem` over a **pin-verified** HTTPS client
+  (`mtls.PinnedHTTPClient`, trust-on-first-use — no CA file to copy); the
+  orchestrator atomically claims the token (`RedeemJoinToken`: single UPDATE
+  guarded on `used_at IS NULL AND expires_at > now`), mints the real host-scoped
+  agent token, and hands back the gRPC address, SAN, and **CA PEM**. `join`
+  persists the token + CA under `--work-dir` at mode 0600 and starts the agent; a
+  later plain `shuttle agent` auto-loads them, so restarts need no secret on the
+  command line. Redeem failures (unknown / expired / already-used) return an
+  undifferentiated 401. The legacy direct `shuttle agent --token` path is
+  unchanged for mTLS and manual setups. `shuttle enroll` resolves its URL +
+  bearer token by precedence (`resolveEnrollCreds`): explicit `--url`/`--token`
+  flags > `--config` (the orchestrator's `config.yml`, reading
+  `advertise_control_url` + `bearer_token`) > `SHUTTLE_URL`/`SHUTTLE_TOKEN` env
+  (a local `.env` works, since `main` loads it). `advertise_control_url` must be
+  the externally reachable URL — it is both the endpoint enroll calls (and pins)
+  and the `redeem-url` baked into the join command — so it can't reuse
+  `http_addr`. On the orchestrator host, `shuttle enroll --config config.yml
+  --host web-1` then needs no secret on the command line.
 - **Zero-downtime is the default, via compose scale not orchestrator magic.**
   Rolling lives entirely in the agent (`rolling.go`): it leans on the existing
   sidecar-Caddy model where Caddy dials the `<service>` network alias, so two
