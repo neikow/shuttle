@@ -37,7 +37,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment. |
-| `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider`. `NewProvider(name)` factory. |
+| `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). `pin.go`: `SPKIPin` + `PinnedHTTPClient` for trust-on-first-use cert pinning during `agent join`. |
@@ -200,6 +200,15 @@ These are deliberate. Don't reverse them without updating this file.
   secrets`; all path *policy* lives in the orchestrator. A key declared in
   `env_schema` but absent from the resolved secrets is a **hard error** (not a
   warning) — the deploy fails loudly rather than shipping a silently-empty `.env`.
+  A second provider, **`file`** (`FileProvider`), needs no external service:
+  `secrets_provider: file` maps the same `Scope{Env, Path}` to a dotenv file at
+  `<SHUTTLE_SECRETS_DIR>/<env>/<path>.env` (default env `SHUTTLE_SECRETS_ENV`,
+  else `production`). Because path policy lives in the orchestrator, the file
+  layout mirrors the Infisical folders exactly, so switching providers needs no
+  repo changes. A missing file is an empty set (env_schema is still the one place
+  a missing key fails); the `Path` is cleaned absolute before joining so a `..`
+  can't escape the root. Secrets can thus live as a tmpfs mount, projected k8s
+  secrets, or sops-decrypted files instead of in Infisical.
 - **CLI loads `CWD/.env` at startup.** `main` calls `config.LoadDotEnv(".env")`
   before any subcommand, so the `INFISICAL_*` provider vars (and others) can come
   from a local `.env`. The real environment always wins; a missing file is not an

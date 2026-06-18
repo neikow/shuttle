@@ -103,11 +103,21 @@ func (b *lockedBuffer) String() string {
 // buffer that is dumped to the test log on failure. The process is killed when
 // ctx is cancelled (t.Context is cancelled during cleanup).
 func startProc(ctx context.Context, t *testing.T, name, bin string, args ...string) {
+	startProcEnv(ctx, t, name, bin, nil, args...)
+}
+
+// startProcEnv is startProc with extra environment variables appended to the
+// inherited environment (used to point the orchestrator at SHUTTLE_SECRETS_DIR
+// for the file secrets provider).
+func startProcEnv(ctx context.Context, t *testing.T, name, bin string, extraEnv []string, args ...string) {
 	t.Helper()
 	out := &lockedBuffer{}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = out
 	cmd.Stderr = out
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}

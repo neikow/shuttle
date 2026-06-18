@@ -23,13 +23,16 @@ type Provider interface {
 
 // NewProvider constructs a Provider by name. "" and "none" return (nil, nil),
 // meaning secrets are not resolved (env passthrough off). "infisical" reads
-// credentials from the environment (see InfisicalProvider).
+// credentials from the environment (see InfisicalProvider); "file" reads dotenv
+// files from SHUTTLE_SECRETS_DIR (see FileProvider).
 func NewProvider(name string) (Provider, error) {
 	switch name {
 	case "", "none":
 		return nil, nil
 	case "infisical":
 		return NewInfisical()
+	case "file":
+		return NewFileProvider()
 	default:
 		return nil, fmt.Errorf("unknown secrets provider %q", name)
 	}
