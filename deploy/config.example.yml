@@ -22,8 +22,10 @@ caddy_admin_url: ""
 https_redirect: false
 
 # Secrets provider for rendering service env (optional). "infisical" reads
-# INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. Default "none"
-# means env passthrough is off.
+# INFISICAL_CLIENT_ID/_SECRET/_PROJECT_ID from the environment. "file" reads
+# dotenv files from SHUTTLE_SECRETS_DIR (layout: <dir>/<env>/<path>.env, mirroring
+# the Infisical folders below; default env SHUTTLE_SECRETS_ENV, else "production").
+# Default "none" means env passthrough is off.
 secrets_provider: "none"
 
 # Infisical folder layout (only used with secrets_provider: infisical). Each

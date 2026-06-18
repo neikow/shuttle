@@ -12,7 +12,7 @@ type OrchestratorConfig struct {
 	WebhookSecret   string `yaml:"webhook_secret"`
 	CaddyAdminURL   string `yaml:"caddy_admin_url"`  // e.g. http://caddy:2019; empty disables route push
 	HTTPSRedirect   bool   `yaml:"https_redirect"`   // when true, Caddy serves :443 only and 308-redirects :80 -> HTTPS
-	SecretsProvider string `yaml:"secrets_provider"` // "infisical" | "none" (default)
+	SecretsProvider string `yaml:"secrets_provider"` // "infisical" | "file" | "none" (default)
 	// SecretsBasePath is the shared secrets folder merged under every service
 	// (default "/shared"). SecretsPathTemplate derives a service's own folder
 	// from its name (default "/services/{service}"); a service's secret_path
