@@ -20,6 +20,7 @@ make build-ui   # binary WITH the embedded web UI (runs `make web` first, -tags 
 make web        # build the React UI into web/dist (npm ci + vite build)
 make web-dev    # Vite dev server, proxies API to a local orchestrator on :8080
 make test       # go test -race ./internal/...   (unit; this is the default gate)
+make test-integration # go test -race -tags integration ./test/integration/... (real Docker; opt-in)
 make lint       # golangci-lint run ./...         (v2 config — see CI notes below)
 make proto      # buf generate -> gen/            (run after editing proto/)
 make certs      # dev mTLS material under ./certs (gitignored)
@@ -44,6 +45,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/orchestrator/` | The brain. See below. |
 | `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`). |
 | `web/` | React + Vite + TS read-only dashboard (Tailwind v4 + Radix). `embed.go`/`embed_stub.go` gate embedding the built `dist/` behind the `embedui` build tag. Consumes the existing control-plane endpoints. |
+| `test/integration/` | End-to-end tests (`//go:build integration`) that drive the real `shuttle` binary against a live Docker daemon: build → orchestrator + agent → `POST /deploy` → container serves → ledger records success. Excluded from the default unit gate; run via `make test-integration`. An untagged `doc.go` keeps `go build ./...`/lint happy. |
 
 ### `internal/orchestrator/` internals
 
@@ -339,6 +341,11 @@ These are deliberate. Don't reverse them without updating this file.
   `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`.
 - `go.mod`'s `go 1.25.x` cannot be lowered — a transitive dep requires it
   (`go mod tidy` re-bumps).
+- `integration.yml` runs the Docker-backed E2E suite (`make test-integration`)
+  on PRs + `main` + manual dispatch. Kept separate from `push.yml` (the fast
+  unit/lint/vet/vulncheck gate) because it is slower and pulls images. The
+  suite skips itself when Docker isn't available, so it's a no-op where it
+  can't run rather than a hard failure.
 - `release.yml` fires on `v*` tags → GoReleaser publishes archives + checksums +
   multi-arch `ghcr.io/neikow/shuttle` images. `goreleaser check` validates config.
 - GHA actions currently run on Node.js 20 (deprecated; forced to Node 24 on
