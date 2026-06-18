@@ -29,6 +29,33 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Software Bill of Materials, one per release archive (syft). Lets consumers
+# audit the dependency set of each shipped binary.
+sboms:
+  - artifacts: archive
+
+# Keyless cosign signature over checksums.txt. Because the checksum file lists
+# every archive's hash, one signature transitively covers all archives. Keyless
+# (Fulcio/Rekor, OIDC) means no long-lived signing key to manage or leak — the
+# release job's GitHub OIDC identity is the signer. Verify with:
+#   cosign verify-blob --certificate checksums.txt.pem \
+#     --signature checksums.txt.sig \
+#     --certificate-identity-regexp 'https://github.com/neikow/shuttle/.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     checksums.txt
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
@@ -60,3 +87,17 @@ docker_manifests:
     image_templates:
       - "ghcr.io/neikow/shuttle:{{ .Version }}-amd64"
       - "ghcr.io/neikow/shuttle:{{ .Version }}-arm64"
+
+# Keyless cosign signatures over the published images and multi-arch manifests
+# (signed by digest). Verify with:
+#   cosign verify ghcr.io/neikow/shuttle:<version> \
+#     --certificate-identity-regexp 'https://github.com/neikow/shuttle/.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker_signs:
+  - cmd: cosign
+    artifacts: all
+    args:
+      - sign
+      - "${artifact}"
+      - "--yes"
+    output: true
