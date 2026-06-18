@@ -131,6 +131,18 @@ func startProcEnv(ctx context.Context, t *testing.T, name, bin string, extraEnv 
 	})
 }
 
+// runShuttle runs the shuttle binary as a one-shot command (not a long-running
+// service) and fails the test if it exits non-zero.
+func runShuttle(t *testing.T, bin string, args ...string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("shuttle %v: %v\n%s", args, err, out)
+	}
+}
+
 // httpDo issues a request with the bearer token and returns status + body.
 func httpDo(t *testing.T, method, url, bearer string) (int, string) {
 	t.Helper()
