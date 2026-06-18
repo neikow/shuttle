@@ -64,6 +64,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
 | `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
+| `ratelimit.go` | `ipRateLimiter` — per-client-IP token bucket (`golang.org/x/time/rate`) wrapping the unauthenticated webhook endpoints; 429 + `Retry-After` over the limit. Buckets idle out; keyed on `RemoteAddr` (not spoofable `X-Forwarded-For`). Tunable via `webhook_rate_limit_per_minute`. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
@@ -226,6 +227,15 @@ These are deliberate. Don't reverse them without updating this file.
   shell-out-over-library bias.
 - **Webhook auth = HMAC `X-Hub-Signature-256` + nonce replay guard (10 min TTL).**
   Matches the GitHub webhook convention; the nonce guard blocks replays.
+- **Unauthenticated webhook endpoints are IP rate-limited.** `/webhook`,
+  `/webhook/infisical`, and `/webhook/repo/{id}` take no bearer, so a
+  per-client-IP token bucket (`ratelimit.go`) bounds DoS/abuse of handlers that
+  do real work (HMAC verify, reconcile) before any auth gate, and slows guessing
+  of the 256-bit repo-webhook IDs. Default 120/min/IP (`webhook_rate_limit_per_minute`;
+  negative disables). Keyed on `RemoteAddr`, **not** `X-Forwarded-For` —
+  trusting XFF would let an attacker forge the header to evade the limit; a
+  trusted-proxy/XFF mode can come later. The limiter sits only on the
+  unauthenticated endpoints; bearer-authed routes rely on the token.
 - **Infisical webhook = HMAC `x-infisical-signature` → selective, debounced
   redeploy.** `infisical_webhook_secret` enables `POST /webhook/infisical`. The
   signature is `t=<ts>,v1=<hmac>` over `<ts>.<body>` (Stripe/Infisical style;

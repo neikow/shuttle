@@ -6,6 +6,7 @@ require (
 	github.com/infisical/go-sdk v0.7.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.8.1
+	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -70,7 +71,6 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/api v0.267.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
