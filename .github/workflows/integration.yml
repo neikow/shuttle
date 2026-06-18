@@ -1,0 +1,28 @@
+name: Integration
+
+# End-to-end tests that deploy real containers against the runner's Docker
+# daemon. Kept in a separate workflow from the fast unit gate (push.yml) because
+# they are slower and pull images. GitHub-hosted ubuntu runners ship Docker, so
+# no extra setup is needed beyond Go + git (git is preinstalled too).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Integration tests
+        run: make test-integration
