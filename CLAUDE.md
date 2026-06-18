@@ -59,7 +59,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
@@ -241,6 +241,13 @@ These are deliberate. Don't reverse them without updating this file.
   repo SHA, so both the webhook and poller paths use `ForceDeploy`, not the
   SHA-gated `Reconcile`.
 - **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
+- **Liveness vs readiness: `/healthz` always-200, `/readyz` gated.** `/healthz`
+  answers 200 for the life of the process (liveness). `/readyz` is backed by an
+  `atomic.Bool` the orchestrator flips true once its listeners are up and **false
+  at the first shutdown signal**, *before* draining — so a load balancer routes
+  new traffic away while in-flight requests finish against the already-graceful
+  `GracefulStop` + timed `http.Shutdown`. Both probes are unauthenticated so a LB
+  can poll them tokenless.
 - **Agent auth = mTLS *or* enrollment token.** Either present a client cert
   (mutual TLS) or a host-scoped bearer token over server-auth TLS. The token path
   avoids per-agent cert distribution: only the
