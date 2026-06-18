@@ -44,6 +44,10 @@ type HTTPServer struct {
 	// instance before the process exits. Distinct from /healthz (liveness).
 	ready atomic.Bool
 
+	// webhookLimiter rate-limits the unauthenticated webhook endpoints per
+	// client IP. nil disables it.
+	webhookLimiter *ipRateLimiter
+
 	// repoWebhookDeployer is the ForceDeploy implementation used by the
 	// repo-webhook trigger handler. Kept separate so tests can substitute a
 	// stub without needing a real GitSyncer.
@@ -133,7 +137,7 @@ func (s *HTTPServer) EnableMetrics(h http.Handler) {
 func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.webhook = h
 	s.syncer = syncer
-	s.mux.HandleFunc("POST /webhook", s.handleWebhook)
+	s.mux.HandleFunc("POST /webhook", s.rateLimited(s.handleWebhook))
 	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
 	s.mux.HandleFunc("GET /plan", s.bearerAuth(s.handlePlan))
 	s.mux.HandleFunc("GET /check", s.bearerAuth(s.handleCheck))
@@ -182,7 +186,7 @@ func (s *HTTPServer) EnableInfisicalWebhook(h *infisical.Handler, syncer *GitSyn
 	s.syncer = syncer
 	s.infisicalDefEnv = defaultEnv
 	s.infisicalDebounce = newChangeDebouncer(debounce, s.reconcileSecretChanges)
-	s.mux.HandleFunc("POST /webhook/infisical", s.handleInfisicalWebhook)
+	s.mux.HandleFunc("POST /webhook/infisical", s.rateLimited(s.handleInfisicalWebhook))
 }
 
 // handleInfisicalWebhook validates the signed payload and queues a debounced
@@ -297,10 +301,11 @@ func (s *HTTPServer) handlePrune(w http.ResponseWriter, r *http.Request) {
 
 func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPServer {
 	s := &HTTPServer{
-		token:    token,
-		ledger:   store,
-		registry: registry,
-		mux:      http.NewServeMux(),
+		token:          token,
+		ledger:         store,
+		registry:       registry,
+		mux:            http.NewServeMux(),
+		webhookLimiter: newIPRateLimiter(defaultWebhookRatePerMin, defaultWebhookRatePerMin/6),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
@@ -325,6 +330,26 @@ func (s *HTTPServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // start of shutdown so a load balancer drains the instance.
 func (s *HTTPServer) SetReady(ready bool) {
 	s.ready.Store(ready)
+}
+
+// SetWebhookRateLimit overrides the per-IP rate limit on the unauthenticated
+// webhook endpoints. A positive perMinute sets that rate (burst ~10s worth); a
+// negative value disables limiting entirely; 0 leaves the default in place.
+func (s *HTTPServer) SetWebhookRateLimit(perMinute int) {
+	switch {
+	case perMinute < 0:
+		s.webhookLimiter = nil
+	case perMinute > 0:
+		s.webhookLimiter = newIPRateLimiter(perMinute, perMinute/6)
+	}
+}
+
+// rateLimited wraps a handler with the webhook rate limiter when one is set.
+func (s *HTTPServer) rateLimited(h http.HandlerFunc) http.HandlerFunc {
+	if s.webhookLimiter == nil {
+		return h
+	}
+	return s.webhookLimiter.middleware(h)
 }
 
 // handleReadyz is the readiness probe: 200 once the orchestrator is serving,
@@ -591,7 +616,7 @@ func newID() string {
 func (s *HTTPServer) EnableRepoWebhooks(syncer *GitSyncer) {
 	s.syncer = syncer
 	s.repoWebhookDeployer = syncer.ForceDeploy
-	s.mux.HandleFunc("POST /webhook/repo/{id}", s.handleRepoWebhookTrigger)
+	s.mux.HandleFunc("POST /webhook/repo/{id}", s.rateLimited(s.handleRepoWebhookTrigger))
 	s.mux.HandleFunc("POST /webhooks/repo", s.bearerAuth(s.handleCreateRepoWebhook))
 	s.mux.HandleFunc("GET /webhooks/repo", s.bearerAuth(s.handleListRepoWebhooks))
 	s.mux.HandleFunc("DELETE /webhooks/repo/{id}", s.bearerAuth(s.handleDeleteRepoWebhook))

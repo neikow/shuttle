@@ -63,6 +63,11 @@ type OrchestratorConfig struct {
 	// repo-managed orchestrator.yaml — because a Slack/Discord webhook URL is a
 	// secret that must not be committed to the IaC repo.
 	Notifications []NotificationTarget `yaml:"notifications"`
+	// WebhookRateLimitPerMinute caps requests per client IP to the
+	// unauthenticated webhook endpoints (/webhook, /webhook/infisical,
+	// /webhook/repo/{id}). 0/unset keeps the built-in default (120/min); a
+	// negative value disables rate limiting.
+	WebhookRateLimitPerMinute int `yaml:"webhook_rate_limit_per_minute"`
 }
 
 // NotificationTarget is one outbound notification sink. The URL receives an

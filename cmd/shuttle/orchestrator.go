@@ -121,6 +121,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	}
 
 	httpHandler := orchestrator.NewHTTPServer(cfg.BearerToken, store, registry)
+	httpHandler.SetWebhookRateLimit(cfg.WebhookRateLimitPerMinute)
 	httpHandler.SetEventBus(bus)
 	metrics := orchestrator.NewMetrics(bus, registry)
 	go metrics.Run(ctx, bus)
