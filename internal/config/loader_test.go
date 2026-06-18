@@ -159,6 +159,60 @@ func TestLoadOrchestratorConfig_gitCredentials(t *testing.T) {
 	}
 }
 
+func TestLoadOrchestratorConfig_notifications(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "valid slack target",
+			body: "bearer_token: tok\nnotifications:\n  - type: slack\n    url: https://hooks.slack.com/x\n    events: [deploy.failed]\n",
+		},
+		{
+			name: "valid webhook without events",
+			body: "bearer_token: tok\nnotifications:\n  - type: webhook\n    url: https://example.com/hook\n",
+		},
+		{
+			name:    "missing type",
+			body:    "bearer_token: tok\nnotifications:\n  - url: https://example.com/hook\n",
+			wantErr: "type is required",
+		},
+		{
+			name:    "unknown type",
+			body:    "bearer_token: tok\nnotifications:\n  - type: pagerduty\n    url: https://example.com/hook\n",
+			wantErr: "unknown type",
+		},
+		{
+			name:    "missing url",
+			body:    "bearer_token: tok\nnotifications:\n  - type: discord\n",
+			wantErr: "url is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadOrchestratorConfig(path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	os.MkdirAll(filepath.Dir(path), 0755)

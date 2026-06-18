@@ -57,7 +57,34 @@ type OrchestratorConfig struct {
 	// authenticate git clone/fetch operations against private repos. Tokens are
 	// resolved from the secrets provider at runtime.
 	GitCredentials []GitCredential `yaml:"git_credentials"`
+	// Notifications lists outbound notification targets. Each subscribes to the
+	// orchestrator event bus and POSTs matching events to a webhook (Slack,
+	// Discord, or a generic JSON endpoint). Lives in config.yml — not the
+	// repo-managed orchestrator.yaml — because a Slack/Discord webhook URL is a
+	// secret that must not be committed to the IaC repo.
+	Notifications []NotificationTarget `yaml:"notifications"`
 }
+
+// NotificationTarget is one outbound notification sink. The URL receives an
+// HTTP POST for every event whose type matches Events (empty Events = all).
+type NotificationTarget struct {
+	// Type selects the payload format: "slack" and "discord" send a chat
+	// message ({"text"} / {"content"}); "webhook" posts the raw event JSON.
+	Type string `yaml:"type"`
+	// URL is the incoming-webhook endpoint to POST to.
+	URL string `yaml:"url"`
+	// Events optionally restricts which event types are delivered (e.g.
+	// ["deploy.failed", "deploy.rolled_back", "drift.detected"]). Empty means
+	// every event type is delivered.
+	Events []string `yaml:"events"`
+}
+
+// Notification target types.
+const (
+	NotifySlack   = "slack"
+	NotifyDiscord = "discord"
+	NotifyWebhook = "webhook"
+)
 
 // GitCredential configures HTTPS token auth for a git host or repo prefix.
 // The token is resolved from the secrets provider at runtime, never stored in config.

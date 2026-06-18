@@ -42,6 +42,20 @@ func LoadOrchestratorConfig(path string) (*OrchestratorConfig, error) {
 				path, i, gc.RepoPrefix, strings.TrimPrefix(gc.RepoPrefix, "https://"))
 		}
 	}
+	for i, n := range cfg.Notifications {
+		switch n.Type {
+		case NotifySlack, NotifyDiscord, NotifyWebhook:
+		case "":
+			return nil, fmt.Errorf("%s: notifications[%d]: type is required (one of %q, %q, %q)",
+				path, i, NotifySlack, NotifyDiscord, NotifyWebhook)
+		default:
+			return nil, fmt.Errorf("%s: notifications[%d]: unknown type %q (want %q, %q, or %q)",
+				path, i, n.Type, NotifySlack, NotifyDiscord, NotifyWebhook)
+		}
+		if n.URL == "" {
+			return nil, fmt.Errorf("%s: notifications[%d]: url is required", path, i)
+		}
+	}
 	return &cfg, nil
 }
 
