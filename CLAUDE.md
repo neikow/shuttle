@@ -341,6 +341,16 @@ These are deliberate. Don't reverse them without updating this file.
   (`go mod tidy` re-bumps).
 - `release.yml` fires on `v*` tags → GoReleaser publishes archives + checksums +
   multi-arch `ghcr.io/neikow/shuttle` images. `goreleaser check` validates config.
+  Supply chain: the release also emits a **per-archive SBOM** (syft, `sboms:`)
+  and **keyless cosign signatures** — `signs:` over `checksums.txt` (transitively
+  covers every archive) and `docker_signs:` over the images + manifests. Keyless
+  (Fulcio/Rekor) means no signing key to manage: the workflow grants
+  `id-token: write` and the job's GitHub OIDC identity is the signer, so
+  `release.yml` installs `cosign` + `syft` before the GoReleaser step. Verify a
+  release with `cosign verify` / `cosign verify-blob`, pinning
+  `--certificate-identity-regexp 'https://github.com/neikow/shuttle/.*'` and
+  `--certificate-oidc-issuer https://token.actions.githubusercontent.com`
+  (recipes in `.goreleaser.yaml` comments).
 - GHA actions currently run on Node.js 20 (deprecated; forced to Node 24 on
   2026-06-02). Bump action versions before then.
 
