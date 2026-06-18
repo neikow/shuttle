@@ -16,14 +16,14 @@ func newRegistryNoEvict() *Registry {
 func TestRegistry_ReconnectThenStaleUnregister(t *testing.T) {
 	r := newRegistryNoEvict()
 
-	old := r.register("web1")
+	old := r.register("web1", "")
 	select {
 	case <-old.done:
 		t.Fatal("new connection's done should be open")
 	default:
 	}
 
-	fresh := r.register("web1") // reconnect displaces old
+	fresh := r.register("web1", "") // reconnect displaces old
 	select {
 	case <-old.done:
 	default:
@@ -48,9 +48,26 @@ func TestRegistry_ReconnectThenStaleUnregister(t *testing.T) {
 
 // Send must never panic on a retired connection, and must report it as not
 // connected.
+func TestRegistry_SnapshotIncludesVersion(t *testing.T) {
+	r := NewRegistry()
+	r.register("web1", "v2.0.0")
+	r.register("web2", "") // version unknown
+
+	got := map[string]string{}
+	for _, c := range r.Snapshot() {
+		got[c.Host] = c.Version
+	}
+	if got["web1"] != "v2.0.0" {
+		t.Errorf("web1 version = %q, want v2.0.0", got["web1"])
+	}
+	if got["web2"] != "" {
+		t.Errorf("web2 version = %q, want empty", got["web2"])
+	}
+}
+
 func TestRegistry_SendAfterUnregister(t *testing.T) {
 	r := newRegistryNoEvict()
-	conn := r.register("web1")
+	conn := r.register("web1", "")
 	r.unregister(conn)
 	if err := r.Send("web1", &shuttlev1.OrchestratorCommand{}); err == nil {
 		t.Fatal("Send after unregister should error")
@@ -61,7 +78,7 @@ func TestRegistry_SendAfterUnregister(t *testing.T) {
 func TestRegistry_ConcurrentSendUnregister(t *testing.T) {
 	r := newRegistryNoEvict()
 	for i := 0; i < 200; i++ {
-		r.register("web1")
+		r.register("web1", "")
 		var wg sync.WaitGroup
 		wg.Add(2)
 		go func() {

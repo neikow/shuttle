@@ -18,11 +18,16 @@ type AgentServiceServer struct {
 	store    *ledger.Store // optional; when nil, deploy results are not persisted
 	tracker  *StateTracker // optional; when nil, container state is not tracked
 	bus      *EventBus     // optional; nil-safe
+	version  string        // orchestrator build version, for skew detection (optional)
 }
 
 func NewAgentServiceServer(registry *Registry, store *ledger.Store) *AgentServiceServer {
 	return &AgentServiceServer{registry: registry, store: store}
 }
+
+// SetVersion records the orchestrator's own build version so Register can warn
+// when a connecting agent reports a different version. Call before serving.
+func (s *AgentServiceServer) SetVersion(v string) { s.version = v }
 
 // SetStateTracker attaches a tracker that receives container state reports for
 // drift detection. Call before serving.
@@ -82,9 +87,13 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 		return status.Errorf(codes.PermissionDenied, "token scoped to host %q, not %q", tokenHost, host)
 	}
 
-	conn := s.registry.register(host)
+	conn := s.registry.register(host, reg.AgentVersion)
 	defer s.registry.unregister(conn)
 	slog.Info("agent connected", "host", host, "version", reg.AgentVersion)
+	if s.version != "" && reg.AgentVersion != "" && reg.AgentVersion != s.version {
+		slog.Warn("agent/orchestrator version skew",
+			"host", host, "agent_version", reg.AgentVersion, "orchestrator_version", s.version)
+	}
 
 	// Fan-out: send commands from the registry channel to the stream until the
 	// connection is retired (evicted, unregistered, or displaced by a reconnect).

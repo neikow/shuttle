@@ -51,16 +51,16 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | File | Responsibility |
 |------|----------------|
-| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. |
+| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
 | `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
-| `registry.go` | Connected-agent registry; heartbeat tracking + eviction; `Send(host, cmd)`. |
+| `registry.go` | Connected-agent registry; heartbeat tracking + eviction; per-agent build version; `Send(host, cmd)`; `Snapshot` (host, last-seen, version). |
 | `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
 | `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
-| `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
+| `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
 | `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
@@ -256,6 +256,16 @@ These are deliberate. Don't reverse them without updating this file.
   hashes, and validated by `TokenStreamInterceptor`, which pins the stream to the
   token's host so a token can't register a different one. Token over a non-TLS
   transport works but logs a cleartext warning.
+- **Agent version is reported and surfaced for skew visibility.** The agent
+  sends its build version in the `RegisterRequest` (`agent_version`, already in
+  the proto). The orchestrator stores it on the registry connection, exposes it
+  per host in `GET /overview` (`agent_version`), and — when its own version is
+  known (`AgentServiceServer.SetVersion`, wired from the binary's `Version`) —
+  logs a warning when a connecting agent's version differs. Detection only, not
+  enforcement: a deploy is never refused on skew (mismatched versions still
+  interoperate over the stable proto), but operators can *see* which hosts lag a
+  rollout. Empty versions (an un-stamped `dev` build) are treated as unknown and
+  never trigger a skew warning.
 - **SSH-like enrollment = single-use join token + cert-pin TOFU.** The token is
   minted and consumed in two steps so the operator's powerful control-plane
   bearer never reaches the target host. `shuttle enroll` (bearer-authed
