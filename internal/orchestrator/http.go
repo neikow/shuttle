@@ -39,6 +39,11 @@ type HTTPServer struct {
 	bus          *EventBus     // optional; nil-safe
 	stateTracker *StateTracker // optional; nil-safe (powers GET /overview)
 
+	// ready gates GET /readyz: true once the orchestrator is wired and serving,
+	// flipped false at the start of shutdown so a load balancer drains this
+	// instance before the process exits. Distinct from /healthz (liveness).
+	ready atomic.Bool
+
 	// repoWebhookDeployer is the ForceDeploy implementation used by the
 	// repo-webhook trigger handler. Kept separate so tests can substitute a
 	// stub without needing a real GitSyncer.
@@ -298,6 +303,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 		mux:      http.NewServeMux(),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
 	s.mux.HandleFunc("GET /overview", s.bearerAuth(s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.bearerAuth(s.handleListDeploys))
 	s.mux.HandleFunc("POST /deploy/{service}", s.bearerAuth(s.handleDeploy))
@@ -312,6 +318,26 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *HTTPServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// SetReady marks the orchestrator ready (or not) to serve traffic. GET /readyz
+// reflects it: callers flip it true once wiring is complete and false at the
+// start of shutdown so a load balancer drains the instance.
+func (s *HTTPServer) SetReady(ready bool) {
+	s.ready.Store(ready)
+}
+
+// handleReadyz is the readiness probe: 200 once the orchestrator is serving,
+// 503 before it is ready or while it is draining. Unauthenticated, like
+// /healthz, so a load balancer can poll it without a token.
+func (s *HTTPServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if !s.ready.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "not ready"})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 }
 
 func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {

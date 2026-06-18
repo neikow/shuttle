@@ -256,15 +256,22 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		}
 	}()
 
+	// Listeners are up; advertise readiness so a load balancer starts routing.
+	httpHandler.SetReady(true)
+
 	select {
 	case <-ctx.Done():
 		slog.Info("shutdown signal received")
 	case err := <-errCh:
+		httpHandler.SetReady(false)
 		stop()
 		shutdown(grpcServer, httpServer)
 		return err
 	}
 
+	// Stop advertising readiness before draining, so a load balancer routes new
+	// traffic away while in-flight requests finish.
+	httpHandler.SetReady(false)
 	shutdown(grpcServer, httpServer)
 	return nil
 }
