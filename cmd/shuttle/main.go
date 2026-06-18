@@ -67,7 +67,9 @@ func main() {
 	planCmd.GroupID = "tools"
 	versionCmd.GroupID = "tools"
 	initCmd.GroupID = "tools"
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd, planCmd, eventsCmd, initCmd)
+	backupCmd.GroupID = "tools"
+	restoreCmd.GroupID = "tools"
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd, planCmd, eventsCmd, initCmd, backupCmd, restoreCmd)
 	silenceUsageOnRun(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -32,11 +32,11 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment. |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore`. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
@@ -160,6 +160,16 @@ These are deliberate. Don't reverse them without updating this file.
 - **SQLite via `modernc.org/sqlite` (pure Go, no CGO), WAL mode.** Single-file
   ledger, static binary, no external DB to operate. The ledger is *append-only*:
   rollback is "redeploy an older recorded SHA," not "mutate state."
+- **Backup/restore via SQLite `VACUUM INTO`, not file copy.** A single-file
+  ledger is one `rm` from total deploy-history loss, so `shuttle backup` is
+  first-class. It uses `VACUUM INTO` (not `cp shuttle.db`) because the live DB
+  runs in WAL mode — a raw copy can capture a torn, mid-checkpoint state. `VACUUM
+  INTO` takes a read transaction and emits a consistent, plain (non-WAL) snapshot
+  *while the orchestrator keeps running*. `shuttle restore` is the offline
+  inverse: it `Verify`s the file is a real ledger (queries `deploys`), then
+  atomically installs it (temp file + rename) and removes stale `-wal`/`-shm`
+  sidecars so the snapshot is authoritative. Both operate on local files only —
+  no running orchestrator needed — so they fit cron/backup tooling.
 - **Service lifecycle is mutable state, separate from the append-only ledger.**
   The `deploys` table can't express "no longer desired," and a removed service's
   config (e.g. its `delete_volumes` policy) is gone from the repo. So a small
