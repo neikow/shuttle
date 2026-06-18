@@ -61,12 +61,13 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
+| `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
 | `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with the pasted bearer token, so control-plane endpoints stay `bearerAuth`-protected. SPA fallback to `index.html` for client routes. |
-| `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Foundation for the (upcoming) notification stream and metrics. |
+| `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Consumed by the SSE stream (`/events`), metrics (`metrics.go`), and outbound notifications (`notify.go`). |
 
 ## Request flows
 
@@ -307,6 +308,20 @@ These are deliberate. Don't reverse them without updating this file.
   (events leak service names + SHAs). A slow reader blocks only its own stream —
   the bus drops its events rather than stalling the deploy path. `shuttle
   events` is the CLI consumer.
+- **Outbound notifications = the same bus, pushed to chat/webhooks.** Where
+  `/events` is pull (a client connects), `notify.go`'s `Notifier` is push: it
+  subscribes to the `EventBus` and POSTs each matching event to configured sinks
+  — `slack` (`{"text"}`), `discord` (`{"content"}`), or generic `webhook` (the
+  raw `Event` JSON). Targets live in `config.yml` under `notifications:` (a
+  Slack/Discord webhook URL is a secret, so **not** the repo-managed
+  `orchestrator.yaml`); each target's optional `events:` list filters by type
+  (empty = all). Delivery is deliberately best-effort and decoupled from the
+  deploy path: sends are bounded-concurrent (a small semaphore) and time-limited
+  (10s client timeout), a saturated target backpressures only the bus (which
+  drops *its* subscriber's events, never the publisher's), and failures are
+  logged, not retried — the ledger + `/events` remain the durable record. The
+  bus's nil-safety lets the notifier be wholly optional (`NewNotifier` returns
+  nil when no targets are configured, and `Run` is a no-op on nil).
 - **Service-specific deploy webhooks — 256-bit ID as the secret, no HMAC.** `POST /webhooks/repo` creates a webhook scoped to one service, returning a random 256-bit ID stored in the ledger (`repo_webhooks` table). `POST /webhook/repo/{id}` triggers a `ForceDeploy` of the bound service with no additional auth — the ID entropy is sufficient. This is the simplest integration point for external systems (container registries, third-party CI) that need to trigger a single-service redeploy without exposing the orchestrator bearer token. Managed via `EnableRepoWebhooks` (called only when git sync is configured).
 - **Web UI: embedded React SPA, build-tag-gated, read-only v1.** `web/` is a
   Vite + TS + Tailwind-v4 + Radix dashboard (sharp aesthetic — radius forced near

@@ -125,6 +125,10 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	metrics := orchestrator.NewMetrics(bus, registry)
 	go metrics.Run(ctx, bus)
 	httpHandler.EnableMetrics(metrics.Handler())
+	if notifier := orchestrator.NewNotifier(cfg.Notifications); notifier != nil {
+		go notifier.Run(ctx, bus)
+		slog.Info("notifications enabled", "targets", len(cfg.Notifications))
+	}
 	httpHandler.SetStateTracker(tracker)
 	httpHandler.EnableUI()
 	if cfg.RepoURL != "" && cfg.WebhookSecret != "" {
