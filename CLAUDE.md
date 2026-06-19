@@ -62,13 +62,13 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`). `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
 | `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
-| `ratelimit.go` | `ipRateLimiter` — per-client-IP token bucket (`golang.org/x/time/rate`) wrapping the unauthenticated webhook endpoints; 429 + `Retry-After` over the limit. Buckets idle out; keyed on `RemoteAddr` (not spoofable `X-Forwarded-For`). Tunable via `webhook_rate_limit_per_minute`. |
+| `ratelimit.go` | `ipRateLimiter` — per-client-IP token bucket (`golang.org/x/time/rate`) wrapping the unauthenticated endpoints (webhooks + `/enroll/redeem`); 429 + `Retry-After` over the limit. Buckets idle out; keyed on `RemoteAddr` (not spoofable `X-Forwarded-For`). Tunable via `webhook_rate_limit_per_minute`. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
@@ -231,15 +231,31 @@ These are deliberate. Don't reverse them without updating this file.
   shell-out-over-library bias.
 - **Webhook auth = HMAC `X-Hub-Signature-256` + nonce replay guard (10 min TTL).**
   Matches the GitHub webhook convention; the nonce guard blocks replays.
-- **Unauthenticated webhook endpoints are IP rate-limited.** `/webhook`,
-  `/webhook/infisical`, and `/webhook/repo/{id}` take no bearer, so a
-  per-client-IP token bucket (`ratelimit.go`) bounds DoS/abuse of handlers that
-  do real work (HMAC verify, reconcile) before any auth gate, and slows guessing
-  of the 256-bit repo-webhook IDs. Default 120/min/IP (`webhook_rate_limit_per_minute`;
-  negative disables). Keyed on `RemoteAddr`, **not** `X-Forwarded-For` —
-  trusting XFF would let an attacker forge the header to evade the limit; a
-  trusted-proxy/XFF mode can come later. The limiter sits only on the
-  unauthenticated endpoints; bearer-authed routes rely on the token.
+- **Unauthenticated endpoints are IP rate-limited.** `/webhook`,
+  `/webhook/infisical`, `/webhook/repo/{id}`, and `/enroll/redeem` take no
+  bearer, so a per-client-IP token bucket (`ratelimit.go`) bounds DoS/abuse of
+  handlers that do real work (HMAC verify, reconcile, a ledger write for redeem)
+  before any auth gate, and slows guessing of the 256-bit repo-webhook IDs.
+  Default 120/min/IP (`webhook_rate_limit_per_minute`; negative disables). Keyed
+  on `RemoteAddr`, **not** `X-Forwarded-For` — trusting XFF would let an attacker
+  forge the header to evade the limit; a trusted-proxy/XFF mode can come later.
+  The limiter sits only on the unauthenticated endpoints; bearer-authed routes
+  rely on the token. `/enroll/redeem` is *additionally* protected by the
+  single-use, short-TTL join token it carries; the rate limit just bounds abuse
+  of the handler itself.
+- **Baseline security headers on every response; CSP on the UI.** `ServeHTTP`
+  sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
+  `Referrer-Policy: no-referrer` on all responses (cheap defense-in-depth that
+  also covers the unauthenticated `/ui/` bundle and probe endpoints), and a
+  restrictive `Content-Security-Policy` (`uiCSP`) on `/ui` paths only —
+  same-origin scripts/connects, `'unsafe-inline'` styles (component libraries set
+  style attributes at runtime), `frame-ancestors 'none'`. CSP is scoped to the UI
+  because only it serves rendered HTML; JSON/metrics responses don't need it.
+- **`/metrics` auth is opt-in.** `/metrics` is unauthenticated by default
+  (standard Prometheus scrape model; labels are low-cardinality so no topology
+  leaks). `metrics_require_auth: true` gates it at the **read** tier via
+  `requireRole`, for deployments that expose `/metrics` on an untrusted network
+  and want it behind a token.
 - **Infisical webhook = HMAC `x-infisical-signature` → selective, debounced
   redeploy.** `infisical_webhook_secret` enables `POST /webhook/infisical`. The
   signature is `t=<ts>,v1=<hmac>` over `<ts>.<body>` (Stripe/Infisical style;
@@ -403,7 +419,9 @@ These are deliberate. Don't reverse them without updating this file.
   because correct histograms + exposition aren't worth hand-rolling. Labels are
   deliberately **low-cardinality — event type only, never service or host
   names** — so `/metrics` can be scraped unauthenticated (standard scrape model)
-  without leaking topology. Connected-agent gauge and dropped-event counter read
+  without leaking topology; `metrics_require_auth: true` gates it at the read
+  tier for untrusted networks (see the `/metrics`-auth decision). Connected-agent
+  gauge and dropped-event counter read
   live from the registry/bus at scrape time (`GaugeFunc`/`CounterFunc`); deploy
   duration is a histogram, timed by matching a terminal event to its queued
   event by deploy ID. Uses its own registry, not the global default.

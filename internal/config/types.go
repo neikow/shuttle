@@ -68,6 +68,10 @@ type OrchestratorConfig struct {
 	// /webhook/repo/{id}). 0/unset keeps the built-in default (120/min); a
 	// negative value disables rate limiting.
 	WebhookRateLimitPerMinute int `yaml:"webhook_rate_limit_per_minute"`
+	// MetricsRequireAuth gates GET /metrics behind the read role. Default false
+	// keeps the standard unauthenticated Prometheus scrape model; set true when
+	// /metrics is reachable from an untrusted network.
+	MetricsRequireAuth bool `yaml:"metrics_require_auth"`
 	// OIDC optionally enables per-user OpenID Connect bearer-token auth on the
 	// HTTP control plane, layered on top of the static bearer + named control
 	// tokens. Empty issuer disables it.

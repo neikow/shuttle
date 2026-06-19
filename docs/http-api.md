@@ -208,9 +208,16 @@ and posts this request.
 
 ## `GET /metrics`
 
-Prometheus exposition format. Unauthed (standard Prometheus scrape model).
-Labels are deliberately low-cardinality (event type only — never service or host
-names) so scraping doesn't leak topology.
+Prometheus exposition format. Unauthed by default (standard Prometheus scrape
+model). Labels are deliberately low-cardinality (event type only — never service
+or host names) so scraping doesn't leak topology. Set `metrics_require_auth:
+true` to gate it at the **read** tier when `/metrics` is exposed on an untrusted
+network.
+
+All responses (including the unauthenticated probes and the `/ui/` bundle) carry
+baseline security headers — `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+DENY`, `Referrer-Policy: no-referrer` — plus a restrictive `Content-Security-Policy`
+on `/ui` paths.
 
 Metrics exposed:
 

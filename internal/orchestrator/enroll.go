@@ -45,13 +45,15 @@ func (o *EnrollOptions) ttl() time.Duration {
 
 // EnableEnrollment registers the enrollment endpoints. GET /hosts and
 // POST /enroll are bearer-authed (operator side). POST /enroll/redeem is
-// authenticated by the single-use join token itself (agent side, no bearer).
+// authenticated by the single-use join token itself (agent side, no bearer), so
+// it is per-IP rate limited like the other unauthenticated endpoints — bounding
+// brute-force/DoS of a handler that does a ledger write before any bearer gate.
 // Call before serving; requires the ledger store to be set.
 func (s *HTTPServer) EnableEnrollment(opts EnrollOptions) {
 	s.enroll = &opts
 	s.mux.HandleFunc("GET /hosts", s.requireRole(RoleRead, s.handleListHosts))
 	s.mux.HandleFunc("POST /enroll", s.requireRole(RoleAdmin, s.handleEnroll))
-	s.mux.HandleFunc("POST /enroll/redeem", s.handleRedeem)
+	s.mux.HandleFunc("POST /enroll/redeem", s.rateLimited(s.handleRedeem))
 }
 
 type hostInfo struct {

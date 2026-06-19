@@ -131,9 +131,15 @@ func writeSSE(w io.Writer, ev Event) error {
 }
 
 // EnableMetrics registers GET /metrics, serving Prometheus metrics. Unauthed by
-// design: the exposed metrics are low-cardinality aggregates (no service/host
-// labels), matching the standard scrape model. Call before serving.
-func (s *HTTPServer) EnableMetrics(h http.Handler) {
+// default: the exposed metrics are low-cardinality aggregates (no service/host
+// labels), matching the standard scrape model. When requireAuth is true the
+// endpoint is gated at the read tier (for deployments that expose /metrics on a
+// reachable network and want it behind a token). Call before serving.
+func (s *HTTPServer) EnableMetrics(h http.Handler, requireAuth bool) {
+	if requireAuth {
+		s.mux.Handle("GET /metrics", s.requireRole(RoleRead, h.ServeHTTP))
+		return
+	}
 	s.mux.Handle("GET /metrics", h)
 }
 
@@ -333,7 +339,25 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	return s
 }
 
+// uiCSP is the Content-Security-Policy for the embedded UI: scripts/styles/
+// connections are same-origin only (the Vite bundle loads its own assets and
+// talks to the same-origin control plane), inline styles are allowed because
+// the component libraries set style attributes at runtime, and the page may not
+// be framed. Applied only to /ui paths — API/JSON responses don't render.
+const uiCSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data:; font-src 'self' data:; connect-src 'self'; " +
+	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
 func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Baseline security headers on every response. Cheap defense-in-depth that
+	// also covers the unauthenticated UI and probe endpoints.
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Referrer-Policy", "no-referrer")
+	if r.URL.Path == "/ui" || strings.HasPrefix(r.URL.Path, "/ui/") {
+		h.Set("Content-Security-Policy", uiCSP)
+	}
 	s.mux.ServeHTTP(w, r)
 }
 

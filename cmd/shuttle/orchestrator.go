@@ -134,7 +134,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	httpHandler.SetEventBus(bus)
 	metrics := orchestrator.NewMetrics(bus, registry)
 	go metrics.Run(ctx, bus)
-	httpHandler.EnableMetrics(metrics.Handler())
+	httpHandler.EnableMetrics(metrics.Handler(), cfg.MetricsRequireAuth)
 	if notifier := orchestrator.NewNotifier(cfg.Notifications); notifier != nil {
 		go notifier.Run(ctx, bus)
 		slog.Info("notifications enabled", "targets", len(cfg.Notifications))
