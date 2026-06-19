@@ -56,6 +56,21 @@ func LoadOrchestratorConfig(path string) (*OrchestratorConfig, error) {
 			return nil, fmt.Errorf("%s: notifications[%d]: url is required", path, i)
 		}
 	}
+	if cfg.OIDC.Issuer != "" {
+		if cfg.OIDC.Audience == "" {
+			return nil, fmt.Errorf("%s: oidc.audience is required when oidc.issuer is set", path)
+		}
+		if len(cfg.OIDC.RoleMapping) == 0 {
+			return nil, fmt.Errorf("%s: oidc.role_mapping must not be empty when oidc.issuer is set", path)
+		}
+		for group, role := range cfg.OIDC.RoleMapping {
+			switch role {
+			case "read", "deploy", "admin":
+			default:
+				return nil, fmt.Errorf("%s: oidc.role_mapping[%q]: invalid role %q (want read, deploy, or admin)", path, group, role)
+			}
+		}
+	}
 	return &cfg, nil
 }
 

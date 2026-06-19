@@ -1,8 +1,25 @@
 # Orchestrator config. Copy to config.yml and edit.
-bearer_token: "change-me"          # required; auth for the HTTP control plane
+bearer_token: "change-me"          # required; bootstrap-admin bearer for the HTTP control plane
 grpc_addr: ":9090"
 http_addr: ":8080"
 data_dir: /var/lib/shuttle         # SQLite ledger lives here
+
+# Per-user OIDC auth (optional). When issuer is set, an OpenID Connect JWT is
+# accepted as a bearer token alongside the static bearer + named control tokens
+# (`shuttle token`). The orchestrator verifies the JWT's signature (via the
+# issuer's JWKS, discovered at startup), its issuer, and audience (`aud`), then
+# maps roles_claim through role_mapping to a control-plane role (read/deploy/
+# admin; highest match wins). A valid token mapping to no role gets 403. The
+# username_claim becomes the audit actor. The static bearer stays full admin.
+# oidc:
+#   issuer: "https://accounts.google.com"   # or a self-hosted Dex/Keycloak
+#   audience: "shuttle"                      # the client ID registered for Shuttle
+#   roles_claim: "groups"                    # claim holding role/group values (default "groups")
+#   username_claim: "email"                  # claim used as the audit actor (default "sub")
+#   role_mapping:                            # IdP group/role value -> control-plane role
+#     shuttle-admins: admin
+#     shuttle-deployers: deploy
+#     shuttle-viewers: read
 
 # Git sync + webhook (optional). Set both repo_url and webhook_secret to enable
 # POST /webhook and the drift reconcile loop.

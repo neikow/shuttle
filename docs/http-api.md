@@ -37,6 +37,16 @@ minimum role is at or below its own. A missing/invalid/revoked token returns
 `401`; a valid token with insufficient role returns `403`. The token's name is
 recorded as the actor in the audit log.
 
+**OIDC (optional):** when `oidc:` is configured (see
+[configuration.md](configuration.md#oidc-per-user-auth)), the same `Authorization:
+Bearer <token>` may carry an OpenID Connect **JWT** issued by your IdP. The
+orchestrator verifies its signature (issuer JWKS), issuer, and audience, then
+maps the configured roles claim through `role_mapping` to a role — so OIDC users
+flow through the identical `read < deploy < admin` enforcement. A validly-signed
+token mapping to no role gets `403`. The caller's `username_claim` (default
+`sub`) is the audit actor. OIDC is additive; the static bearer and control
+tokens keep working.
+
 `GET /hosts` and `POST /enroll` exist only when `agent_token_auth` and git sync
 are configured; see [operations.md](operations.md#enrolling-agents-with-tokens).
 

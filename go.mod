@@ -3,6 +3,8 @@ module github.com/neikow/shuttle
 go 1.25.7
 
 require (
+	github.com/coreos/go-oidc/v3 v3.19.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/infisical/go-sdk v0.7.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.8.1
