@@ -19,6 +19,8 @@ const (
 	auditRedeem        = "enroll.redeem"
 	auditWebhookCreate = "webhook.create"
 	auditWebhookDelete = "webhook.delete"
+	auditTokenCreate   = "token.create"
+	auditTokenRevoke   = "token.revoke"
 )
 
 // Audit result values.
@@ -27,15 +29,19 @@ const (
 	auditFailure = "failure"
 )
 
-// auditActor derives the actor for an audited request. With a single static
-// bearer token the orchestrator cannot tell individual operators apart, so a
-// caller may self-identify via the X-Actor header (e.g. CI sets it to the
-// triggering user/workflow); absent that, the actor is the generic "operator".
+// auditActor derives the actor for an audited request. A named, role-scoped
+// control token gives the request a real identity (the token's name), which
+// wins. The static bootstrap bearer_token has no name, so the caller may
+// self-identify via the X-Actor header (e.g. CI sets it to the triggering
+// user/workflow); absent that, the actor is the generic "operator".
 //
 // Source IP for audit entries comes from clientIP (ratelimit.go), which reads
 // RemoteAddr, never X-Forwarded-For — XFF is client-spoofable and must not be
 // trusted as an audit source.
 func auditActor(r *http.Request) string {
+	if id, ok := identityFrom(r.Context()); ok && id.Name != "" {
+		return id.Name
+	}
 	if a := strings.TrimSpace(r.Header.Get("X-Actor")); a != "" {
 		return a
 	}

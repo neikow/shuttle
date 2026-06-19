@@ -3,30 +3,39 @@
 The orchestrator serves a small control plane on `http_addr` (default `:8080`).
 All responses are JSON.
 
-| Method & path | Auth |
-|---------------|------|
+| Method & path | Min role |
+|---------------|----------|
 | `GET  /healthz` | none |
+| `GET  /readyz` | none |
 | `GET  /metrics` | none |
-| `GET  /deploys` | bearer |
-| `GET  /audit` | bearer |
-| `POST /deploy/{service}` | bearer |
-| `POST /rollback` | bearer |
-| `GET  /overview` | bearer |
-| `GET  /plan` | bearer |
-| `GET  /check` | bearer |
-| `GET  /events` | bearer |
-| `GET  /hosts` | bearer |
-| `POST /enroll` | bearer |
-| `POST /prune` | bearer |
+| `GET  /deploys` | read |
+| `GET  /audit` | read |
+| `GET  /overview` | read |
+| `GET  /plan` | read |
+| `GET  /check` | read |
+| `GET  /events` | read |
+| `GET  /hosts` | read |
+| `POST /deploy/{service}` | deploy |
+| `POST /rollback` | deploy |
+| `POST /prune` | deploy |
+| `POST /enroll` | admin |
+| `POST /tokens` | admin |
+| `GET  /tokens` | admin |
+| `DELETE /tokens/{id}` | admin |
+| `POST /webhooks/repo` | admin |
+| `GET  /webhooks/repo` | admin |
+| `DELETE /webhooks/repo/{id}` | admin |
 | `POST /webhook` | HMAC |
 | `POST /webhook/infisical` | HMAC |
 | `POST /webhook/repo/{id}` | ID |
-| `POST /webhooks/repo` | bearer |
-| `GET  /webhooks/repo` | bearer |
-| `DELETE /webhooks/repo/{id}` | bearer |
 
-**Bearer auth:** send `Authorization: Bearer <bearer_token>`. A missing or wrong
-token returns `401`.
+**Bearer auth + RBAC:** send `Authorization: Bearer <token>`. The static
+`bearer_token` from `config.yml` is the bootstrap **admin** and satisfies every
+tier. Named, role-scoped tokens (see `POST /tokens`) carry one of three roles,
+totally ordered `read < deploy < admin`; a token may call any endpoint whose
+minimum role is at or below its own. A missing/invalid/revoked token returns
+`401`; a valid token with insufficient role returns `403`. The token's name is
+recorded as the actor in the audit log.
 
 `GET /hosts` and `POST /enroll` exist only when `agent_token_auth` and git sync
 are configured; see [operations.md](operations.md#enrolling-agents-with-tokens).
@@ -79,6 +88,28 @@ orchestrator can't distinguish operators, so a caller may self-identify by
 setting an `X-Actor` request header on mutating calls (e.g. CI sets it to the
 triggering user/workflow); absent that the actor is recorded as `operator`. The
 `shuttle audit` CLI is the convenience consumer.
+
+## `POST /tokens` / `GET /tokens` / `DELETE /tokens/{id}`
+
+Manage named, role-scoped control-plane tokens (admin only). The static
+`bearer_token` is the bootstrap admin; these add least-privilege credentials.
+
+`POST /tokens` mints a token, returning the plaintext **once** (only its hash is
+stored):
+
+```sh
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ci-bot","role":"deploy"}' \
+  http://localhost:8080/tokens
+# → 201 {"id":"...","name":"ci-bot","role":"deploy","token":"<secret>"}
+```
+
+`role` must be `read`, `deploy`, or `admin` (else `400`). `GET /tokens` lists
+records (`id`, `name`, `role`, `created_at`, `revoked_at`) — never the hash.
+`DELETE /tokens/{id}` revokes by ID (`204`; `404` if unknown). Create and revoke
+are recorded in the audit log (`token.create` / `token.revoke`). The
+`shuttle token` CLI wraps all three.
 
 ## `POST /deploy/{service}`
 
@@ -335,11 +366,12 @@ single service without exposing the orchestrator bearer token.
 | Code | Meaning |
 |------|---------|
 | `200` | OK (healthz, list, hosts, plan, check) |
-| `201` | Enrollment token or repo webhook created |
+| `201` | Enrollment token, control token, or repo webhook created |
 | `202` | Deploy/rollback/webhook trigger accepted and queued |
-| `204` | Repo webhook deleted |
-| `400` | Missing required parameter |
+| `204` | Repo webhook or control token deleted |
+| `400` | Missing required parameter / invalid role |
 | `401` | Bad/missing bearer token |
-| `404` | Unknown host (enroll) or webhook ID not found |
+| `403` | Valid token, but its role is below the endpoint's minimum |
+| `404` | Unknown host (enroll), webhook ID, or token ID not found |
 | `409` | No rollback target available |
 | `502` | Could not reach the target agent |
