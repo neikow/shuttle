@@ -47,8 +47,8 @@ func TestMetrics_RecordsEventsAndDuration(t *testing.T) {
 func TestMetrics_ConnectedAgentsGauge(t *testing.T) {
 	reg := NewRegistry()
 	m := NewMetrics(NewEventBus(), reg)
-	reg.register("h1")
-	reg.register("h2")
+	reg.register("h1", "")
+	reg.register("h2", "")
 
 	if body := scrapeMetrics(t, m); !strings.Contains(body, "shuttle_connected_agents 2") {
 		t.Errorf("want connected_agents 2\n---\n%s", body)

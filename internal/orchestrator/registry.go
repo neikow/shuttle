@@ -24,6 +24,7 @@ type agentConn struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	lastSeen  time.Time
+	version   string // agent build version reported at register (may be empty)
 }
 
 func (c *agentConn) close() { c.closeOnce.Do(func() { close(c.done) }) }
@@ -40,10 +41,11 @@ func NewRegistry() *Registry {
 	return r
 }
 
-// register adds a connection for host and returns it. If host already has a
-// connection (a stale stream that has not yet torn down), that one is retired
-// first so its fan-out goroutine stops and it is no longer addressable.
-func (r *Registry) register(host string) *agentConn {
+// register adds a connection for host and returns it. version is the agent's
+// reported build version (may be empty). If host already has a connection (a
+// stale stream that has not yet torn down), that one is retired first so its
+// fan-out goroutine stops and it is no longer addressable.
+func (r *Registry) register(host, version string) *agentConn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if old, ok := r.conns[host]; ok {
@@ -54,6 +56,7 @@ func (r *Registry) register(host string) *agentConn {
 		send:     make(chan *shuttlev1.OrchestratorCommand, 16),
 		done:     make(chan struct{}),
 		lastSeen: time.Now(),
+		version:  version,
 	}
 	r.conns[host] = conn
 	return conn
@@ -124,6 +127,7 @@ func (r *Registry) ConnectedHosts() []string {
 type HostConn struct {
 	Host     string    `json:"host"`
 	LastSeen time.Time `json:"last_seen"`
+	Version  string    `json:"version,omitempty"`
 }
 
 // Snapshot returns the liveness of every connected agent.
@@ -132,7 +136,7 @@ func (r *Registry) Snapshot() []HostConn {
 	defer r.mu.RUnlock()
 	out := make([]HostConn, 0, len(r.conns))
 	for h, c := range r.conns {
-		out = append(out, HostConn{Host: h, LastSeen: c.lastSeen})
+		out = append(out, HostConn{Host: h, LastSeen: c.lastSeen, Version: c.version})
 	}
 	return out
 }

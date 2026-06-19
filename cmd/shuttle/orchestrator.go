@@ -110,6 +110,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 	agentServer := orchestrator.NewAgentServiceServer(registry, store)
 	agentServer.SetStateTracker(tracker)
 	agentServer.SetEventBus(bus)
+	agentServer.SetVersion(Version)
 
 	grpcServer := grpc.NewServer(grpcOpts...)
 	shuttlev1.RegisterAgentServiceServer(grpcServer, agentServer)

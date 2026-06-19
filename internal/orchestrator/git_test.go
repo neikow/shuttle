@@ -84,7 +84,7 @@ func TestGitSyncer_DeployAtSHA(t *testing.T) {
 	}
 	defer store.Close()
 	registry := NewRegistry()
-	conn := registry.register("web1")
+	conn := registry.register("web1", "")
 	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, nil)
 
 	id, host, err := g.DeployAtSHA(context.Background(), "app", sha, ledger.TriggeredByManual)
@@ -219,7 +219,7 @@ func TestGitSyncer_RemoteCompose(t *testing.T) {
 	}
 	defer store.Close()
 	registry := NewRegistry()
-	conn := registry.register("web1")
+	conn := registry.register("web1", "")
 	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, nil)
 
 	dispatched, err := g.Reconcile(context.Background(), nil)
@@ -246,7 +246,7 @@ func TestGitSyncer_Reconcile(t *testing.T) {
 	defer store.Close()
 
 	registry := NewRegistry()
-	conn := registry.register("web1") // simulate a connected agent
+	conn := registry.register("web1", "") // simulate a connected agent
 
 	sec := secrets.NewFake(nil)
 	// Secrets live in the default base folder ("/shared"); renderEnv reads there.

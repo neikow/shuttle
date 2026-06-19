@@ -13,6 +13,7 @@ type OverviewHost struct {
 	Name      string         `json:"name"`
 	Connected bool           `json:"connected"`
 	LastSeen  *time.Time     `json:"last_seen,omitempty"`
+	Version   string         `json:"agent_version,omitempty"`
 	Services  []ServiceState `json:"services"`
 }
 
@@ -33,9 +34,11 @@ func (s *HTTPServer) SetStateTracker(t *StateTracker) { s.stateTracker = t }
 // host with known services still shows up (Connected=false).
 func (s *HTTPServer) handleOverview(w http.ResponseWriter, r *http.Request) {
 	conns := map[string]time.Time{}
+	versions := map[string]string{}
 	if s.registry != nil {
 		for _, c := range s.registry.Snapshot() {
 			conns[c.Host] = c.LastSeen
+			versions[c.Host] = c.Version
 		}
 	}
 	states := s.stateTracker.Snapshot() // nil-safe
@@ -58,6 +61,7 @@ func (s *HTTPServer) handleOverview(w http.ResponseWriter, r *http.Request) {
 			h.Connected = true
 			ls := seen
 			h.LastSeen = &ls
+			h.Version = versions[name]
 		}
 		hosts = append(hosts, h)
 	}

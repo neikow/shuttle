@@ -9,7 +9,7 @@ import (
 
 func TestHandleOverview(t *testing.T) {
 	reg := NewRegistry()
-	reg.register("web1") // connected
+	reg.register("web1", "v1.2.3") // connected, reports its version
 	tr := NewStateTracker()
 	tr.Record("web1", "app", "running", "abc1234567890")
 	tr.Record("web2", "legacy", "exited", "def4567890123") // offline host, known service
@@ -36,6 +36,9 @@ func TestHandleOverview(t *testing.T) {
 	w1, w2 := ov.Hosts[0], ov.Hosts[1]
 	if w1.Name != "web1" || !w1.Connected || w1.LastSeen == nil {
 		t.Fatalf("web1 = %+v, want connected with last_seen", w1)
+	}
+	if w1.Version != "v1.2.3" {
+		t.Errorf("web1 version = %q, want v1.2.3", w1.Version)
 	}
 	if len(w1.Services) != 1 || w1.Services[0].Service != "app" || w1.Services[0].Status != "running" {
 		t.Fatalf("web1 services = %+v", w1.Services)
