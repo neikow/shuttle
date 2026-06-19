@@ -49,8 +49,8 @@ func (o *EnrollOptions) ttl() time.Duration {
 // Call before serving; requires the ledger store to be set.
 func (s *HTTPServer) EnableEnrollment(opts EnrollOptions) {
 	s.enroll = &opts
-	s.mux.HandleFunc("GET /hosts", s.bearerAuth(s.handleListHosts))
-	s.mux.HandleFunc("POST /enroll", s.bearerAuth(s.handleEnroll))
+	s.mux.HandleFunc("GET /hosts", s.requireRole(RoleRead, s.handleListHosts))
+	s.mux.HandleFunc("POST /enroll", s.requireRole(RoleAdmin, s.handleEnroll))
 	s.mux.HandleFunc("POST /enroll/redeem", s.handleRedeem)
 }
 

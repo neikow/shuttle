@@ -59,7 +59,7 @@ type HTTPServer struct {
 func (s *HTTPServer) SetEventBus(b *EventBus) {
 	s.bus = b
 	if b != nil {
-		s.mux.HandleFunc("GET /events", s.bearerAuth(s.handleEvents))
+		s.mux.HandleFunc("GET /events", s.requireRole(RoleRead, s.handleEvents))
 	}
 }
 
@@ -138,9 +138,9 @@ func (s *HTTPServer) EnableWebhook(h *webhook.Handler, syncer *GitSyncer) {
 	s.webhook = h
 	s.syncer = syncer
 	s.mux.HandleFunc("POST /webhook", s.rateLimited(s.handleWebhook))
-	s.mux.HandleFunc("POST /prune", s.bearerAuth(s.handlePrune))
-	s.mux.HandleFunc("GET /plan", s.bearerAuth(s.handlePlan))
-	s.mux.HandleFunc("GET /check", s.bearerAuth(s.handleCheck))
+	s.mux.HandleFunc("POST /prune", s.requireRole(RoleDeploy, s.handlePrune))
+	s.mux.HandleFunc("GET /plan", s.requireRole(RoleRead, s.handlePlan))
+	s.mux.HandleFunc("GET /check", s.requireRole(RoleRead, s.handleCheck))
 }
 
 // handleCheck runs the read-only config + secret-availability validation pass
@@ -317,11 +317,14 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
-	s.mux.HandleFunc("GET /overview", s.bearerAuth(s.handleOverview))
-	s.mux.HandleFunc("GET /deploys", s.bearerAuth(s.handleListDeploys))
-	s.mux.HandleFunc("GET /audit", s.bearerAuth(s.handleListAudit))
-	s.mux.HandleFunc("POST /deploy/{service}", s.bearerAuth(s.handleDeploy))
-	s.mux.HandleFunc("POST /rollback", s.bearerAuth(s.handleRollback))
+	s.mux.HandleFunc("GET /overview", s.requireRole(RoleRead, s.handleOverview))
+	s.mux.HandleFunc("GET /deploys", s.requireRole(RoleRead, s.handleListDeploys))
+	s.mux.HandleFunc("GET /audit", s.requireRole(RoleRead, s.handleListAudit))
+	s.mux.HandleFunc("GET /tokens", s.requireRole(RoleAdmin, s.handleListControlTokens))
+	s.mux.HandleFunc("POST /tokens", s.requireRole(RoleAdmin, s.handleCreateControlToken))
+	s.mux.HandleFunc("DELETE /tokens/{id}", s.requireRole(RoleAdmin, s.handleRevokeControlToken))
+	s.mux.HandleFunc("POST /deploy/{service}", s.requireRole(RoleDeploy, s.handleDeploy))
+	s.mux.HandleFunc("POST /rollback", s.requireRole(RoleDeploy, s.handleRollback))
 	return s
 }
 
@@ -644,18 +647,6 @@ func writeDeployError(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadGateway)
 }
 
-func (s *HTTPServer) bearerAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || !constantTimeEqual(auth[len("Bearer "):], s.token) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
-
-
 // constantTimeEqual compares two secrets without leaking their length or content
 // through timing. Both sides are hashed to a fixed-size digest first, so the
 // comparison is constant-time regardless of input length.
@@ -681,9 +672,9 @@ func (s *HTTPServer) EnableRepoWebhooks(syncer *GitSyncer) {
 	s.syncer = syncer
 	s.repoWebhookDeployer = syncer.ForceDeploy
 	s.mux.HandleFunc("POST /webhook/repo/{id}", s.rateLimited(s.handleRepoWebhookTrigger))
-	s.mux.HandleFunc("POST /webhooks/repo", s.bearerAuth(s.handleCreateRepoWebhook))
-	s.mux.HandleFunc("GET /webhooks/repo", s.bearerAuth(s.handleListRepoWebhooks))
-	s.mux.HandleFunc("DELETE /webhooks/repo/{id}", s.bearerAuth(s.handleDeleteRepoWebhook))
+	s.mux.HandleFunc("POST /webhooks/repo", s.requireRole(RoleAdmin, s.handleCreateRepoWebhook))
+	s.mux.HandleFunc("GET /webhooks/repo", s.requireRole(RoleAdmin, s.handleListRepoWebhooks))
+	s.mux.HandleFunc("DELETE /webhooks/repo/{id}", s.requireRole(RoleAdmin, s.handleDeleteRepoWebhook))
 }
 
 // handleRepoWebhookTrigger fires a ForceDeploy for the service bound to the

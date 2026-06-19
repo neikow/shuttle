@@ -102,9 +102,9 @@ func newRepoWebhookServer(t *testing.T, deployIDs []string, deployErr error) *HT
 		return deployIDs, deployErr
 	}
 	srv.mux.HandleFunc("POST /webhook/repo/{id}", srv.handleRepoWebhookTrigger)
-	srv.mux.HandleFunc("POST /webhooks/repo", srv.bearerAuth(srv.handleCreateRepoWebhook))
-	srv.mux.HandleFunc("GET /webhooks/repo", srv.bearerAuth(srv.handleListRepoWebhooks))
-	srv.mux.HandleFunc("DELETE /webhooks/repo/{id}", srv.bearerAuth(srv.handleDeleteRepoWebhook))
+	srv.mux.HandleFunc("POST /webhooks/repo", srv.requireRole(RoleAdmin, srv.handleCreateRepoWebhook))
+	srv.mux.HandleFunc("GET /webhooks/repo", srv.requireRole(RoleAdmin, srv.handleListRepoWebhooks))
+	srv.mux.HandleFunc("DELETE /webhooks/repo/{id}", srv.requireRole(RoleAdmin, srv.handleDeleteRepoWebhook))
 	return srv
 }
 

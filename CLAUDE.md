@@ -32,11 +32,11 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation. |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation + the `control_tokens` table (`CreateControlToken`, `LookupControlToken`, `ListControlTokens`, `RevokeControlToken`) — named, role-scoped HTTP bearer tokens (hashed at rest) backing RBAC. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
@@ -53,13 +53,15 @@ Always run `make test` before committing. The repo is kept race-clean.
 |------|----------------|
 | `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
+| `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name as actor. |
+| `control_tokens_http.go` | `POST /tokens` (mint, returns plaintext once), `GET /tokens` (list, no hashes), `DELETE /tokens/{id}` (revoke) — all admin-only; create/revoke audited (`token.create`/`token.revoke`). |
 | `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; per-agent build version; `Send(host, cmd)`; `Snapshot` (host, last-seen, version). |
 | `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/audit`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
@@ -252,7 +254,25 @@ These are deliberate. Don't reverse them without updating this file.
   orchestrator never persists secret plaintext. A secret change doesn't move the
   repo SHA, so both the webhook and poller paths use `ForceDeploy`, not the
   SHA-gated `Reconcile`.
-- **HTTP auth = static bearer token (v1).** Simple to start; OIDC is planned.
+- **HTTP auth = static bearer token + RBAC role tokens.** The single static
+  `bearer_token` from `config.yml` remains the **bootstrap admin** (backward
+  compatible: existing configs, CI, and the UI keep full access). On top of it,
+  **named, role-scoped control tokens** (`control_tokens` ledger table, SHA-256
+  hashed at rest) add least-privilege credentials. Three totally-ordered roles —
+  `read` < `deploy` < `admin`: *read* = list/inspect (`/deploys`, `/audit`,
+  `/overview`, `/plan`, `/check`, `/events`, `/hosts`); *deploy* = + `/deploy`,
+  `/rollback`, `/prune`; *admin* = + `/enroll`, `/webhooks/repo` CRUD, `/tokens`
+  CRUD. Each authed route is wrapped in `requireRole(min, …)` (`rbac.go`):
+  `resolveRole` matches the static bearer (→admin, constant-time) or looks the
+  token up in the ledger; a missing/invalid/revoked token → 401, a valid token
+  with too low a role → 403. The resolved identity (token **name**) is stashed in
+  the request context and becomes the **audit actor**, so RBAC and the audit log
+  reinforce each other — see the audit-log decision. Tokens are minted via the
+  admin-only `POST /tokens` (plaintext returned once, like `shuttle enroll`),
+  listed without their hash, and revoked by ID; managed by `shuttle token
+  create/list/revoke`. This is a deliberate bridge, not the end state: **OIDC is
+  still planned** and will replace token *identity* (per-user) while reusing this
+  same role model and `requireRole` enforcement.
 - **Audit log = append-only actor+action record, separate from the deploys
   ledger.** Every control-plane *mutation* (`deploy`, `rollback`, `prune`,
   `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`) writes an
@@ -260,10 +280,12 @@ These are deliberate. Don't reverse them without updating this file.
   (success/failure), and a short detail string — so an operator can answer "who
   deployed this / who minted that agent token". It is distinct from the `deploys`
   table (which records deploy *state*, not actor identity) and never mutated
-  after insert. Because v1 auth is a single static bearer, the orchestrator can't
-  tell operators apart, so a caller self-identifies via an optional `X-Actor`
-  header (CI sets it to the triggering user/workflow); absent that the actor is
-  the generic `operator`. The redeem path has no bearer, so its actor is `agent`.
+  after insert. The actor is resolved in precedence order: a **named RBAC control
+  token** contributes its name (real identity — see the HTTP-auth decision);
+  otherwise, since the static bootstrap bearer has no name, a caller may
+  self-identify via an optional `X-Actor` header (CI sets it to the triggering
+  user/workflow); absent both, the actor is the generic `operator`. The redeem
+  path has no bearer, so its actor is `agent`.
   Source IP is taken from `RemoteAddr`, **never** `X-Forwarded-For` (spoofable).
   Recording is **best-effort**: a failed audit write is logged but never fails the
   action — the audit log must not gate the control plane. Exposed read-only at
