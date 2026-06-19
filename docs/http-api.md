@@ -8,6 +8,7 @@ All responses are JSON.
 | `GET  /healthz` | none |
 | `GET  /metrics` | none |
 | `GET  /deploys` | bearer |
+| `GET  /audit` | bearer |
 | `POST /deploy/{service}` | bearer |
 | `POST /rollback` | bearer |
 | `GET  /overview` | bearer |
@@ -56,6 +57,28 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 Returns an array of deploy records (`deploy_id`, `service`, `host`, `sha`,
 `status`, `triggered_by`, timestamps).
+
+## `GET /audit`
+
+The control-plane audit log, newest first: who did what (deploy, rollback,
+prune, enrollment, webhook CRUD), when, from where, and how it turned out.
+
+| Query | Default | Notes |
+|-------|---------|-------|
+| `action` | (all) | Filter to one action: `deploy`, `rollback`, `prune`, `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`. |
+| `limit` | `50` | Clamped to `1..200`. |
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/audit?action=deploy&limit=100"
+```
+
+Returns an array of entries (`id`, `at`, `actor`, `action`, `target`,
+`source_ip`, `result`, `detail`). With v1's single static bearer token the
+orchestrator can't distinguish operators, so a caller may self-identify by
+setting an `X-Actor` request header on mutating calls (e.g. CI sets it to the
+triggering user/workflow); absent that the actor is recorded as `operator`. The
+`shuttle audit` CLI is the convenience consumer.
 
 ## `POST /deploy/{service}`
 

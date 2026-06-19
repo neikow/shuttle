@@ -127,6 +127,10 @@ func (s *HTTPServer) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditEnroll, Target: req.Host, SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: "join_token_id=" + id,
+	})
 	slog.Info("join token minted", "id", id, "host", req.Host, "expires_at", exp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -168,6 +172,10 @@ func (s *HTTPServer) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	host, err := s.ledger.RedeemJoinToken(r.Context(), token.Hash(req.JoinToken), time.Now())
 	if errors.Is(err, ledger.ErrJoinTokenInvalid) {
 		// Undifferentiated 401: unknown, expired, and already-used all look alike.
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: "agent", Action: auditRedeem, SourceIP: clientIP(r),
+			Result: auditFailure, Detail: "join token invalid, expired, or already used",
+		})
 		http.Error(w, "join token invalid, expired, or already used", http.StatusUnauthorized)
 		return
 	}
@@ -187,6 +195,10 @@ func (s *HTTPServer) handleRedeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: "agent", Action: auditRedeem, Target: host, SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: "agent_token_id=" + id,
+	})
 	slog.Info("join token redeemed", "host", host, "agent_token_id", id)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)

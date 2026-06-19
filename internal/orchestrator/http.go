@@ -292,9 +292,17 @@ func (s *HTTPServer) reconcileSecretChanges(changes []SecretChange) {
 func (s *HTTPServer) handlePrune(w http.ResponseWriter, r *http.Request) {
 	pruned, err := s.syncer.PruneVolumes(r.Context())
 	if err != nil {
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: auditActor(r), Action: auditPrune, SourceIP: clientIP(r),
+			Result: auditFailure, Detail: "err=" + err.Error(),
+		})
 		http.Error(w, "prune: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditPrune, Target: strings.Join(pruned, ","), SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: fmt.Sprintf("pruned=%d", len(pruned)),
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"pruned": pruned})
 }
@@ -311,6 +319,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
 	s.mux.HandleFunc("GET /overview", s.bearerAuth(s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.bearerAuth(s.handleListDeploys))
+	s.mux.HandleFunc("GET /audit", s.bearerAuth(s.handleListAudit))
 	s.mux.HandleFunc("POST /deploy/{service}", s.bearerAuth(s.handleDeploy))
 	s.mux.HandleFunc("POST /rollback", s.bearerAuth(s.handleRollback))
 	return s
@@ -382,6 +391,29 @@ func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(deploys)
 }
 
+// handleListAudit returns the most recent audit-log entries as JSON, newest
+// first. Optional ?action= filters to one action; ?limit= caps the count
+// (default 50, max 200).
+func (s *HTTPServer) handleListAudit(w http.ResponseWriter, r *http.Request) {
+	action := r.URL.Query().Get("action")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	entries, err := s.ledger.ListAudit(r.Context(), action, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []ledger.AuditEntry{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(entries)
+}
+
 func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	service := r.PathValue("service")
 	if service == "" {
@@ -398,9 +430,17 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 	if s.syncer != nil {
 		deployID, host, err := s.syncer.DeployAtSHA(r.Context(), service, sha, ledger.TriggeredByManual)
 		if err != nil {
+			s.recordAudit(r.Context(), ledger.AuditEntry{
+				Actor: auditActor(r), Action: auditDeploy, Target: service, SourceIP: clientIP(r),
+				Result: auditFailure, Detail: "sha=" + sha + " err=" + err.Error(),
+			})
 			writeDeployError(w, err)
 			return
 		}
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: auditActor(r), Action: auditDeploy, Target: service, SourceIP: clientIP(r),
+			Result: auditSuccess, Detail: "sha=" + sha + " deploy_id=" + deployID + " host=" + host,
+		})
 		slog.Info("deploy queued", "deploy_id", deployID, "service", service, "host", host, "sha", sha)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -446,11 +486,19 @@ func (s *HTTPServer) handleDeploy(w http.ResponseWriter, r *http.Request) {
 			Type: EventDeployFailed, Service: service, Host: host, DeployID: deployID,
 			SHA: sha, Status: string(ledger.StatusFailed), Message: "send to agent failed",
 		})
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: auditActor(r), Action: auditDeploy, Target: service, SourceIP: clientIP(r),
+			Result: auditFailure, Detail: "sha=" + sha + " host=" + host + " err=" + err.Error(),
+		})
 		http.Error(w, "send to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	slog.Info("deploy queued", "deploy_id", deployID, "service", service, "host", host)
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditDeploy, Target: service, SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: "sha=" + sha + " deploy_id=" + deployID + " host=" + host,
+	})
 	s.bus.Publish(Event{
 		Type: EventDeployQueued, Service: service, Host: host, DeployID: deployID,
 		SHA: sha, Status: string(ledger.StatusPending),
@@ -484,9 +532,17 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 	if s.syncer != nil {
 		deployID, host, err := s.syncer.DeployAtSHA(r.Context(), service, targetSHA, ledger.TriggeredByRollback)
 		if err != nil {
+			s.recordAudit(r.Context(), ledger.AuditEntry{
+				Actor: auditActor(r), Action: auditRollback, Target: service, SourceIP: clientIP(r),
+				Result: auditFailure, Detail: "target_sha=" + targetSHA + " err=" + err.Error(),
+			})
 			writeDeployError(w, err)
 			return
 		}
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: auditActor(r), Action: auditRollback, Target: service, SourceIP: clientIP(r),
+			Result: auditSuccess, Detail: "target_sha=" + targetSHA + " deploy_id=" + deployID + " host=" + host,
+		})
 		slog.Info("rollback queued", "deploy_id", deployID, "service", service, "host", host, "target_sha", targetSHA)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
@@ -530,10 +586,18 @@ func (s *HTTPServer) handleRollback(w http.ResponseWriter, r *http.Request) {
 			Type: EventDeployFailed, Service: service, Host: host, DeployID: deployID,
 			SHA: targetSHA, Status: string(ledger.StatusFailed), Message: "send rollback to agent failed",
 		})
+		s.recordAudit(r.Context(), ledger.AuditEntry{
+			Actor: auditActor(r), Action: auditRollback, Target: service, SourceIP: clientIP(r),
+			Result: auditFailure, Detail: "target_sha=" + targetSHA + " host=" + host + " err=" + err.Error(),
+		})
 		http.Error(w, "send rollback to agent: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditRollback, Target: service, SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: "target_sha=" + targetSHA + " deploy_id=" + deployID + " host=" + host,
+	})
 	s.bus.Publish(Event{
 		Type: EventRollbackQueued, Service: service, Host: host, DeployID: deployID,
 		SHA: targetSHA, Status: string(ledger.StatusPending),
@@ -659,6 +723,10 @@ func (s *HTTPServer) handleCreateRepoWebhook(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditWebhookCreate, Target: req.Service, SourceIP: clientIP(r),
+		Result: auditSuccess, Detail: "webhook_id=" + id,
+	})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
@@ -687,6 +755,10 @@ func (s *HTTPServer) handleDeleteRepoWebhook(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.recordAudit(r.Context(), ledger.AuditEntry{
+		Actor: auditActor(r), Action: auditWebhookDelete, Target: id, SourceIP: clientIP(r),
+		Result: auditSuccess,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
