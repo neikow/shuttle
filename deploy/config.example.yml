@@ -28,10 +28,15 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # repo_dir: ""                     # defaults to <data_dir>/repo
 # webhook_secret: "change-me-too"
 
-# Per-IP rate limit for the unauthenticated webhook endpoints (/webhook,
-# /webhook/infisical, /webhook/repo/{id}). Unset keeps the default 120/min; a
-# negative value disables limiting.
+# Per-IP rate limit for the unauthenticated endpoints (/webhook,
+# /webhook/infisical, /webhook/repo/{id}, /enroll/redeem). Unset keeps the
+# default 120/min; a negative value disables limiting.
 # webhook_rate_limit_per_minute: 120
+
+# Gate GET /metrics behind the read role. Default false keeps the standard
+# unauthenticated Prometheus scrape model; set true when /metrics is reachable
+# from an untrusted network.
+# metrics_require_auth: false
 
 # Central Caddy admin API for ingress route push (optional, legacy). Leave empty
 # to use agent-managed Caddy sidecars instead: start the agent with --caddy and

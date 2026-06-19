@@ -55,6 +55,8 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
 | `advertise_addr` | `grpc_addr` | gRPC `host:port` baked into the command `shuttle enroll` prints. |
 | `advertise_server_name` | — | Orchestrator cert SAN added to the enrollment command when TLS is on. |
+| `webhook_rate_limit_per_minute` | `120` | Per-IP cap on the unauthenticated endpoints (webhooks + `/enroll/redeem`). A negative value disables limiting. |
+| `metrics_require_auth` | `false` | Gate `GET /metrics` behind the read role. Default keeps the standard unauthenticated scrape model; set true when `/metrics` is reachable from an untrusted network. |
 | `oidc` | — | Per-user OpenID Connect auth. Set `oidc.issuer` to enable. See [OIDC](#oidc-per-user-auth) below. |
 
 ### Feature gating
