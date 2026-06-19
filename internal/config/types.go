@@ -68,7 +68,42 @@ type OrchestratorConfig struct {
 	// /webhook/repo/{id}). 0/unset keeps the built-in default (120/min); a
 	// negative value disables rate limiting.
 	WebhookRateLimitPerMinute int `yaml:"webhook_rate_limit_per_minute"`
+	// OIDC optionally enables per-user OpenID Connect bearer-token auth on the
+	// HTTP control plane, layered on top of the static bearer + named control
+	// tokens. Empty issuer disables it.
+	OIDC OIDCConfig `yaml:"oidc"`
 }
+
+// OIDCConfig configures OpenID Connect bearer-token authentication for the HTTP
+// control plane. When Issuer is set, the orchestrator verifies presented JWTs
+// against the issuer's published keys (JWKS, discovered at startup) and maps a
+// token claim to a control-plane role, reusing the same read<deploy<admin model
+// as the static bearer and named control tokens. This adds per-user identity
+// (the audit actor becomes the OIDC subject) without replacing the bootstrap
+// bearer, which stays the break-glass admin.
+type OIDCConfig struct {
+	// Issuer is the OIDC issuer URL (e.g. https://accounts.google.com or a
+	// self-hosted Dex/Keycloak). Its /.well-known/openid-configuration is fetched
+	// at startup for discovery. Empty disables OIDC entirely.
+	Issuer string `yaml:"issuer"`
+	// Audience is the expected `aud` claim — the client ID registered with the
+	// IdP for Shuttle. Tokens not issued for this audience are rejected.
+	Audience string `yaml:"audience"`
+	// RolesClaim is the token claim read for role mapping; its value may be a
+	// single string or a list of strings (e.g. "groups"). Default "groups".
+	RolesClaim string `yaml:"roles_claim"`
+	// RoleMapping maps a value found in RolesClaim to a control-plane role
+	// (read/deploy/admin). The highest-ranked matched role wins. A validly-signed
+	// token that maps to nothing is authenticated but unauthorized (403).
+	// Required when Issuer is set.
+	RoleMapping map[string]string `yaml:"role_mapping"`
+	// UsernameClaim is the claim used as the caller's identity (the audit actor).
+	// Default "sub".
+	UsernameClaim string `yaml:"username_claim"`
+}
+
+// OIDCEnabled reports whether OIDC HTTP auth is configured.
+func (c *OrchestratorConfig) OIDCEnabled() bool { return c.OIDC.Issuer != "" }
 
 // NotificationTarget is one outbound notification sink. The URL receives an
 // HTTP POST for every event whose type matches Events (empty Events = all).

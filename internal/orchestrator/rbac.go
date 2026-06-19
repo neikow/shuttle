@@ -72,10 +72,17 @@ func bearerFromRequest(r *http.Request) string {
 	return auth[len("Bearer "):]
 }
 
-// resolveRole maps a presented bearer token to a role and name. The static
-// config bearer_token is the bootstrap admin (no name). Otherwise the token is
-// looked up among the named, role-scoped control tokens in the ledger. ok is
-// false for missing/unknown/revoked tokens.
+// SetOIDC attaches an OIDC authenticator so per-user OIDC bearer tokens are
+// accepted as a third identity source. Call before serving; nil leaves OIDC off.
+func (s *HTTPServer) SetOIDC(a *OIDCAuthenticator) { s.oidc = a }
+
+// resolveRole maps a presented bearer token to a role and name, trying three
+// identity sources in order: (1) the static config bearer_token — the bootstrap
+// admin (no name); (2) a named, role-scoped control token in the ledger; (3)
+// when configured, an OIDC JWT (identity = its subject/username claim). ok
+// reports that the caller was authenticated — it may still carry an empty Role
+// (rank 0), which requireRole answers with 403 rather than 401. ok is false only
+// for a token that matches none of the three sources.
 func (s *HTTPServer) resolveRole(ctx context.Context, tok string) (Role, string, bool) {
 	if tok == "" {
 		return "", "", false
@@ -83,24 +90,40 @@ func (s *HTTPServer) resolveRole(ctx context.Context, tok string) (Role, string,
 	if s.token != "" && constantTimeEqual(tok, s.token) {
 		return RoleAdmin, "", true
 	}
-	if s.ledger == nil {
-		return "", "", false
+	// Named control token (an opaque random string), looked up in the ledger. A
+	// hit is authoritative; a miss or lookup error falls through to OIDC so an
+	// OIDC JWT (which is not in control_tokens) still gets its chance.
+	if s.ledger != nil {
+		name, roleStr, found, err := s.ledger.LookupControlToken(ctx, token.Hash(tok))
+		switch {
+		case err != nil:
+			slog.Error("control token lookup failed", "err", err)
+		case found:
+			role, perr := ParseRole(roleStr)
+			if perr != nil {
+				// A token with a corrupt role grants nothing.
+				slog.Error("control token has invalid role", "name", name, "role", roleStr)
+				return "", "", false
+			}
+			return role, name, true
+		}
 	}
-	name, roleStr, found, err := s.ledger.LookupControlToken(ctx, token.Hash(tok))
-	if err != nil {
-		slog.Error("control token lookup failed", "err", err)
-		return "", "", false
+	// OIDC bearer (a JWT). Only attempted on JWT-shaped tokens, so an opaque
+	// control/static token never incurs a signature verify.
+	if s.oidc != nil && looksLikeJWT(tok) {
+		if role, name, ok := s.oidc.verify(ctx, tok); ok {
+			return role, name, true
+		}
 	}
-	if !found {
-		return "", "", false
-	}
-	role, err := ParseRole(roleStr)
-	if err != nil {
-		// A token with a corrupt role grants nothing.
-		slog.Error("control token has invalid role", "name", name, "role", roleStr)
-		return "", "", false
-	}
-	return role, name, true
+	return "", "", false
+}
+
+// looksLikeJWT reports whether tok has the compact JWS shape
+// (header.payload.signature) — three non-empty dot-separated segments. Used to
+// skip OIDC verification of opaque (non-JWT) bearer tokens.
+func looksLikeJWT(tok string) bool {
+	parts := strings.Split(tok, ".")
+	return len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 }
 
 // requireRole wraps a handler so it only runs for a caller whose token resolves

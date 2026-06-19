@@ -123,6 +123,14 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 
 	httpHandler := orchestrator.NewHTTPServer(cfg.BearerToken, store, registry)
 	httpHandler.SetWebhookRateLimit(cfg.WebhookRateLimitPerMinute)
+	if cfg.OIDCEnabled() {
+		oidcAuth, err := orchestrator.NewOIDCAuthenticator(ctx, cfg.OIDC)
+		if err != nil {
+			return fmt.Errorf("oidc: %w", err)
+		}
+		httpHandler.SetOIDC(oidcAuth)
+		slog.Info("oidc http auth enabled", "issuer", cfg.OIDC.Issuer, "audience", cfg.OIDC.Audience)
+	}
 	httpHandler.SetEventBus(bus)
 	metrics := orchestrator.NewMetrics(bus, registry)
 	go metrics.Run(ctx, bus)

@@ -39,6 +39,11 @@ type HTTPServer struct {
 	bus          *EventBus     // optional; nil-safe
 	stateTracker *StateTracker // optional; nil-safe (powers GET /overview)
 
+	// oidc, when set, authenticates per-user OIDC bearer tokens (JWTs) as a third
+	// identity source in resolveRole. nil disables OIDC; the static bearer +
+	// control tokens are unaffected.
+	oidc *OIDCAuthenticator
+
 	// ready gates GET /readyz: true once the orchestrator is wired and serving,
 	// flipped false at the start of shutdown so a load balancer drains this
 	// instance before the process exits. Distinct from /healthz (liveness).

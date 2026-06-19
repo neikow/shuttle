@@ -53,7 +53,8 @@ Always run `make test` before committing. The repo is kept race-clean.
 |------|----------------|
 | `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
-| `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name as actor. |
+| `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup, else OIDC JWT via `looksLikeJWT`+`SetOIDC`), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name / OIDC subject as actor. |
+| `oidc.go` | `OIDCAuthenticator`: per-user OpenID Connect auth. `NewOIDCAuthenticator` does discovery (`github.com/coreos/go-oidc`) against the issuer at boot; `verify` checks JWT signature/JWKS + issuer + `audience`, maps the `roles_claim` through `role_mapping`→`Role` (highest wins), identity = `username_claim`. The third source in `resolveRole`. |
 | `control_tokens_http.go` | `POST /tokens` (mint, returns plaintext once), `GET /tokens` (list, no hashes), `DELETE /tokens/{id}` (revoke) — all admin-only; create/revoke audited (`token.create`/`token.revoke`). |
 | `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; per-agent build version; `Send(host, cmd)`; `Snapshot` (host, last-seen, version). |
@@ -263,16 +264,35 @@ These are deliberate. Don't reverse them without updating this file.
   `/overview`, `/plan`, `/check`, `/events`, `/hosts`); *deploy* = + `/deploy`,
   `/rollback`, `/prune`; *admin* = + `/enroll`, `/webhooks/repo` CRUD, `/tokens`
   CRUD. Each authed route is wrapped in `requireRole(min, …)` (`rbac.go`):
-  `resolveRole` matches the static bearer (→admin, constant-time) or looks the
-  token up in the ledger; a missing/invalid/revoked token → 401, a valid token
-  with too low a role → 403. The resolved identity (token **name**) is stashed in
-  the request context and becomes the **audit actor**, so RBAC and the audit log
-  reinforce each other — see the audit-log decision. Tokens are minted via the
-  admin-only `POST /tokens` (plaintext returned once, like `shuttle enroll`),
-  listed without their hash, and revoked by ID; managed by `shuttle token
-  create/list/revoke`. This is a deliberate bridge, not the end state: **OIDC is
-  still planned** and will replace token *identity* (per-user) while reusing this
-  same role model and `requireRole` enforcement.
+  `resolveRole` tries three identity sources in order — the static bearer
+  (→admin, constant-time), then a named ledger control token, then (when
+  configured) an **OIDC JWT** — and a missing/invalid token → 401, a valid token
+  with too low a role → 403. The resolved identity (token **name**, or the OIDC
+  subject) is stashed in the request context and becomes the **audit actor**, so
+  RBAC and the audit log reinforce each other — see the audit-log decision.
+  Tokens are minted via the admin-only `POST /tokens` (plaintext returned once,
+  like `shuttle enroll`), listed without their hash, and revoked by ID; managed
+  by `shuttle token create/list/revoke`.
+- **OIDC HTTP auth = per-user identity layered on the same role model.** When
+  `oidc:` is configured (`issuer` + `audience`), `resolveRole` accepts an
+  OpenID Connect **JWT** as a third identity source (after the static bearer and
+  named control tokens). `internal/orchestrator/oidc.go` `OIDCAuthenticator`
+  delegates JWT signature/JWKS verification to `github.com/coreos/go-oidc` (the
+  canonical Go verifier — crypto correctness is not hand-rolled, cf. cosign /
+  prometheus histograms), validating the issuer + `audience` (`aud`) and mapping
+  a configurable claim (`roles_claim`, default `groups`) through `role_mapping`
+  to a `Role` — highest-ranked matched role wins. The caller's identity (audit
+  actor) is the `username_claim` (default `sub`). A validly-signed token that
+  maps to **no** role is authenticated but unauthorized → **403, not 401**
+  (mirrors a too-low control token); `resolveRole`'s `ok` now means "the caller
+  was authenticated", not "has a usable role". Only JWT-shaped tokens
+  (`looksLikeJWT`: three non-empty dot segments) incur a signature verify, so an
+  opaque static/control token never does. OIDC is **additive**: the static
+  bearer stays the break-glass admin and control tokens are untouched. Discovery
+  is a startup network call (`NewOIDCAuthenticator`), so a typo'd role or an
+  unreachable issuer fails the orchestrator at boot rather than silently denying
+  every user. This realizes the per-user identity the RBAC/audit work was built
+  toward; the role model and `requireRole` enforcement are reused unchanged.
 - **Audit log = append-only actor+action record, separate from the deploys
   ledger.** Every control-plane *mutation* (`deploy`, `rollback`, `prune`,
   `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`) writes an
@@ -290,8 +310,9 @@ These are deliberate. Don't reverse them without updating this file.
   Recording is **best-effort**: a failed audit write is logged but never fails the
   action — the audit log must not gate the control plane. Exposed read-only at
   bearer-authed `GET /audit` (`?action=` filter, `?limit=` 1–200) and consumed by
-  `shuttle audit`. This is the foundation the planned RBAC/OIDC work builds on
-  (per-user actor identity replaces the `X-Actor`/`operator` fallback).
+  `shuttle audit`. RBAC token names and OIDC subjects now supply real per-user
+  actor identity; the `X-Actor`/`operator` fallback remains only for the static
+  bootstrap bearer.
 - **Liveness vs readiness: `/healthz` always-200, `/readyz` gated.** `/healthz`
   answers 200 for the life of the process (liveness). `/readyz` is backed by an
   `atomic.Bool` the orchestrator flips true once its listeners are up and **false
@@ -432,7 +453,9 @@ These are deliberate. Don't reverse them without updating this file.
 - **ECS target — dropped.** It doesn't fit the agent-runs-compose model (it's
   orchestrator-side, needs `aws-sdk-go-v2`, and can't be verified locally). The
   AWS SDK still appears as an *indirect* dep via Infisical, not for ECS.
-- **OIDC HTTP auth — planned**, not yet built (bearer token for now).
+- **OIDC HTTP auth — done.** Per-user OpenID Connect JWTs are a third identity
+  source on the control plane, mapped to the read/deploy/admin role model (see
+  the OIDC HTTP-auth decision). The static bearer remains the break-glass admin.
 
 ## CI notes (non-obvious)
 

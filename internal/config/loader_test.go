@@ -34,6 +34,56 @@ func TestLoadOrchestratorConfig_missingToken(t *testing.T) {
 	}
 }
 
+func TestLoadOrchestratorConfig_OIDC(t *testing.T) {
+	base := "bearer_token: s3cret\n"
+	cases := []struct {
+		name    string
+		oidc    string
+		wantErr string // substring; "" means must succeed
+	}{
+		{
+			name: "valid",
+			oidc: "oidc:\n  issuer: https://idp.example\n  audience: shuttle\n  role_mapping:\n    admins: admin\n",
+		},
+		{
+			name:    "issuer without audience",
+			oidc:    "oidc:\n  issuer: https://idp.example\n  role_mapping:\n    admins: admin\n",
+			wantErr: "oidc.audience is required",
+		},
+		{
+			name:    "issuer without mapping",
+			oidc:    "oidc:\n  issuer: https://idp.example\n  audience: shuttle\n",
+			wantErr: "oidc.role_mapping must not be empty",
+		},
+		{
+			name:    "invalid role in mapping",
+			oidc:    "oidc:\n  issuer: https://idp.example\n  audience: shuttle\n  role_mapping:\n    admins: superuser\n",
+			wantErr: "invalid role",
+		},
+		{
+			name: "no issuer disables OIDC (mapping ignored)",
+			oidc: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yml")
+			if err := os.WriteFile(path, []byte(base+c.oidc), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadOrchestratorConfig(path)
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			case c.wantErr != "" && err == nil:
+				t.Fatalf("want error containing %q, got nil", c.wantErr)
+			case c.wantErr != "" && !strings.Contains(err.Error(), c.wantErr):
+				t.Fatalf("error = %v, want substring %q", err, c.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_fixture(t *testing.T) {
 	root := filepath.Join("..", "..", "test", "fixtures", "repo")
 	repo, err := Load(root)

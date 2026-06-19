@@ -55,6 +55,7 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
 | `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
 | `advertise_addr` | `grpc_addr` | gRPC `host:port` baked into the command `shuttle enroll` prints. |
 | `advertise_server_name` | — | Orchestrator cert SAN added to the enrollment command when TLS is on. |
+| `oidc` | — | Per-user OpenID Connect auth. Set `oidc.issuer` to enable. See [OIDC](#oidc-per-user-auth) below. |
 
 ### Feature gating
 
@@ -69,6 +70,40 @@ See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.y
   are both configured.
 - **Infisical webhook** turns on when `infisical_webhook_secret` is set.
 - **Infisical polling** turns on when `infisical_poll_interval` is set.
+- **OIDC auth** turns on when `oidc.issuer` is set (discovery happens at startup).
+
+### OIDC (per-user auth)
+
+`oidc:` adds per-user OpenID Connect login on top of the static `bearer_token`
+and the named control tokens (`shuttle token`). A presented JWT is verified
+against the issuer's published keys and mapped to a control-plane role, so OIDC
+users flow through the same `read < deploy < admin` model — and the caller's
+identity becomes the audit actor. The static bearer stays the break-glass admin;
+OIDC is purely additive.
+
+| Sub-key | Default | Purpose |
+|---------|---------|---------|
+| `issuer` | — | OIDC issuer URL (e.g. `https://accounts.google.com`, or a self-hosted Dex/Keycloak). Setting it enables OIDC. Its `/.well-known/openid-configuration` is fetched **at startup** — an unreachable issuer fails the orchestrator at boot. |
+| `audience` | — (**required** with issuer) | Expected `aud` claim — the client ID registered with the IdP for Shuttle. |
+| `roles_claim` | `groups` | Token claim read for role mapping. Its value may be a string or a list of strings. |
+| `role_mapping` | — (**required** with issuer) | Maps a value found in `roles_claim` to a role (`read`/`deploy`/`admin`). The highest-ranked matched role wins; a token mapping to nothing is authenticated but **403**. |
+| `username_claim` | `sub` | Claim used as the caller's identity (the audit actor). |
+
+```yaml
+oidc:
+  issuer: "https://keycloak.example.com/realms/shuttle"
+  audience: "shuttle"
+  roles_claim: "groups"
+  username_claim: "email"
+  role_mapping:
+    shuttle-admins: admin
+    shuttle-deployers: deploy
+    shuttle-viewers: read
+```
+
+Your IdP must include Shuttle's `audience` in the token's `aud` and emit the
+configured `roles_claim`. OIDC verification only runs on JWT-shaped tokens, so
+the static bearer and control tokens are never affected.
 
 ### Flag fallbacks
 
