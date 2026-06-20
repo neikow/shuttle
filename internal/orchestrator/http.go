@@ -331,6 +331,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	s.mux.HandleFunc("GET /whoami", s.requireRole(RoleRead, s.handleWhoami))
 	s.mux.HandleFunc("GET /overview", s.requireRole(RoleRead, s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.requireRole(RoleRead, s.handleListDeploys))
+	s.mux.HandleFunc("GET /deploys/{id}/logs", s.requireRole(RoleRead, s.handleDeployLogs))
 	s.mux.HandleFunc("GET /audit", s.requireRole(RoleRead, s.handleListAudit))
 	s.mux.HandleFunc("GET /tokens", s.requireRole(RoleAdmin, s.handleListControlTokens))
 	s.mux.HandleFunc("POST /tokens", s.requireRole(RoleAdmin, s.handleCreateControlToken))
@@ -435,6 +436,19 @@ func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(deploys)
+}
+
+// handleDeployLogs returns the captured output of one deploy (by deploy_id),
+// in emission order, as JSON. An unknown id yields an empty array.
+func (s *HTTPServer) handleDeployLogs(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	logs, err := s.ledger.DeployLogs(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(logs)
 }
 
 // handleListAudit returns the most recent audit-log entries as JSON, newest

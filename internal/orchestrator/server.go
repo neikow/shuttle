@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 	"github.com/neikow/shuttle/internal/ledger"
@@ -65,6 +66,25 @@ func ledgerStatus(s shuttlev1.DeployStatus) (ledger.Status, bool) {
 	default:
 		return "", false
 	}
+}
+
+// deployLogsFromProto maps the agent's reported log lines into ledger rows.
+func deployLogsFromProto(in []*shuttlev1.LogLine) []ledger.DeployLog {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ledger.DeployLog, 0, len(in))
+	for _, l := range in {
+		if l == nil {
+			continue
+		}
+		out = append(out, ledger.DeployLog{
+			At:     time.UnixMilli(l.TsUnixMs),
+			Stream: l.Stream,
+			Text:   l.Text,
+		})
+	}
+	return out
 }
 
 func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServer) error {
@@ -138,6 +158,13 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 				if s.store != nil {
 					if err := s.store.MarkStatus(stream.Context(), res.DeployId, ls); err != nil {
 						slog.Error("mark deploy status", "deploy_id", res.DeployId, "err", err)
+					}
+					// Persist the captured output (best-effort: never gate the
+					// deploy result on a log write).
+					if logs := deployLogsFromProto(res.Logs); len(logs) > 0 {
+						if err := s.store.RecordDeployLogs(stream.Context(), res.DeployId, logs); err != nil {
+							slog.Error("record deploy logs", "deploy_id", res.DeployId, "err", err)
+						}
 					}
 				}
 				if et, emit := deployEventType(ls); emit {

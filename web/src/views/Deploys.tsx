@@ -7,6 +7,7 @@ import { useRole } from "../role-context";
 import { Button, Empty, Panel, Sha, StatusDot } from "../components/ui";
 import { ConfirmDialog } from "../components/Modal";
 import { useToast } from "../components/Toast";
+import { LogsModal } from "./DeployLogs";
 
 function ago(iso: string): string {
   const d = Date.now() - new Date(iso).getTime();
@@ -29,6 +30,7 @@ export function Deploys() {
   const qc = useQueryClient();
   const toast = useToast();
   const [pending, setPending] = useState<Pending | null>(null);
+  const [logsFor, setLogsFor] = useState<DeployRecord | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["deploys"],
@@ -66,7 +68,7 @@ export function Deploys() {
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Trigger</th>
               <th className="px-3 py-2 font-medium">When</th>
-              {mayDeploy && <th className="px-3 py-2"></th>}
+              <th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -85,22 +87,25 @@ export function Deploys() {
                 </td>
                 <td className="px-3 py-2 text-[var(--color-muted)]">{d.TriggeredBy}</td>
                 <td className="px-3 py-2 text-[var(--color-muted)]">{ago(d.StartedAt)}</td>
-                {mayDeploy && (
-                  <td className="px-3 py-2 text-right">
-                    <span className="inline-flex gap-1.5">
-                      <Button
-                        onClick={() =>
-                          setPending({ kind: "redeploy", service: d.Service, sha: d.SHA })
-                        }
-                      >
-                        Redeploy
-                      </Button>
-                      <Button onClick={() => setPending({ kind: "rollback", service: d.Service })}>
-                        Rollback
-                      </Button>
-                    </span>
-                  </td>
-                )}
+                <td className="px-3 py-2 text-right">
+                  <span className="inline-flex gap-1.5">
+                    <Button onClick={() => setLogsFor(d)}>Logs</Button>
+                    {mayDeploy && (
+                      <>
+                        <Button
+                          onClick={() =>
+                            setPending({ kind: "redeploy", service: d.Service, sha: d.SHA })
+                          }
+                        >
+                          Redeploy
+                        </Button>
+                        <Button onClick={() => setPending({ kind: "rollback", service: d.Service })}>
+                          Rollback
+                        </Button>
+                      </>
+                    )}
+                  </span>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -129,6 +134,8 @@ export function Deploys() {
           onCancel={() => setPending(null)}
         />
       )}
+
+      {logsFor && <LogsModal deploy={logsFor} onClose={() => setLogsFor(null)} />}
     </Panel>
   );
 }

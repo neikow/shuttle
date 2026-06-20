@@ -11,6 +11,14 @@ export interface DeployRecord {
   StartedAt: string;
 }
 
+// DeployLog is one captured output line of a deploy/rollback (GET
+// /deploys/{id}/logs). Marshals with the ledger's snake_case JSON tags.
+export interface DeployLog {
+  at: string;
+  stream: string;
+  text: string;
+}
+
 export type PlanAction = "create" | "update" | "unchanged" | "remove";
 
 export interface PlanEntry {
