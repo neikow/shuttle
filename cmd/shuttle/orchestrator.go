@@ -246,6 +246,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 			}
 			scheduler := orchestrator.NewBackupScheduler(syncer, store, bpInterval)
 			go scheduler.Run(ctx)
+			httpHandler.EnableBackups(syncer)
 			slog.Info("service backups enabled", "scheduler_interval", bpInterval)
 		}
 	} else {

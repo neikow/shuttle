@@ -58,6 +58,11 @@ type HTTPServer struct {
 	// repo-webhook trigger handler. Kept separate so tests can substitute a
 	// stub without needing a real GitSyncer.
 	repoWebhookDeployer func(ctx context.Context, services []string) ([]string, error)
+
+	// backupDispatcher / restoreDispatcher back the backup endpoints. Kept as
+	// fields so tests can stub them without a real GitSyncer.
+	backupDispatcher  func(ctx context.Context, service string, trigger ledger.TriggeredBy) (backupID, host string, err error)
+	restoreDispatcher func(ctx context.Context, service, backupID string) (operationID, host, snapshotID string, err error)
 }
 
 // SetEventBus attaches the event bus the control plane publishes to and, when

@@ -21,6 +21,8 @@ const (
 	auditWebhookDelete = "webhook.delete"
 	auditTokenCreate   = "token.create"
 	auditTokenRevoke   = "token.revoke"
+	auditBackup        = "backup"
+	auditRestore       = "backup.restore"
 )
 
 // Audit result values.
