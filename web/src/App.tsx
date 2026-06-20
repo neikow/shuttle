@@ -11,7 +11,8 @@ import {
   Server,
   Webhook,
 } from "lucide-react";
-import { clearToken, getToken } from "./auth";
+import { clearToken, getToken, setToken } from "./auth";
+import { completeOidcLogin, oidcLogout } from "./oidc";
 import { api, ApiError } from "./api";
 import { canAdmin } from "./role";
 import type { Role } from "./role";
@@ -28,13 +29,31 @@ import { Webhooks } from "./views/Webhooks";
 
 export function App() {
   const [authed, setAuthed] = useState(() => !!getToken());
+  // On first load, finish an OIDC redirect if this is the callback. Until that
+  // resolves we hold rendering so the gate doesn't flash over a returning login.
+  const [booting, setBooting] = useState(true);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  useEffect(() => {
+    completeOidcLogin()
+      .then((idToken) => {
+        if (idToken) {
+          setToken(idToken);
+          setAuthed(true);
+        }
+      })
+      .catch(() => setLoginError("SSO login failed. Try again or use a token."))
+      .finally(() => setBooting(false));
+  }, []);
 
   function signOut() {
     clearToken();
+    void oidcLogout();
     setAuthed(false);
   }
 
-  if (!authed) return <TokenGate onAuthed={() => setAuthed(true)} />;
+  if (booting) return <Empty>Loading…</Empty>;
+  if (!authed) return <TokenGate onAuthed={() => setAuthed(true)} initialError={loginError} />;
   return <Shell onSignOut={signOut} />;
 }
 

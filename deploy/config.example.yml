@@ -11,11 +11,15 @@ data_dir: /var/lib/shuttle         # SQLite ledger lives here
 # maps roles_claim through role_mapping to a control-plane role (read/deploy/
 # admin; highest match wins). A valid token mapping to no role gets 403. The
 # username_claim becomes the audit actor. The static bearer stays full admin.
+# The web UI also offers "Sign in with SSO": it reads the unauthenticated
+# GET /auth/config (issuer + audience + scopes) and runs an Authorization Code +
+# PKCE login in the browser, using the resulting ID token as its bearer.
 # oidc:
 #   issuer: "https://accounts.google.com"   # or a self-hosted Dex/Keycloak
 #   audience: "shuttle"                      # the client ID registered for Shuttle
 #   roles_claim: "groups"                    # claim holding role/group values (default "groups")
 #   username_claim: "email"                  # claim used as the audit actor (default "sub")
+#   scopes: "openid profile email groups"   # scopes the UI requests at login (default "openid profile email")
 #   role_mapping:                            # IdP group/role value -> control-plane role
 #     shuttle-admins: admin
 #     shuttle-deployers: deploy

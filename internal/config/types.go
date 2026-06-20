@@ -104,6 +104,12 @@ type OIDCConfig struct {
 	// UsernameClaim is the claim used as the caller's identity (the audit actor).
 	// Default "sub".
 	UsernameClaim string `yaml:"username_claim"`
+	// Scopes are the OAuth2 scopes the *web UI* requests during its browser login
+	// (Authorization Code + PKCE). It does not affect server-side token
+	// verification — only what the SPA asks the IdP for so the resulting ID token
+	// carries the claims (e.g. groups) this config maps. Space-separated; default
+	// "openid profile email". Advertised at GET /auth/config.
+	Scopes string `yaml:"scopes"`
 }
 
 // OIDCEnabled reports whether OIDC HTTP auth is configured.

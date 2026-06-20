@@ -1,5 +1,6 @@
 import { authHeaders } from "./auth";
 import type {
+  AuthConfig,
   CheckReport,
   ControlToken,
   CreatedToken,
@@ -46,6 +47,7 @@ const del = (path: string) => request<void>("DELETE", path);
 
 export const api = {
   // --- reads ---
+  authConfig: () => get<AuthConfig>("/auth/config"),
   whoami: () => get<WhoAmI>("/whoami"),
   overview: () => get<Overview>("/overview"),
   deploys: (service?: string) =>

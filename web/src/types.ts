@@ -89,6 +89,16 @@ export interface WhoAmI {
   role: string;
 }
 
+// Public OIDC parameters the SPA needs to run a browser login (GET /auth/config,
+// unauthenticated). oidc_enabled is false when the orchestrator has no OIDC
+// configured — the UI then offers only the paste-token flow.
+export interface AuthConfig {
+  oidc_enabled: boolean;
+  issuer?: string;
+  client_id?: string;
+  scopes?: string;
+}
+
 // ControlToken marshals with the ledger's JSON tags (snake_case).
 export interface ControlToken {
   id: string;

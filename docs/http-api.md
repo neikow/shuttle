@@ -60,6 +60,21 @@ Liveness probe. Always `200`:
 { "status": "ok" }
 ```
 
+## `GET /auth/config`
+
+Unauthenticated. Advertises the non-secret OIDC parameters the web UI needs to
+run a browser login (Authorization Code + PKCE). Returns `{"oidc_enabled": false}`
+when OIDC isn't configured (the UI then offers only the paste-token flow).
+
+```json
+{
+  "oidc_enabled": true,
+  "issuer": "https://keycloak.example.com/realms/shuttle",
+  "client_id": "shuttle",
+  "scopes": "openid profile email groups"
+}
+```
+
 ## `GET /deploys`
 
 List ledger records, newest first.

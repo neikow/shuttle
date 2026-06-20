@@ -24,6 +24,26 @@ type OIDCAuthenticator struct {
 	rolesClaim    string
 	usernameClaim string
 	mapping       map[string]Role
+
+	// Public, non-secret parameters the web UI needs to run the browser login
+	// flow (Authorization Code + PKCE). Served at GET /auth/config.
+	issuer   string
+	audience string
+	scopes   string
+}
+
+// OIDCPublicConfig is the non-secret OIDC information the web UI needs to start a
+// browser login: the issuer to discover, the client_id (audience) to request a
+// token for, and the scopes to ask for.
+type OIDCPublicConfig struct {
+	Issuer   string `json:"issuer"`
+	ClientID string `json:"client_id"`
+	Scopes   string `json:"scopes"`
+}
+
+// PublicConfig returns the non-secret parameters the SPA needs to log in.
+func (a *OIDCAuthenticator) PublicConfig() OIDCPublicConfig {
+	return OIDCPublicConfig{Issuer: a.issuer, ClientID: a.audience, Scopes: a.scopes}
 }
 
 // NewOIDCAuthenticator performs OIDC discovery against cfg.Issuer (a network
@@ -62,11 +82,18 @@ func NewOIDCAuthenticator(ctx context.Context, cfg config.OIDCConfig) (*OIDCAuth
 	if usernameClaim == "" {
 		usernameClaim = "sub"
 	}
+	scopes := cfg.Scopes
+	if scopes == "" {
+		scopes = "openid profile email"
+	}
 	return &OIDCAuthenticator{
 		verifier:      provider.Verifier(&oidc.Config{ClientID: cfg.Audience}),
 		rolesClaim:    rolesClaim,
 		usernameClaim: usernameClaim,
 		mapping:       mapping,
+		issuer:        cfg.Issuer,
+		audience:      cfg.Audience,
+		scopes:        scopes,
 	}, nil
 }
 

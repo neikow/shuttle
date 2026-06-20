@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -328,6 +329,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	s.mux.HandleFunc("GET /auth/config", s.handleAuthConfig)
 	s.mux.HandleFunc("GET /whoami", s.requireRole(RoleRead, s.handleWhoami))
 	s.mux.HandleFunc("GET /overview", s.requireRole(RoleRead, s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.requireRole(RoleRead, s.handleListDeploys))
@@ -358,9 +360,55 @@ func (s *HTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Referrer-Policy", "no-referrer")
 	if r.URL.Path == "/ui" || strings.HasPrefix(r.URL.Path, "/ui/") {
-		h.Set("Content-Security-Policy", uiCSP)
+		h.Set("Content-Security-Policy", s.cspForUI())
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// cspForUI returns the UI Content-Security-Policy. When OIDC is enabled the SPA
+// must reach the IdP origin for discovery + the PKCE token exchange (XHR), so
+// that origin is added to connect-src; otherwise the strict same-origin policy
+// stands. The login *redirect* itself is a top-level navigation, not subject to
+// connect-src.
+func (s *HTTPServer) cspForUI() string {
+	if s.oidc == nil {
+		return uiCSP
+	}
+	origin := originOf(s.oidc.PublicConfig().Issuer)
+	if origin == "" {
+		return uiCSP
+	}
+	return strings.Replace(uiCSP, "connect-src 'self'", "connect-src 'self' "+origin, 1)
+}
+
+// originOf returns the scheme://host origin of a URL, or "" if it can't be
+// parsed into one.
+func originOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// handleAuthConfig advertises the non-secret OIDC parameters the web UI needs to
+// start a browser login (issuer, client_id, scopes). Unauthenticated — the login
+// gate fetches it before any token exists. Returns {"oidc_enabled": false} when
+// OIDC is not configured, so the UI falls back to the paste-token flow.
+func (s *HTTPServer) handleAuthConfig(w http.ResponseWriter, r *http.Request) {
+	type resp struct {
+		OIDCEnabled bool   `json:"oidc_enabled"`
+		Issuer      string `json:"issuer,omitempty"`
+		ClientID    string `json:"client_id,omitempty"`
+		Scopes      string `json:"scopes,omitempty"`
+	}
+	out := resp{}
+	if s.oidc != nil {
+		pc := s.oidc.PublicConfig()
+		out = resp{OIDCEnabled: true, Issuer: pc.Issuer, ClientID: pc.ClientID, Scopes: pc.Scopes}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func (s *HTTPServer) handleHealthz(w http.ResponseWriter, r *http.Request) {
