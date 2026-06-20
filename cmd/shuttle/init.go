@@ -55,9 +55,9 @@ type InitOptions struct {
 	RepoDir   string // where the IaC git repo is scaffolded
 
 	// Bootstrap — written to config.yml (stay on the server, never in git).
-	DataDir    string
-	GRPCAddr   string
-	HTTPAddr   string
+	DataDir  string
+	GRPCAddr string
+	HTTPAddr string
 
 	// Secrets written to config.yml; .env carries Infisical creds.
 	BearerToken   string
@@ -66,7 +66,14 @@ type InitOptions struct {
 	// IaC remote URL (repo_url in config.yml). Empty = fill in later.
 	RemoteURL string
 
-	// TLS: "insecure", "token", "mtls"
+	// RepoMode controls what the IaC repo is seeded with:
+	//   "starter"  — an example whoami service + a "local" host to deploy first
+	//   "empty"/"" — placeholder hosts.yaml + empty services/ (bring your own)
+	//   "existing" — don't scaffold locally; just point repo_url at RemoteURL
+	RepoMode string
+
+	// TLS: "insecure", "token", "mtls". Defaults to "token" (server TLS + SSH-like
+	// agent enrollment) — the recommended, secure-by-default transport.
 	TLSMode             string
 	TLSCertPath         string
 	TLSKeyPath          string
@@ -74,6 +81,18 @@ type InitOptions struct {
 	AdvertiseAddr       string
 	AdvertiseServerName string
 	AgentTokenAuth      bool
+
+	// AdvertiseControlURL is the externally reachable control-plane URL written to
+	// config.yml so `shuttle enroll --config` needs no --url. Locally this is the
+	// http_addr on localhost; in production it's the public HTTPS endpoint.
+	AdvertiseControlURL string
+
+	// GenerateCert, when true, makes applyInit write a fresh self-signed EC
+	// orchestrator TLS cert/key at TLSCertPath/TLSKeyPath (skipped if they already
+	// exist). This is what makes the secure token-enrollment path one step: agents
+	// trust-on-first-use pin the cert and receive it via redeem, so there's no CA
+	// to distribute and no openssl/make dependency.
+	GenerateCert bool
 
 	// Secrets provider.
 	SecretsProvider string // "none" or "infisical"
@@ -137,59 +156,81 @@ func promptInitOptions(r io.Reader, w io.Writer, outputDir string) (InitOptions,
 		return strings.TrimSpace(s.Text())
 	}
 
-	_, _ = fmt.Fprintln(w, "\nShuttle init — sets up a new orchestrator environment.")
+	_, _ = fmt.Fprintln(w, "\nShuttle init — sets up a secure orchestrator environment.")
+	_, _ = fmt.Fprintln(w, "Press Enter to accept the [default] for any question.")
 	_, _ = fmt.Fprintln(w)
 
 	opts := InitOptions{OutputDir: outputDir}
 
 	// ── Orchestrator settings ──────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "=== Orchestrator settings ===")
+	_, _ = fmt.Fprintln(w, "=== Orchestrator ===")
 	opts.DataDir = ask("Data directory", "./data")
-	opts.GRPCAddr = ask("gRPC address", ":9090")
-	opts.HTTPAddr = ask("HTTP address", ":8080")
+	opts.HTTPAddr = ask("Control-plane HTTP address", ":8080")
+	opts.GRPCAddr = ask("Agent gRPC address", ":9090")
+	opts.AdvertiseControlURL = ask("Externally reachable control URL (agents/CI/enroll use it)", "http://localhost"+opts.HTTPAddr)
 
-	// ── Security ──────────────────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== Security ===")
+	// ── Secrets (auto-generated, protected) ────────────────────────────────
+	_, _ = fmt.Fprintln(w, "\n=== Control-plane secrets ===")
+	_, _ = fmt.Fprintln(w, "The bearer token (admin auth) and webhook secret are auto-generated")
+	_, _ = fmt.Fprintln(w, "with crypto/rand and written at mode 0600. Override only if you must.")
 	opts.BearerToken = askSecret("Bearer token")
 	opts.WebhookSecret = askSecret("Webhook secret")
 
+	// ── Agent transport security ───────────────────────────────────────────
+	// Token enrollment over TLS is the default: it encrypts + authenticates the
+	// agent link with no per-agent certs and no inbound firewall holes.
+	_, _ = fmt.Fprintln(w, "\n=== Agent transport security ===")
+	_, _ = fmt.Fprintln(w, "  1) Token enrollment over TLS — recommended (SSH-like, no cert copying)")
+	_, _ = fmt.Fprintln(w, "  2) Mutual TLS — advanced (you manage a CA + per-agent certs)")
+	_, _ = fmt.Fprintln(w, "  3) Insecure — NO encryption or auth, local experiments only")
+	switch ask("Choice", "1") {
+	case "3":
+		opts.TLSMode = "insecure"
+		_, _ = fmt.Fprintln(w, "  ⚠ Insecure transport: the agent link is unencrypted and unauthenticated.")
+	case "2":
+		opts.TLSMode = "mtls"
+		_, _ = fmt.Fprintln(w, "Run `make certs` (or your PKI) to produce the cert/key/CA, then point at them:")
+		opts.TLSCertPath = ask("TLS cert path", "./certs/orchestrator.crt")
+		opts.TLSKeyPath = ask("TLS key path", "./certs/orchestrator.key")
+		opts.TLSCAPath = ask("CA cert path", "./certs/ca.crt")
+		opts.AdvertiseAddr = ask("Advertise address (host:port agents dial)", "localhost"+opts.GRPCAddr)
+		opts.AdvertiseServerName = ask("Cert hostname / SAN agents verify", "orchestrator")
+	default:
+		opts.TLSMode = "token"
+		opts.AgentTokenAuth = true
+		opts.TLSCertPath = ask("TLS cert path", "./certs/orchestrator.crt")
+		opts.TLSKeyPath = ask("TLS key path", "./certs/orchestrator.key")
+		opts.AdvertiseAddr = ask("Advertise address (host:port agents dial)", "localhost"+opts.GRPCAddr)
+		opts.AdvertiseServerName = ask("Cert hostname / SAN agents verify", "orchestrator")
+		// Generating the self-signed cert is what keeps "secure" and "easy"
+		// together — agents pin it on first use and receive it via redeem.
+		opts.GenerateCert = askBool("Generate a self-signed TLS cert now?", true)
+	}
+
 	// ── IaC repository ────────────────────────────────────────────────────
 	_, _ = fmt.Fprintln(w, "\n=== IaC repository ===")
-	opts.RepoDir = ask("Local repo directory to scaffold", "./iac-repo")
-
-	_, _ = fmt.Fprintln(w, "Remote URL options:")
-	_, _ = fmt.Fprintln(w, "  1) I have an existing remote (enter URL)")
-	_, _ = fmt.Fprintln(w, "  2) Skip for now (add remote later)")
-	remoteChoice := ask("Choice", "2")
-	if remoteChoice == "1" {
+	_, _ = fmt.Fprintln(w, "  1) Starter repo with an example service (whoami) to deploy first")
+	_, _ = fmt.Fprintln(w, "  2) Empty repo scaffold (bring your own services)")
+	_, _ = fmt.Fprintln(w, "  3) Use an existing remote (enter URL, no local scaffold)")
+	switch ask("Choice", "1") {
+	case "3":
+		opts.RepoMode = "existing"
 		opts.RemoteURL = ask("Remote URL", "")
+	case "2":
+		opts.RepoMode = "empty"
+		opts.RepoDir = ask("Local repo directory to scaffold", "./iac-repo")
+		if askBool("Add an existing git remote (origin) now?", false) {
+			opts.RemoteURL = ask("Remote URL", "")
+		}
+	default:
+		opts.RepoMode = "starter"
+		opts.RepoDir = ask("Local repo directory to scaffold", "./iac-repo")
+		if askBool("Push the starter repo to an existing git remote (origin) now?", false) {
+			opts.RemoteURL = ask("Remote URL", "")
+		}
 	}
 
 	opts.SetupGitHubActions = askBool("Set up GitHub Actions workflows (deploy + plan comment)?", false)
-
-	// ── gRPC transport ────────────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== gRPC transport ===")
-	_, _ = fmt.Fprintln(w, "  1) Insecure (dev only)")
-	_, _ = fmt.Fprintln(w, "  2) Server TLS + token enrollment (recommended)")
-	_, _ = fmt.Fprintln(w, "  3) Mutual TLS (mTLS)")
-	tlsChoice := ask("Choice", "2")
-	switch tlsChoice {
-	case "3":
-		opts.TLSMode = "mtls"
-		opts.TLSCertPath = ask("TLS cert path", "/etc/shuttle/certs/orchestrator.crt")
-		opts.TLSKeyPath = ask("TLS key path", "/etc/shuttle/certs/orchestrator.key")
-		opts.TLSCAPath = ask("CA cert path", "/etc/shuttle/certs/ca.crt")
-		opts.AgentTokenAuth = false
-	case "2":
-		opts.TLSMode = "token"
-		opts.TLSCertPath = ask("TLS cert path", "/etc/shuttle/certs/orchestrator.crt")
-		opts.TLSKeyPath = ask("TLS key path", "/etc/shuttle/certs/orchestrator.key")
-		opts.AgentTokenAuth = true
-		opts.AdvertiseAddr = ask("Advertise address (host:port agents dial)", "")
-		opts.AdvertiseServerName = ask("Advertise server name (SAN on cert)", "orchestrator")
-	default:
-		opts.TLSMode = "insecure"
-	}
 
 	// ── Secrets ──────────────────────────────────────────────────────────
 	_, _ = fmt.Fprintln(w, "\n=== Secrets provider ===")
@@ -231,8 +272,33 @@ func applyInit(ctx context.Context, opts InitOptions, w io.Writer) error {
 		opts.WebhookSecret = generateHexToken()
 	}
 
+	// A local starter repo with no remote drives itself: point repo_url at the
+	// scaffolded repo via file:// so the orchestrator's git-sync loop deploys
+	// the example service without a push or a remote.
+	if opts.RepoMode == "starter" && opts.RemoteURL == "" {
+		if abs, err := filepath.Abs(opts.RepoDir); err == nil {
+			opts.RemoteURL = "file://" + abs
+		}
+	}
+
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	// ── TLS cert (self-signed, token path) ─────────────────────────────────
+	// Generate the orchestrator's server cert so the secure default works with
+	// no openssl/make and no CA to distribute. Skipped if the files already
+	// exist so re-running init never clobbers a real cert.
+	if opts.GenerateCert && opts.TLSCertPath != "" && opts.TLSKeyPath != "" {
+		created, err := ensureSelfSignedCert(opts.TLSCertPath, opts.TLSKeyPath, certSANs(opts))
+		if err != nil {
+			return fmt.Errorf("generate TLS cert: %w", err)
+		}
+		if created {
+			_, _ = fmt.Fprintf(w, "Generated self-signed TLS cert %s (key %s, mode 0600)\n", opts.TLSCertPath, opts.TLSKeyPath)
+		} else {
+			_, _ = fmt.Fprintf(w, "TLS cert %s already exists — left unchanged\n", opts.TLSCertPath)
+		}
 	}
 
 	// ── config.yml ───────────────────────────────────────────────────────
@@ -254,36 +320,77 @@ func applyInit(ctx context.Context, opts InitOptions, w io.Writer) error {
 	}
 
 	// ── IaC repository ────────────────────────────────────────────────────
-	if err := scaffoldRepo(ctx, opts, w); err != nil {
-		return fmt.Errorf("scaffold IaC repo: %w", err)
+	// "existing" points repo_url at a remote the user already manages, so there
+	// is nothing to scaffold locally.
+	if opts.RepoMode != "existing" {
+		if err := scaffoldRepo(ctx, opts, w); err != nil {
+			return fmt.Errorf("scaffold IaC repo: %w", err)
+		}
 	}
 
-	// ── Next steps ────────────────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== Next steps ===")
-	if opts.TLSMode != "insecure" {
-		_, _ = fmt.Fprintln(w, "  1. Generate TLS certs (or provide your own):")
-		_, _ = fmt.Fprintln(w, "       make certs")
-	}
-	step := 2
-	if opts.TLSMode == "insecure" {
-		step = 1
-	}
-	_, _ = fmt.Fprintf(w, "  %d. Add hosts to %s/hosts.yaml\n", step, opts.RepoDir)
-	step++
-	_, _ = fmt.Fprintf(w, "  %d. Add services under %s/services/\n", step, opts.RepoDir)
-	step++
-	if opts.RemoteURL == "" {
-		_, _ = fmt.Fprintf(w, "  %d. Add a remote and push the IaC repo:\n", step)
-		_, _ = fmt.Fprintf(w, "       cd %s && git remote add origin <url> && git push -u origin main\n", opts.RepoDir)
-		step++
-	}
-	_, _ = fmt.Fprintf(w, "  %d. Start the orchestrator:\n", step)
-	_, _ = fmt.Fprintf(w, "       shuttle orchestrator --config %s\n", configPath)
-	step++
-	_, _ = fmt.Fprintf(w, "  %d. Enroll your first host:\n", step)
-	_, _ = fmt.Fprintf(w, "       shuttle enroll --url http://localhost%s --token '%s'\n", opts.HTTPAddr, opts.BearerToken)
-
+	printNextSteps(w, opts, configPath)
 	return nil
+}
+
+// printNextSteps writes the ordered, copy-pasteable commands to finish setup.
+// It adapts to the transport (token enrollment vs insecure vs mtls) and to the
+// repo mode, and — for the self-driving local starter — adds the whoami verify
+// step so a first-timer sees a real deploy.
+func printNextSteps(w io.Writer, opts InitOptions, configPath string) {
+	starterLocal := opts.RepoMode == "starter" && strings.HasPrefix(opts.RemoteURL, "file://")
+	insecure := opts.TLSMode == "insecure"
+
+	_, _ = fmt.Fprintln(w, "\n=== Next steps ===")
+	n := 0
+	step := func(format string, a ...any) {
+		n++
+		_, _ = fmt.Fprintf(w, "  %d. "+format+"\n", append([]any{n}, a...)...)
+	}
+
+	if opts.TLSMode == "mtls" {
+		step("Generate the cert/key/CA you pointed at (e.g. `make certs`).")
+	}
+	if opts.RepoMode == "empty" {
+		step("Declare hosts in %s/hosts.yaml and services under %s/services/.", opts.RepoDir, opts.RepoDir)
+	}
+	if opts.RepoMode != "existing" && opts.RemoteURL != "" && !strings.HasPrefix(opts.RemoteURL, "file://") {
+		step("Push the IaC repo to its remote:")
+		_, _ = fmt.Fprintf(w, "       cd %s && git push -u origin main\n", opts.RepoDir)
+	}
+
+	step("Start the orchestrator:")
+	_, _ = fmt.Fprintf(w, "       shuttle orchestrator --config %s\n", configPath)
+
+	switch {
+	case insecure:
+		// No enrollment: the agent dials directly with no token.
+		step("Start an agent (new terminal) for a declared host:")
+		host := "<host>"
+		if starterLocal {
+			host = "local"
+		}
+		_, _ = fmt.Fprintf(w, "       shuttle agent --orchestrator localhost%s --host %s\n", opts.GRPCAddr, host)
+	default:
+		// Secure path: mint a single-use join token, then run join on the host.
+		host := "<host>"
+		if starterLocal {
+			host = "local"
+		}
+		step("Enroll a host — prints a one-line `shuttle agent join …` command:")
+		_, _ = fmt.Fprintf(w, "       shuttle enroll --config %s --host %s\n", configPath, host)
+		if starterLocal {
+			step("Run that printed command in a new terminal to start the local agent.")
+		} else {
+			step("Run that printed command once on the target host to start its agent.")
+		}
+	}
+
+	if starterLocal {
+		step("Watch the whoami example deploy (~60s), then verify it:")
+		_, _ = fmt.Fprintln(w, "       curl localhost:8088")
+		_, _ = fmt.Fprintf(w, "       curl -s -H \"Authorization: Bearer %s\" localhost%s/deploys | jq\n", opts.BearerToken, opts.HTTPAddr)
+		_, _ = fmt.Fprintf(w, "\nEdit %s/services/whoami/ and commit to roll out a change.\n", opts.RepoDir)
+	}
 }
 
 func writeConfigYML(path string, opts InitOptions) error {
@@ -300,6 +407,11 @@ data_dir: "{{ .DataDir }}"
 repo_url: "{{ .RemoteURL }}"
 repo_branch: "main"
 webhook_secret: "{{ .WebhookSecret }}"
+{{ if .AdvertiseControlURL -}}
+# Externally reachable control-plane URL. 'shuttle enroll --config' reads it so
+# enrolling a host needs no --url; in production make this the public HTTPS URL.
+advertise_control_url: "{{ .AdvertiseControlURL }}"
+{{ end -}}
 {{ if eq .TLSMode "token" -}}
 # gRPC — server TLS + token enrollment.
 grpc_tls_cert: "{{ .TLSCertPath }}"
@@ -382,17 +494,34 @@ func scaffoldRepo(ctx context.Context, opts InitOptions, w io.Writer) error {
 		return err
 	}
 
-	// hosts.yaml
-	if err := writeFileIfAbsent(filepath.Join(dir, "hosts.yaml"), hostsYAMLContent); err != nil {
+	// hosts.yaml — the starter declares the "local" host its agent registers as;
+	// otherwise a placeholder host to edit.
+	hostsContent := hostsYAMLContent
+	if opts.RepoMode == "starter" {
+		hostsContent = starterHostsYAMLContent
+	}
+	if err := writeFileIfAbsent(filepath.Join(dir, "hosts.yaml"), hostsContent); err != nil {
 		return err
 	}
 
-	// services/ with a .gitkeep so the directory is tracked.
+	// services/ — starter seeds a runnable whoami service; otherwise an empty
+	// directory kept tracked with a .gitkeep.
 	svcDir := filepath.Join(dir, "services")
 	if err := os.MkdirAll(svcDir, 0o755); err != nil {
 		return err
 	}
-	if err := writeFileIfAbsent(filepath.Join(svcDir, ".gitkeep"), ""); err != nil {
+	if opts.RepoMode == "starter" {
+		whoamiDir := filepath.Join(svcDir, "whoami")
+		if err := os.MkdirAll(whoamiDir, 0o755); err != nil {
+			return err
+		}
+		if err := writeFileIfAbsent(filepath.Join(whoamiDir, "whoami.yaml"), starterServiceYAMLContent); err != nil {
+			return err
+		}
+		if err := writeFileIfAbsent(filepath.Join(whoamiDir, "docker-compose.yml"), starterComposeYAMLContent); err != nil {
+			return err
+		}
+	} else if err := writeFileIfAbsent(filepath.Join(svcDir, ".gitkeep"), ""); err != nil {
 		return err
 	}
 
@@ -508,6 +637,28 @@ const hostsYAMLContent = `hosts:
     labels:
       region: us-east
       role: edge
+`
+
+// starterHostsYAMLContent declares the single host the starter agent registers
+// as (the host you enroll, or `shuttle agent --host local`).
+const starterHostsYAMLContent = `hosts:
+  - name: local
+`
+
+// starterServiceYAMLContent / starterComposeYAMLContent are the runnable whoami
+// example — the first thing a new install deploys. recreate (not the rolling
+// default) lets the compose file publish a fixed host port so it's reachable at
+// http://localhost:8088 without Caddy. Replace it with your real services.
+const starterServiceYAMLContent = `name: whoami
+host: local
+update_policy: recreate   # lets the example publish a fixed host port
+`
+
+const starterComposeYAMLContent = `services:
+  whoami:
+    image: traefik/whoami:latest
+    ports: ["8088:80"]
+    restart: unless-stopped
 `
 
 const deployWorkflowContent = `# Drop into .github/workflows/deploy.yml in your IaC repo.

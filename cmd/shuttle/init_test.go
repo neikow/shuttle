@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"io"
 	"os"
@@ -271,6 +273,180 @@ func TestApplyInit_IdempotentRepo(t *testing.T) {
 	}
 	if string(data) != custom {
 		t.Error("second init run overwrote existing hosts.yaml")
+	}
+}
+
+// ── starter / repo modes ─────────────────────────────────────────────────────
+
+func TestApplyInit_StarterRepo_ScaffoldsWhoami(t *testing.T) {
+	opts := makeOpts(t)
+	opts.RepoMode = "starter"
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	assertFileExists(t, filepath.Join(opts.RepoDir, "services", "whoami", "whoami.yaml"))
+	assertFileExists(t, filepath.Join(opts.RepoDir, "services", "whoami", "docker-compose.yml"))
+
+	hosts, err := os.ReadFile(filepath.Join(opts.RepoDir, "hosts.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, string(hosts), "name: local")
+
+	// The starter must not leave a .gitkeep (services/ is non-empty).
+	if _, err := os.Stat(filepath.Join(opts.RepoDir, "services", ".gitkeep")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("starter repo should not contain services/.gitkeep")
+	}
+}
+
+func TestApplyInit_StarterRepo_SelfDrivingRepoURL(t *testing.T) {
+	opts := makeOpts(t)
+	opts.RepoMode = "starter"
+	opts.RemoteURL = "" // no remote → orchestrator drives the local repo via file://
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(opts.OutputDir, "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs, _ := filepath.Abs(opts.RepoDir)
+	assertContains(t, string(data), `repo_url: "file://`+abs+`"`)
+}
+
+func TestApplyInit_StarterRepo_RemoteOverridesFileURL(t *testing.T) {
+	opts := makeOpts(t)
+	opts.RepoMode = "starter"
+	opts.RemoteURL = "https://github.com/me/iac.git"
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(opts.OutputDir, "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	assertContains(t, body, `repo_url: "https://github.com/me/iac.git"`)
+	if strings.Contains(body, "file://") {
+		t.Error("an explicit remote should not be replaced by a file:// URL")
+	}
+}
+
+func TestApplyInit_ExistingRepo_NoLocalScaffold(t *testing.T) {
+	opts := makeOpts(t)
+	opts.RepoMode = "existing"
+	opts.RemoteURL = "https://github.com/me/iac.git"
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.RepoDir, "hosts.yaml")); !errors.Is(err, os.ErrNotExist) {
+		t.Error("existing repo mode should not scaffold a local repo")
+	}
+	data, err := os.ReadFile(filepath.Join(opts.OutputDir, "config.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertContains(t, string(data), `repo_url: "https://github.com/me/iac.git"`)
+}
+
+// ── secure defaults ──────────────────────────────────────────────────────────
+
+// TestPromptInitOptions_SecureDefaults pumps an empty reader so every prompt
+// takes its default, asserting that hitting Enter through the wizard yields a
+// secure setup: token enrollment over TLS, a cert to generate, the starter repo,
+// and an auto-generated (empty here) bearer token.
+func TestPromptInitOptions_SecureDefaults(t *testing.T) {
+	opts, err := promptInitOptions(strings.NewReader(""), io.Discard, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.TLSMode != "token" {
+		t.Errorf("TLSMode = %q, want token (secure default)", opts.TLSMode)
+	}
+	if !opts.AgentTokenAuth {
+		t.Error("AgentTokenAuth should default true")
+	}
+	if !opts.GenerateCert {
+		t.Error("GenerateCert should default true")
+	}
+	if opts.RepoMode != "starter" {
+		t.Errorf("RepoMode = %q, want starter", opts.RepoMode)
+	}
+	if opts.AdvertiseControlURL != "http://localhost:8080" {
+		t.Errorf("AdvertiseControlURL = %q, want http://localhost:8080", opts.AdvertiseControlURL)
+	}
+	if opts.AdvertiseServerName != "orchestrator" {
+		t.Errorf("AdvertiseServerName = %q, want orchestrator", opts.AdvertiseServerName)
+	}
+	if opts.BearerToken != "" {
+		t.Error("bearer token should be left empty for auto-generation")
+	}
+}
+
+func TestApplyInit_GeneratesSelfSignedCert(t *testing.T) {
+	opts := makeOpts(t)
+	opts.TLSMode = "token"
+	opts.AgentTokenAuth = true
+	opts.GenerateCert = true
+	opts.AdvertiseServerName = "orchestrator"
+	opts.AdvertiseAddr = "localhost:9090"
+	certDir := t.TempDir()
+	opts.TLSCertPath = filepath.Join(certDir, "orchestrator.crt")
+	opts.TLSKeyPath = filepath.Join(certDir, "orchestrator.key")
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	assertFileExists(t, opts.TLSCertPath)
+	assertFileExists(t, opts.TLSKeyPath)
+
+	info, err := os.Stat(opts.TLSKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("key perm = %o, want 0600", perm)
+	}
+
+	pemBytes, err := os.ReadFile(opts.TLSCertPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		t.Fatal("cert is not valid PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cert.VerifyHostname("orchestrator"); err != nil {
+		t.Errorf("cert missing SAN orchestrator: %v", err)
+	}
+	if err := cert.VerifyHostname("localhost"); err != nil {
+		t.Errorf("cert missing SAN localhost: %v", err)
+	}
+}
+
+func TestEnsureSelfSignedCert_SkipsExisting(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "o.crt")
+	keyPath := filepath.Join(dir, "o.key")
+	if err := os.WriteFile(certPath, []byte("EXISTING"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("EXISTING"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created, err := ensureSelfSignedCert(certPath, keyPath, []string{"orchestrator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Error("should not regenerate when both files exist")
+	}
+	data, _ := os.ReadFile(certPath)
+	if string(data) != "EXISTING" {
+		t.Error("existing cert was overwritten")
 	}
 }
 
