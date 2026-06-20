@@ -1,16 +1,35 @@
 # Shuttle
 
-Self-hosted, git-driven Infrastructure-as-Code deployment platform. A single Go
-binary that watches an IaC git repository and rolls changes out to your own
-hosts over Docker Compose — with an append-only deploy ledger, one-command
-rollback, drift detection, secrets injection, and automatic Caddy ingress.
+**Git-driven deployments to your own servers — no SaaS, no Kubernetes.**
 
-Think Portainer's spirit (own your infra, no SaaS), plus full rollback history,
-secret management, and multi-host fan-out.
+Shuttle is a self-hosted deployment platform shipped as a single Go binary. It
+watches an Infrastructure-as-Code git repository and rolls changes out to your
+hosts over Docker Compose, recording every deploy in an append-only SQLite
+ledger that powers one-command rollback and drift detection.
 
-> Status: **v0.2.0** — maturity release: web dashboard, RBAC + OIDC, audit log,
-> secrets, zero-downtime deploys, observability, and a signed supply chain. See
-> the [changelog](CHANGELOG.md).
+Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
+
+> **Status: v0.2.0** — web dashboard, RBAC + OIDC, audit log, secrets,
+> zero-downtime deploys, observability, and a signed supply chain. See the
+> [changelog](CHANGELOG.md).
+
+## Highlights
+
+- **Git is the source of truth.** A deploy is a commit; a rollback is redeploying
+  an older one. The full history lives in a single SQLite file you can back up
+  with one command.
+- **Zero-downtime by default.** New containers come up and pass health checks
+  *before* the old ones are removed — a bad deploy never takes you offline.
+- **No inbound holes.** Agents dial *out* to the orchestrator, so managed hosts
+  need no open ports.
+- **Secure onboarding.** `shuttle init` sets up TLS + SSH-like token enrollment
+  for you — it generates a self-signed cert, so there's no `openssl` step and no
+  CA to distribute.
+- **Batteries included.** Secret injection (Infisical or file), per-user OIDC and
+  role-scoped tokens, an audit log, Prometheus metrics, Slack/Discord
+  notifications, automatic Caddy ingress, and an embedded web dashboard.
+- **One binary.** `shuttle orchestrator` on your control host, `shuttle agent` on
+  each server — the split is a runtime flag, not a separate build.
 
 ## How it works
 
@@ -30,118 +49,92 @@ secret management, and multi-host fan-out.
 
 - **Orchestrator** is the brain: it pulls the IaC repo, diffs the desired state
   against the deploy ledger, renders each service's compose + env (with secrets),
-  and dispatches deploy commands to agents. It also pushes ingress routes to Caddy.
-- **Agents** are dumb executors. They dial *out* to the orchestrator (no inbound
-  firewall holes), receive rendered compose files, and shell out to
-  `docker compose`. They report container state back so the orchestrator can
-  detect and heal drift.
+  and dispatches deploys to agents. It also pushes ingress routes to Caddy.
+- **Agents** are dumb executors. They dial out to the orchestrator, receive a
+  finished compose file, and shell out to `docker compose` — then report
+  container state back so the orchestrator can detect and heal drift.
 
-See [docs/architecture.md](docs/architecture.md) for the full design and the
-rationale behind each choice.
+## Install
 
-## Quickstart (local dev cluster)
-
-Brings up the orchestrator (with the embedded web UI) plus two **simulated
-remote hosts** — each an isolated Docker-in-Docker engine running a
-self-enrolling agent that deploys into its own engine:
+Grab the binary for your platform (linux/darwin × amd64/arm64) from the
+[latest release](https://github.com/neikow/shuttle/releases/latest):
 
 ```sh
-make dev-up
+VERSION=0.2.0
+curl -sSL "https://github.com/neikow/shuttle/releases/download/v${VERSION}/shuttle_${VERSION}_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+  | tar -xz shuttle && sudo install shuttle /usr/local/bin/
+shuttle version
 ```
 
-Open the UI at <http://localhost:8080/ui/> and paste the bearer token
-`test-bearer`. The HTTP control plane is on `:8080`, gRPC on `:9090`. Follow
-logs with `make dev-logs`; tear it down with `make dev-down`. Full walkthrough:
-the [3-minute Quickstart](https://neikow.github.io/shuttle/guide/quickstart).
+Releases are [cosign](https://docs.sigstore.dev/)-signed and ship an SBOM. Other
+methods — container image, `go install`, building from source — are in the
+[Installation guide](https://neikow.github.io/shuttle/guide/installation).
 
-## Build & test
+## Get running
 
-```sh
-make build          # -> ./shuttle (version stamped from git)
-make test           # go test -race ./internal/...
-make lint           # golangci-lint (v2)
-make proto          # regenerate gen/ from proto/ via buf
-make certs          # generate dev mTLS CA + orchestrator + agent certs
-```
-
-## Run
+`shuttle init` scaffolds a **secure** setup. Run it in an empty directory and
+press Enter through the prompts:
 
 ```sh
-# Bootstrap a new environment (interactive wizard)
+mkdir shuttle-demo && cd shuttle-demo
 shuttle init
-
-# Orchestrator (reads config.yml; see deploy/config.example.yml)
-shuttle orchestrator --config /etc/shuttle/config.yml
-
-# Enroll a host: pick from the IaC repo's hosts, get a ready-to-run agent command
-shuttle enroll --url https://orch.example.com:8080 --token "$BEARER_TOKEN"
-
-# Agent (on a managed host; --host must match a name in hosts.yaml)
-shuttle agent --orchestrator orch.example.com:9090 --host web1 --token <token>   # token enrollment
-shuttle agent --orchestrator orch.example.com:9090 --host web1 \
-  --cert agent.crt --key agent.key --ca ca.crt          # mTLS (omit for insecure dev)
-
-# Synology DSM target
-shuttle agent --driver synology --orchestrator … --host nas1
 ```
 
-## HTTP control plane
+The defaults give you TLS with SSH-like token enrollment (a self-signed cert is
+generated — no `openssl`, no CA to copy), auto-generated secrets written at mode
+`0600`, and a starter IaC repo with a runnable example service. Then:
 
-| Method & path                      | Auth   | Purpose                                          |
-|------------------------------------|--------|--------------------------------------------------|
-| `GET  /healthz`                    | none   | Liveness probe                                   |
-| `GET  /metrics`                    | none   | Prometheus metrics                               |
-| `GET  /deploys`                    | bearer | List deploy ledger records                       |
-| `GET  /deploys/{id}/logs`          | bearer | Captured output of one deploy/rollback           |
-| `POST /deploy/{service}?sha=…`     | bearer | Manually deploy a service at a commit            |
-| `POST /rollback?service=…&steps=N` | bearer | Roll a service back N deploys                    |
-| `GET  /overview`                   | bearer | Host + service health snapshot (backs the UI)    |
-| `GET  /plan`                       | bearer | Desired-vs-actual diff (no deploy)               |
-| `GET  /check`                      | bearer | Validate config + secrets (no deploy)            |
-| `GET  /events`                     | bearer | SSE stream of orchestrator events                |
-| `GET  /hosts`                      | bearer | List enrollable hosts (token auth)               |
-| `POST /enroll`                     | bearer | Mint an agent enrollment token                   |
-| `POST /webhook`                    | HMAC   | Git push trigger (signed, replay-guarded)        |
-| `POST /webhook/infisical`          | HMAC   | Infisical secret-change trigger                  |
-| `POST /webhook/repo/{id}`          | ID     | Service-specific deploy webhook (ID = secret)    |
-| `POST /webhooks/repo`              | bearer | Create a service-specific deploy webhook         |
-| `GET  /webhooks/repo`              | bearer | List service-specific deploy webhooks            |
-| `DELETE /webhooks/repo/{id}`       | bearer | Delete a service-specific deploy webhook         |
-| `POST /prune`                      | bearer | Delete kept volumes of removed services          |
+```sh
+shuttle orchestrator --config config.yml          # terminal 1
+shuttle enroll --config config.yml --host local   # terminal 2 — prints a join command
+```
 
-Bearer auth uses the static `bearer_token` from config. Webhooks verify an
-`X-Hub-Signature-256` HMAC and reject replays. Agents authenticate with either a
-client cert (mTLS) or a host-scoped enrollment token over server TLS — see
-[docs/operations.md](docs/operations.md#enrolling-agents-with-tokens). Full API
-reference: [docs/http-api.md](docs/http-api.md).
+Run the printed `shuttle agent join …` command and your first service deploys.
+Full walkthrough: the
+[3-minute Quickstart](https://neikow.github.io/shuttle/guide/quickstart). To
+deploy to a real server, see
+[Deploy to a real host](https://neikow.github.io/shuttle/guide/first-deployment).
+
+The HTTP control plane (deploy, rollback, plan, audit, webhooks, …) is documented
+in the [API reference](https://neikow.github.io/shuttle/http-api).
 
 ## Web UI
 
-Build the binary with the embedded dashboard:
+Build the binary with the embedded React dashboard:
 
 ```sh
 make build-ui   # runs make web, then embeds web/dist (-tags embedui)
 ```
 
-The UI is served under `/ui/` (unauthenticated static bundle; the browser
-authenticates its own API calls with the bearer token you paste into the UI).
-During development, `make web-dev` starts a Vite dev server that proxies API
-requests to a local orchestrator on `:8080`.
+It's served under `/ui/`. The browser authenticates its own API calls with a
+bearer token you paste in, or via **Sign in with SSO** (OIDC) when configured.
 
-## IaC repository layout
+## Development
 
+Contributions welcome. You need **Go 1.25+**, **Docker** with Compose v2, and
+**git**.
+
+```sh
+git clone https://github.com/neikow/shuttle.git
+cd shuttle
+make build      # -> ./shuttle (version stamped from git)
+make test       # unit tests, race-enabled — the default gate
+make lint       # golangci-lint v2
 ```
-hosts.yaml                            # hosts + labels
-orchestrator.yaml                     # repo-managed orchestrator overrides (optional)
-services/<name>/<name>.yaml           # service def: host, domains, env, port
-services/<name>/docker-compose.yml    # local compose  (XOR with a remote pointer)
+
+Spin up a full local cluster — orchestrator + web UI + two **simulated remote
+hosts** (each an isolated Docker-in-Docker engine running a self-enrolling agent)
+— with one command:
+
+```sh
+make dev-up     # UI at http://localhost:8080/ui/  (bearer token: test-bearer)
+make dev-logs   # follow logs
+make dev-down   # tear it down
 ```
 
-`orchestrator.yaml` lets you change Caddy settings, secrets paths, and Git
-credentials via a git commit — no orchestrator restart needed. See
-[docs/iac-repo.md](docs/iac-repo.md) for the full schema and
-[docs/configuration.md](docs/configuration.md#repo-managed-config-orchestratoryaml)
-for the config split. `examples/repo/` has a working sample.
+[**CLAUDE.md**](CLAUDE.md) is the repo map: the architecture, the package layout,
+and the rationale behind each design decision. Read it before changing structural
+code.
 
 ## Documentation
 
@@ -149,12 +142,11 @@ for the config split. `examples/repo/` has a working sample.
 VitePress; `make docs-dev` to preview locally).
 
 - [Getting started](https://neikow.github.io/shuttle/guide/getting-started)
-- [Architecture & design decisions](docs/architecture.md)
-- [Configuration reference](docs/configuration.md)
-- [IaC repository schema](docs/iac-repo.md)
-- [HTTP API reference](docs/http-api.md)
-- [Operations: deploying, mTLS, Synology, releases](docs/operations.md)
-- [Contributor guide / repo map (CLAUDE.md)](CLAUDE.md)
+- [Architecture & design decisions](https://neikow.github.io/shuttle/architecture)
+- [Configuration reference](https://neikow.github.io/shuttle/configuration)
+- [IaC repository schema](https://neikow.github.io/shuttle/iac-repo)
+- [HTTP API reference](https://neikow.github.io/shuttle/http-api)
+- [Operations: deploying, mTLS, Synology, releases](https://neikow.github.io/shuttle/operations)
 
 ## License
 

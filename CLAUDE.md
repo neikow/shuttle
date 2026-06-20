@@ -34,7 +34,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive bootstrap wizard), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
@@ -157,7 +157,7 @@ These are deliberate. Don't reverse them without updating this file.
 - **Single Go binary, two subcommands.** One artifact to ship and version; the
   orchestrator/agent split is a runtime flag, not a separate build.
 - **Two-tier config split: `config.yml` (bootstrap) vs `orchestrator.yaml` (repo-managed).** Settings needed to *start* the orchestrator (bearer token, repo URL, webhook secret, TLS) can't live in git — the orchestrator can't clone the repo without them. Everything that changes at runtime without a restart (Caddy, secrets paths, git credentials) lives in `orchestrator.yaml` in the IaC repo, reloaded atomically on each reconcile via `atomic.Pointer[RepoOrchestratorConfig]`. A parse error keeps old values and never blocks deploys — a broken commit is recoverable with a revert push. `shuttle init` scaffolds both files.
-- **`shuttle init` as the blessed bootstrap path.** Auto-generates bearer token and webhook secret (32-byte `crypto/rand`, hex-encoded); writes `config.yml` and `.env` at mode 0600; scaffolds the IaC repo idempotently (second run never overwrites user-edited files); optionally wires GitHub Actions. Separating the wizard (`promptInitOptions`) from the applier (`applyInit`) keeps the logic fully unit-testable without stdin.
+- **`shuttle init` as the blessed, secure-by-default bootstrap path.** A single guided wizard whose defaults (hit Enter through it) yield a *secure* setup, not an insecure demo: **token enrollment over TLS** is the default transport, and init **generates the orchestrator's self-signed EC cert inline** (`certgen.go`, `ensureSelfSignedCert`) so "secure" and "easy" don't conflict — agents trust-on-first-use pin it and receive it via redeem, so there's no `openssl`/`make certs` step and no CA to distribute (the orchestrator already hands a self-signed server cert back as the trust root, see the SSH-like enrollment decision). The cert carries SANs for the advertise server name + `localhost`/`127.0.0.1` + the advertised gRPC/control hosts (`certSANs`), and is never clobbered if the files already exist. Auto-generates bearer token + webhook secret (32-byte `crypto/rand`, hex); writes `config.yml` (incl. `advertise_control_url` so `shuttle enroll --config` needs no `--url`) and `.env` at mode 0600. The IaC repo is one of three choices: a **starter** repo with a runnable `whoami` example + a `local` host (with no remote, `repo_url` is set to `file://<abs repo>` so the orchestrator drives it directly — a real, secured first deploy with nothing to push), an **empty** scaffold, or an **existing** remote (no local scaffold). Scaffolding is idempotent (second run never overwrites user-edited files); optionally wires GitHub Actions. Mutual TLS and an insecure local link remain selectable for advanced/dev use. Separating the wizard (`promptInitOptions`) from the applier (`applyInit`) keeps the logic fully unit-testable without stdin.
 - **gRPC bidi stream, agent dials out.** Agents open the connection to the
   orchestrator, so managed hosts need *no* inbound firewall holes. Commands flow
   down the same stream that heartbeats and state flow up.
@@ -297,8 +297,8 @@ These are deliberate. Don't reverse them without updating this file.
   OpenID Connect **JWT** as a third identity source (after the static bearer and
   named control tokens). `internal/orchestrator/oidc.go` `OIDCAuthenticator`
   delegates JWT signature/JWKS verification to `github.com/coreos/go-oidc` (the
-  canonical Go verifier — crypto correctness is not hand-rolled, cf. cosign /
-  prometheus histograms), validating the issuer + `audience` (`aud`) and mapping
+  canonical Go verifier — don't hand-roll crypto), validating the issuer +
+  `audience` (`aud`) and mapping
   a configurable claim (`roles_claim`, default `groups`) through `role_mapping`
   to a `Role` — highest-ranked matched role wins. The caller's identity (audit
   actor) is the `username_claim` (default `sub`). A validly-signed token that
@@ -319,8 +319,8 @@ These are deliberate. Don't reverse them without updating this file.
   paste-token field. It reads the unauthenticated `GET /auth/config`
   (issuer/client_id/scopes — `OIDCAuthenticator.PublicConfig`) and runs an
   Authorization Code + **PKCE** flow via `oidc-client-ts` (a maintained,
-  security-reviewed library — same "don't hand-roll the crypto-adjacent bits"
-  stance as using coreos/go-oidc server-side), then uses the returned **ID
+  security-reviewed library — don't hand-roll the crypto-adjacent bits), then
+  uses the returned **ID
   token** (`aud` = the configured audience/client_id, which is exactly what
   `verify` checks) as the bearer for every API call — mirrored into the existing
   `localStorage` token so the rest of the app is unchanged. The redirect URI is
@@ -561,3 +561,18 @@ These are deliberate. Don't reverse them without updating this file.
   and explicit error wrapping (`fmt.Errorf("…: %w", err)`).
 - Touching `proto/` means re-running `make proto` and committing `gen/`.
 - Don't commit `certs/` (gitignored) or real secrets.
+
+## Working in this repo (for future sessions)
+
+- **Update the docs in the same PR as the code.** User-facing changes (a new
+  flag, command, config key, endpoint, or behavior) must update `docs/` and, when
+  relevant, `README.md` — and add/extend a design-decision bullet above. A PR that
+  changes behavior without touching docs is incomplete. The docs are the contract;
+  stale docs are worse than none.
+- **Split a feature into several focused commits, not one massive diff.** Land it
+  as a reviewable sequence — e.g. proto/schema → core logic → wiring/CLI → tests →
+  docs — each commit building and passing on its own. Avoid one squashed
+  thousand-line commit; small commits make review and `git bisect` tractable.
+- **Run `make test` (and `make lint`) before every commit.** The repo is kept
+  race-clean; `cmd/` tests aren't in the default gate, so run `go test ./cmd/...`
+  too when you touch the CLI.
