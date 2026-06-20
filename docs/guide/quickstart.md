@@ -8,7 +8,7 @@ binary, Docker, and git.
 
 - The **`shuttle` binary** — [install it](/guide/installation) (one command):
   ```sh
-  VERSION=0.1.0   # see https://github.com/neikow/shuttle/releases/latest
+  VERSION=0.2.0   # see https://github.com/neikow/shuttle/releases/latest
   curl -sSL "https://github.com/neikow/shuttle/releases/download/v${VERSION}/shuttle_${VERSION}_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
     | tar -xz shuttle && sudo install shuttle /usr/local/bin/
   ```
