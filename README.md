@@ -143,6 +143,10 @@ for the config split. `examples/repo/` has a working sample.
 
 ## Documentation
 
+📖 **Full docs: <https://neikow.github.io/shuttle/>** (built from `docs/` with
+VitePress; `make docs-dev` to preview locally).
+
+- [Getting started](https://neikow.github.io/shuttle/guide/getting-started)
 - [Architecture & design decisions](docs/architecture.md)
 - [Configuration reference](docs/configuration.md)
 - [IaC repository schema](docs/iac-repo.md)

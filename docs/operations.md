@@ -166,7 +166,7 @@ shuttle agent --driver synology --orchestrator … --host nas1
 
 The `synology` driver invokes `/usr/local/bin/docker` (where DSM installs the CLI
 and where Task Scheduler's minimal `PATH` can't find it). Full install guide and
-a boot-up task script: [`deploy/synology/README.md`](../deploy/synology/README.md).
+a boot-up task script: [`deploy/synology/README.md`](https://github.com/neikow/shuttle/blob/main/deploy/synology/README.md).
 
 ## Webhooks from CI
 

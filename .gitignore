@@ -20,6 +20,11 @@
 # Generated graphify knowledge graph output
 /graphify-out/
 
+# Docs site (VitePress)
+/docs/node_modules/
+/docs/.vitepress/dist/
+/docs/.vitepress/cache/
+
 # OS / editor
 .DS_Store
 

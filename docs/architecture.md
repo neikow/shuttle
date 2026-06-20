@@ -164,4 +164,4 @@ for the SSE events view (since `EventSource` cannot set headers). Mutations
 - **Secret scoping** — agents receive only the env keys a service declares in its
   `env_schema`.
 
-For the rationale behind each of these choices, see [CLAUDE.md](../CLAUDE.md).
+For the rationale behind each of these choices, see [CLAUDE.md](https://github.com/neikow/shuttle/blob/main/CLAUDE.md).
