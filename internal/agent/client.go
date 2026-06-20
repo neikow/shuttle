@@ -371,7 +371,7 @@ func executeBackup(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 		DBName:    req.DbName,
 		Retention: retentionFromProto(req.Retention),
 	})
-	return streamBackupResult(stream, req.BackupId, "backup", logCh, doneCh, err)
+	return streamBackupResult(stream, req.BackupId, "backup", req.Service, logCh, doneCh, err)
 }
 
 // executeRestore restores a prior backup into the service.
@@ -391,7 +391,7 @@ func executeRestore(ctx context.Context, cfg Config, stream shuttlev1.AgentServi
 		DBUser:      req.DbUser,
 		DBName:      req.DbName,
 	})
-	return streamBackupResult(stream, req.OperationId, "restore", logCh, doneCh, err)
+	return streamBackupResult(stream, req.OperationId, "restore", req.Service, logCh, doneCh, err)
 }
 
 // retentionFromProto maps the proto retention into the driver's form.
@@ -410,12 +410,12 @@ func retentionFromProto(r *shuttlev1.BackupRetention) BackupRetention {
 // streamBackupResult drains the backup/restore log stream and outcome, then sends
 // one terminal BackupResult event. A start error (driver failed to launch) is
 // reported as a failed result directly.
-func streamBackupResult(stream shuttlev1.AgentService_RegisterClient, opID, operation string, logCh <-chan LogLine, doneCh <-chan BackupOutcome, startErr error) error {
+func streamBackupResult(stream shuttlev1.AgentService_RegisterClient, opID, operation, service string, logCh <-chan LogLine, doneCh <-chan BackupOutcome, startErr error) error {
 	if startErr != nil {
 		return stream.Send(&shuttlev1.AgentEvent{
 			Payload: &shuttlev1.AgentEvent_BackupResult{
 				BackupResult: &shuttlev1.BackupResult{
-					OperationId: opID, Operation: operation,
+					OperationId: opID, Operation: operation, Service: service,
 					Status: shuttlev1.BackupStatus_BACKUP_STATUS_FAILED, Error: startErr.Error(),
 				},
 			},
@@ -437,6 +437,7 @@ func streamBackupResult(stream shuttlev1.AgentService_RegisterClient, opID, oper
 			BackupResult: &shuttlev1.BackupResult{
 				OperationId: opID,
 				Operation:   operation,
+				Service:     service,
 				Status:      status,
 				SnapshotId:  out.SnapshotID,
 				SizeBytes:   out.SizeBytes,

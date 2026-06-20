@@ -920,6 +920,7 @@ type BackupResult struct {
 	SizeBytes     int64                  `protobuf:"varint,5,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
 	Logs          []*LogLine             `protobuf:"bytes,6,rep,name=logs,proto3" json:"logs,omitempty"`
 	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
+	Service       string                 `protobuf:"bytes,8,opt,name=service,proto3" json:"service,omitempty"` // so the result is self-describing for events/audit
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -999,6 +1000,13 @@ func (x *BackupResult) GetLogs() []*LogLine {
 func (x *BackupResult) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *BackupResult) GetService() string {
+	if x != nil {
+		return x.Service
 	}
 	return ""
 }
@@ -1089,7 +1097,7 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	" \x01(\tR\x06dbName\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x80\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9a\x02\n" +
 	"\fBackupResult\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\tR\toperation\x120\n" +
@@ -1099,7 +1107,8 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"\n" +
 	"size_bytes\x18\x05 \x01(\x03R\tsizeBytes\x12'\n" +
 	"\x04logs\x18\x06 \x03(\v2\x13.shuttle.v1.LogLineR\x04logs\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error*\xb7\x01\n" +
+	"\x05error\x18\a \x01(\tR\x05error\x12\x18\n" +
+	"\aservice\x18\b \x01(\tR\aservice*\xb7\x01\n" +
 	"\fDeployStatus\x12\x1d\n" +
 	"\x19DEPLOY_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DEPLOY_STATUS_PENDING\x10\x01\x12\x19\n" +

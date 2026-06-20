@@ -20,6 +20,11 @@ const (
 	EventDriftDetected    EventType = "drift.detected"
 	EventServiceRemoved   EventType = "service.removed"
 	EventVolumesPurged    EventType = "volumes.purged"
+	EventBackupQueued     EventType = "backup.queued"
+	EventBackupSucceeded  EventType = "backup.succeeded"
+	EventBackupFailed     EventType = "backup.failed"
+	EventRestoreSucceeded EventType = "restore.succeeded"
+	EventRestoreFailed    EventType = "restore.failed"
 )
 
 // Event is a single thing that happened in the orchestrator. One flat struct

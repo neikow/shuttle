@@ -135,4 +135,5 @@ message BackupResult {
   int64 size_bytes = 5;
   repeated LogLine logs = 6;
   string error = 7;
+  string service = 8; // so the result is self-describing for events/audit
 }

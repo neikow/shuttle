@@ -42,7 +42,8 @@ type GitSyncer struct {
 	secretsBasePath     string
 	secretsPathTemplate string
 	gitCreds            []config.GitCredential
-	bus                 *EventBus // optional; nil-safe
+	backupCfg           config.BackupConfig // bootstrap backup creds + store/target defaults
+	bus                 *EventBus           // optional; nil-safe
 
 	// liveRepoCfg is loaded from orchestrator.yaml in the IaC repo on every
 	// sync. It provides runtime overrides for a subset of bootstrap settings
@@ -250,6 +251,7 @@ func (g *GitSyncer) checkoutRef(ctx context.Context, ref string) (sib *GitSyncer
 		secretsBasePath:     g.secretsBasePath,
 		secretsPathTemplate: g.secretsPathTemplate,
 		gitCreds:            g.gitCreds,
+		backupCfg:           g.backupCfg,
 		bus:                 g.bus,
 	}
 	// Share the parent's live repo config so ref-based plan/check also picks
@@ -580,6 +582,11 @@ func (g *GitSyncer) DeployAtSHA(ctx context.Context, service, sha string, trigge
 }
 
 func (g *GitSyncer) dispatch(ctx context.Context, svc config.Service, step Step, triggeredBy ledger.TriggeredBy) (string, error) {
+	// Best-effort snapshot before the deploy when the service opts in. Enqueued
+	// before the deploy command so the agent (which processes stream commands
+	// sequentially) finishes the backup first; never blocks or fails the deploy.
+	g.maybeBackupBeforeDeploy(ctx, svc)
+
 	composeYAML, err := g.renderCompose(ctx, svc)
 	if err != nil {
 		return "", err
