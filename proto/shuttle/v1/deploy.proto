@@ -64,3 +64,75 @@ message CaddyConfigResponse {
   bool ok = 1;
   string error = 2;
 }
+
+enum BackupStatus {
+  BACKUP_STATUS_UNSPECIFIED = 0;
+  BACKUP_STATUS_RUNNING = 1;
+  BACKUP_STATUS_SUCCESS = 2;
+  BACKUP_STATUS_FAILED = 3;
+}
+
+// BackupRetention bounds how many snapshots a restic store keeps after a backup.
+// Zero fields mean "keep everything" (no forget/prune). Ignored by the local
+// store, which keeps every file.
+message BackupRetention {
+  int32 keep_last = 1;
+  int32 keep_daily = 2;
+  int32 keep_weekly = 3;
+  int32 keep_monthly = 4;
+}
+
+// BackupRequest tells an agent to capture a service's persistent data. The agent
+// runs against the service's compose workspace already on disk, so it ships no
+// compose. engine selects the capture method ("volume" tars named volumes,
+// "postgres" runs pg_dump in the DB container); store selects the destination
+// ("local" writes a file under target, "restic" snapshots into the target repo).
+// env carries backend credentials (RESTIC_PASSWORD, AWS_*, PGPASSWORD) resolved
+// from the secrets provider and injected into the process env — never persisted.
+message BackupRequest {
+  string backup_id = 1;
+  string service = 2;
+  string engine = 3; // "volume" | "postgres"
+  string store = 4; // "local" | "restic"
+  string target = 5; // local directory or restic repository
+  map<string, string> env = 6;
+  // Volumes optionally restricts a "volume" engine backup to these compose
+  // volume keys; empty means every named volume in the project.
+  repeated string volumes = 7;
+  // Postgres engine parameters. db_name empty => pg_dumpall (all databases +
+  // roles); otherwise pg_dump of that single database.
+  string db_service = 8;
+  string db_user = 9;
+  string db_name = 10;
+  BackupRetention retention = 11;
+}
+
+// RestoreRequest tells an agent to restore a prior backup into a service. The
+// service's containers are stopped, the snapshot is restored into its volume (or
+// replayed into its database), then the containers are started again — restoring
+// data is always cold, never hot-swapped.
+message RestoreRequest {
+  string operation_id = 1; // id of this restore operation (for logs/audit)
+  string service = 2;
+  string engine = 3;
+  string store = 4;
+  string target = 5;
+  string snapshot_id = 6; // restic snapshot id, or local filename
+  map<string, string> env = 7;
+  string db_service = 8;
+  string db_user = 9;
+  string db_name = 10;
+}
+
+// BackupResult is the agent's terminal report for a backup or restore. operation
+// distinguishes the two ("backup" | "restore"); snapshot_id and size_bytes are
+// set on a successful backup.
+message BackupResult {
+  string operation_id = 1;
+  string operation = 2; // "backup" | "restore"
+  BackupStatus status = 3;
+  string snapshot_id = 4;
+  int64 size_bytes = 5;
+  repeated LogLine logs = 6;
+  string error = 7;
+}

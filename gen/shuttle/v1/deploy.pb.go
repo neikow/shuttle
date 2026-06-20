@@ -79,6 +79,58 @@ func (DeployStatus) EnumDescriptor() ([]byte, []int) {
 	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{0}
 }
 
+type BackupStatus int32
+
+const (
+	BackupStatus_BACKUP_STATUS_UNSPECIFIED BackupStatus = 0
+	BackupStatus_BACKUP_STATUS_RUNNING     BackupStatus = 1
+	BackupStatus_BACKUP_STATUS_SUCCESS     BackupStatus = 2
+	BackupStatus_BACKUP_STATUS_FAILED      BackupStatus = 3
+)
+
+// Enum value maps for BackupStatus.
+var (
+	BackupStatus_name = map[int32]string{
+		0: "BACKUP_STATUS_UNSPECIFIED",
+		1: "BACKUP_STATUS_RUNNING",
+		2: "BACKUP_STATUS_SUCCESS",
+		3: "BACKUP_STATUS_FAILED",
+	}
+	BackupStatus_value = map[string]int32{
+		"BACKUP_STATUS_UNSPECIFIED": 0,
+		"BACKUP_STATUS_RUNNING":     1,
+		"BACKUP_STATUS_SUCCESS":     2,
+		"BACKUP_STATUS_FAILED":      3,
+	}
+)
+
+func (x BackupStatus) Enum() *BackupStatus {
+	p := new(BackupStatus)
+	*p = x
+	return p
+}
+
+func (x BackupStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (BackupStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_shuttle_v1_deploy_proto_enumTypes[1].Descriptor()
+}
+
+func (BackupStatus) Type() protoreflect.EnumType {
+	return &file_shuttle_v1_deploy_proto_enumTypes[1]
+}
+
+func (x BackupStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use BackupStatus.Descriptor instead.
+func (BackupStatus) EnumDescriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{1}
+}
+
 type DeployRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	DeployId    string                 `protobuf:"bytes,1,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
@@ -530,6 +582,427 @@ func (x *CaddyConfigResponse) GetError() string {
 	return ""
 }
 
+// BackupRetention bounds how many snapshots a restic store keeps after a backup.
+// Zero fields mean "keep everything" (no forget/prune). Ignored by the local
+// store, which keeps every file.
+type BackupRetention struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	KeepLast      int32                  `protobuf:"varint,1,opt,name=keep_last,json=keepLast,proto3" json:"keep_last,omitempty"`
+	KeepDaily     int32                  `protobuf:"varint,2,opt,name=keep_daily,json=keepDaily,proto3" json:"keep_daily,omitempty"`
+	KeepWeekly    int32                  `protobuf:"varint,3,opt,name=keep_weekly,json=keepWeekly,proto3" json:"keep_weekly,omitempty"`
+	KeepMonthly   int32                  `protobuf:"varint,4,opt,name=keep_monthly,json=keepMonthly,proto3" json:"keep_monthly,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupRetention) Reset() {
+	*x = BackupRetention{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupRetention) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupRetention) ProtoMessage() {}
+
+func (x *BackupRetention) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupRetention.ProtoReflect.Descriptor instead.
+func (*BackupRetention) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *BackupRetention) GetKeepLast() int32 {
+	if x != nil {
+		return x.KeepLast
+	}
+	return 0
+}
+
+func (x *BackupRetention) GetKeepDaily() int32 {
+	if x != nil {
+		return x.KeepDaily
+	}
+	return 0
+}
+
+func (x *BackupRetention) GetKeepWeekly() int32 {
+	if x != nil {
+		return x.KeepWeekly
+	}
+	return 0
+}
+
+func (x *BackupRetention) GetKeepMonthly() int32 {
+	if x != nil {
+		return x.KeepMonthly
+	}
+	return 0
+}
+
+// BackupRequest tells an agent to capture a service's persistent data. The agent
+// runs against the service's compose workspace already on disk, so it ships no
+// compose. engine selects the capture method ("volume" tars named volumes,
+// "postgres" runs pg_dump in the DB container); store selects the destination
+// ("local" writes a file under target, "restic" snapshots into the target repo).
+// env carries backend credentials (RESTIC_PASSWORD, AWS_*, PGPASSWORD) resolved
+// from the secrets provider and injected into the process env — never persisted.
+type BackupRequest struct {
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	BackupId string                 `protobuf:"bytes,1,opt,name=backup_id,json=backupId,proto3" json:"backup_id,omitempty"`
+	Service  string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	Engine   string                 `protobuf:"bytes,3,opt,name=engine,proto3" json:"engine,omitempty"` // "volume" | "postgres"
+	Store    string                 `protobuf:"bytes,4,opt,name=store,proto3" json:"store,omitempty"`   // "local" | "restic"
+	Target   string                 `protobuf:"bytes,5,opt,name=target,proto3" json:"target,omitempty"` // local directory or restic repository
+	Env      map[string]string      `protobuf:"bytes,6,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Volumes optionally restricts a "volume" engine backup to these compose
+	// volume keys; empty means every named volume in the project.
+	Volumes []string `protobuf:"bytes,7,rep,name=volumes,proto3" json:"volumes,omitempty"`
+	// Postgres engine parameters. db_name empty => pg_dumpall (all databases +
+	// roles); otherwise pg_dump of that single database.
+	DbService     string           `protobuf:"bytes,8,opt,name=db_service,json=dbService,proto3" json:"db_service,omitempty"`
+	DbUser        string           `protobuf:"bytes,9,opt,name=db_user,json=dbUser,proto3" json:"db_user,omitempty"`
+	DbName        string           `protobuf:"bytes,10,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	Retention     *BackupRetention `protobuf:"bytes,11,opt,name=retention,proto3" json:"retention,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupRequest) Reset() {
+	*x = BackupRequest{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupRequest) ProtoMessage() {}
+
+func (x *BackupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupRequest.ProtoReflect.Descriptor instead.
+func (*BackupRequest) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *BackupRequest) GetBackupId() string {
+	if x != nil {
+		return x.BackupId
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetEngine() string {
+	if x != nil {
+		return x.Engine
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetStore() string {
+	if x != nil {
+		return x.Store
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *BackupRequest) GetVolumes() []string {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
+func (x *BackupRequest) GetDbService() string {
+	if x != nil {
+		return x.DbService
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetDbUser() string {
+	if x != nil {
+		return x.DbUser
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+func (x *BackupRequest) GetRetention() *BackupRetention {
+	if x != nil {
+		return x.Retention
+	}
+	return nil
+}
+
+// RestoreRequest tells an agent to restore a prior backup into a service. The
+// service's containers are stopped, the snapshot is restored into its volume (or
+// replayed into its database), then the containers are started again — restoring
+// data is always cold, never hot-swapped.
+type RestoreRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"` // id of this restore operation (for logs/audit)
+	Service       string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	Engine        string                 `protobuf:"bytes,3,opt,name=engine,proto3" json:"engine,omitempty"`
+	Store         string                 `protobuf:"bytes,4,opt,name=store,proto3" json:"store,omitempty"`
+	Target        string                 `protobuf:"bytes,5,opt,name=target,proto3" json:"target,omitempty"`
+	SnapshotId    string                 `protobuf:"bytes,6,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"` // restic snapshot id, or local filename
+	Env           map[string]string      `protobuf:"bytes,7,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	DbService     string                 `protobuf:"bytes,8,opt,name=db_service,json=dbService,proto3" json:"db_service,omitempty"`
+	DbUser        string                 `protobuf:"bytes,9,opt,name=db_user,json=dbUser,proto3" json:"db_user,omitempty"`
+	DbName        string                 `protobuf:"bytes,10,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestoreRequest) Reset() {
+	*x = RestoreRequest{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestoreRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestoreRequest) ProtoMessage() {}
+
+func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
+func (*RestoreRequest) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RestoreRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetEngine() string {
+	if x != nil {
+		return x.Engine
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetStore() string {
+	if x != nil {
+		return x.Store
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *RestoreRequest) GetDbService() string {
+	if x != nil {
+		return x.DbService
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetDbUser() string {
+	if x != nil {
+		return x.DbUser
+	}
+	return ""
+}
+
+func (x *RestoreRequest) GetDbName() string {
+	if x != nil {
+		return x.DbName
+	}
+	return ""
+}
+
+// BackupResult is the agent's terminal report for a backup or restore. operation
+// distinguishes the two ("backup" | "restore"); snapshot_id and size_bytes are
+// set on a successful backup.
+type BackupResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Operation     string                 `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"` // "backup" | "restore"
+	Status        BackupStatus           `protobuf:"varint,3,opt,name=status,proto3,enum=shuttle.v1.BackupStatus" json:"status,omitempty"`
+	SnapshotId    string                 `protobuf:"bytes,4,opt,name=snapshot_id,json=snapshotId,proto3" json:"snapshot_id,omitempty"`
+	SizeBytes     int64                  `protobuf:"varint,5,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Logs          []*LogLine             `protobuf:"bytes,6,rep,name=logs,proto3" json:"logs,omitempty"`
+	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BackupResult) Reset() {
+	*x = BackupResult{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BackupResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BackupResult) ProtoMessage() {}
+
+func (x *BackupResult) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
+func (*BackupResult) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *BackupResult) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *BackupResult) GetOperation() string {
+	if x != nil {
+		return x.Operation
+	}
+	return ""
+}
+
+func (x *BackupResult) GetStatus() BackupStatus {
+	if x != nil {
+		return x.Status
+	}
+	return BackupStatus_BACKUP_STATUS_UNSPECIFIED
+}
+
+func (x *BackupResult) GetSnapshotId() string {
+	if x != nil {
+		return x.SnapshotId
+	}
+	return ""
+}
+
+func (x *BackupResult) GetSizeBytes() int64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *BackupResult) GetLogs() []*LogLine {
+	if x != nil {
+		return x.Logs
+	}
+	return nil
+}
+
+func (x *BackupResult) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_shuttle_v1_deploy_proto protoreflect.FileDescriptor
 
 const file_shuttle_v1_deploy_proto_rawDesc = "" +
@@ -575,14 +1048,70 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"configJson\";\n" +
 	"\x13CaddyConfigResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error*\xb7\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x91\x01\n" +
+	"\x0fBackupRetention\x12\x1b\n" +
+	"\tkeep_last\x18\x01 \x01(\x05R\bkeepLast\x12\x1d\n" +
+	"\n" +
+	"keep_daily\x18\x02 \x01(\x05R\tkeepDaily\x12\x1f\n" +
+	"\vkeep_weekly\x18\x03 \x01(\x05R\n" +
+	"keepWeekly\x12!\n" +
+	"\fkeep_monthly\x18\x04 \x01(\x05R\vkeepMonthly\"\xa0\x03\n" +
+	"\rBackupRequest\x12\x1b\n" +
+	"\tbackup_id\x18\x01 \x01(\tR\bbackupId\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12\x16\n" +
+	"\x06engine\x18\x03 \x01(\tR\x06engine\x12\x14\n" +
+	"\x05store\x18\x04 \x01(\tR\x05store\x12\x16\n" +
+	"\x06target\x18\x05 \x01(\tR\x06target\x124\n" +
+	"\x03env\x18\x06 \x03(\v2\".shuttle.v1.BackupRequest.EnvEntryR\x03env\x12\x18\n" +
+	"\avolumes\x18\a \x03(\tR\avolumes\x12\x1d\n" +
+	"\n" +
+	"db_service\x18\b \x01(\tR\tdbService\x12\x17\n" +
+	"\adb_user\x18\t \x01(\tR\x06dbUser\x12\x17\n" +
+	"\adb_name\x18\n" +
+	" \x01(\tR\x06dbName\x129\n" +
+	"\tretention\x18\v \x01(\v2\x1b.shuttle.v1.BackupRetentionR\tretention\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf4\x02\n" +
+	"\x0eRestoreRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12\x16\n" +
+	"\x06engine\x18\x03 \x01(\tR\x06engine\x12\x14\n" +
+	"\x05store\x18\x04 \x01(\tR\x05store\x12\x16\n" +
+	"\x06target\x18\x05 \x01(\tR\x06target\x12\x1f\n" +
+	"\vsnapshot_id\x18\x06 \x01(\tR\n" +
+	"snapshotId\x125\n" +
+	"\x03env\x18\a \x03(\v2#.shuttle.v1.RestoreRequest.EnvEntryR\x03env\x12\x1d\n" +
+	"\n" +
+	"db_service\x18\b \x01(\tR\tdbService\x12\x17\n" +
+	"\adb_user\x18\t \x01(\tR\x06dbUser\x12\x17\n" +
+	"\adb_name\x18\n" +
+	" \x01(\tR\x06dbName\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x80\x02\n" +
+	"\fBackupResult\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1c\n" +
+	"\toperation\x18\x02 \x01(\tR\toperation\x120\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x18.shuttle.v1.BackupStatusR\x06status\x12\x1f\n" +
+	"\vsnapshot_id\x18\x04 \x01(\tR\n" +
+	"snapshotId\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x05 \x01(\x03R\tsizeBytes\x12'\n" +
+	"\x04logs\x18\x06 \x03(\v2\x13.shuttle.v1.LogLineR\x04logs\x12\x14\n" +
+	"\x05error\x18\a \x01(\tR\x05error*\xb7\x01\n" +
 	"\fDeployStatus\x12\x1d\n" +
 	"\x19DEPLOY_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15DEPLOY_STATUS_PENDING\x10\x01\x12\x19\n" +
 	"\x15DEPLOY_STATUS_RUNNING\x10\x02\x12\x19\n" +
 	"\x15DEPLOY_STATUS_SUCCESS\x10\x03\x12\x18\n" +
 	"\x14DEPLOY_STATUS_FAILED\x10\x04\x12\x1d\n" +
-	"\x19DEPLOY_STATUS_ROLLED_BACK\x10\x05B4Z2github.com/neikow/shuttle/gen/shuttle/v1;shuttlev1b\x06proto3"
+	"\x19DEPLOY_STATUS_ROLLED_BACK\x10\x05*}\n" +
+	"\fBackupStatus\x12\x1d\n" +
+	"\x19BACKUP_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15BACKUP_STATUS_RUNNING\x10\x01\x12\x19\n" +
+	"\x15BACKUP_STATUS_SUCCESS\x10\x02\x12\x18\n" +
+	"\x14BACKUP_STATUS_FAILED\x10\x03B4Z2github.com/neikow/shuttle/gen/shuttle/v1;shuttlev1b\x06proto3"
 
 var (
 	file_shuttle_v1_deploy_proto_rawDescOnce sync.Once
@@ -596,30 +1125,42 @@ func file_shuttle_v1_deploy_proto_rawDescGZIP() []byte {
 	return file_shuttle_v1_deploy_proto_rawDescData
 }
 
-var file_shuttle_v1_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_shuttle_v1_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(DeployStatus)(0),           // 0: shuttle.v1.DeployStatus
-	(*DeployRequest)(nil),       // 1: shuttle.v1.DeployRequest
-	(*RollbackRequest)(nil),     // 2: shuttle.v1.RollbackRequest
-	(*LogLine)(nil),             // 3: shuttle.v1.LogLine
-	(*DeployResponse)(nil),      // 4: shuttle.v1.DeployResponse
-	(*TeardownRequest)(nil),     // 5: shuttle.v1.TeardownRequest
-	(*CaddyConfigRequest)(nil),  // 6: shuttle.v1.CaddyConfigRequest
-	(*CaddyConfigResponse)(nil), // 7: shuttle.v1.CaddyConfigResponse
-	nil,                         // 8: shuttle.v1.DeployRequest.EnvEntry
-	nil,                         // 9: shuttle.v1.RollbackRequest.EnvEntry
+	(BackupStatus)(0),           // 1: shuttle.v1.BackupStatus
+	(*DeployRequest)(nil),       // 2: shuttle.v1.DeployRequest
+	(*RollbackRequest)(nil),     // 3: shuttle.v1.RollbackRequest
+	(*LogLine)(nil),             // 4: shuttle.v1.LogLine
+	(*DeployResponse)(nil),      // 5: shuttle.v1.DeployResponse
+	(*TeardownRequest)(nil),     // 6: shuttle.v1.TeardownRequest
+	(*CaddyConfigRequest)(nil),  // 7: shuttle.v1.CaddyConfigRequest
+	(*CaddyConfigResponse)(nil), // 8: shuttle.v1.CaddyConfigResponse
+	(*BackupRetention)(nil),     // 9: shuttle.v1.BackupRetention
+	(*BackupRequest)(nil),       // 10: shuttle.v1.BackupRequest
+	(*RestoreRequest)(nil),      // 11: shuttle.v1.RestoreRequest
+	(*BackupResult)(nil),        // 12: shuttle.v1.BackupResult
+	nil,                         // 13: shuttle.v1.DeployRequest.EnvEntry
+	nil,                         // 14: shuttle.v1.RollbackRequest.EnvEntry
+	nil,                         // 15: shuttle.v1.BackupRequest.EnvEntry
+	nil,                         // 16: shuttle.v1.RestoreRequest.EnvEntry
 }
 var file_shuttle_v1_deploy_proto_depIdxs = []int32{
-	8, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
-	9, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
-	0, // 2: shuttle.v1.DeployResponse.status:type_name -> shuttle.v1.DeployStatus
-	3, // 3: shuttle.v1.DeployResponse.logs:type_name -> shuttle.v1.LogLine
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	13, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
+	14, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
+	0,  // 2: shuttle.v1.DeployResponse.status:type_name -> shuttle.v1.DeployStatus
+	4,  // 3: shuttle.v1.DeployResponse.logs:type_name -> shuttle.v1.LogLine
+	15, // 4: shuttle.v1.BackupRequest.env:type_name -> shuttle.v1.BackupRequest.EnvEntry
+	9,  // 5: shuttle.v1.BackupRequest.retention:type_name -> shuttle.v1.BackupRetention
+	16, // 6: shuttle.v1.RestoreRequest.env:type_name -> shuttle.v1.RestoreRequest.EnvEntry
+	1,  // 7: shuttle.v1.BackupResult.status:type_name -> shuttle.v1.BackupStatus
+	4,  // 8: shuttle.v1.BackupResult.logs:type_name -> shuttle.v1.LogLine
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_deploy_proto_init() }
@@ -632,8 +1173,8 @@ func file_shuttle_v1_deploy_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shuttle_v1_deploy_proto_rawDesc), len(file_shuttle_v1_deploy_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   9,
+			NumEnums:      2,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

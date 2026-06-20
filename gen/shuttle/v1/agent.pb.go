@@ -30,6 +30,7 @@ type AgentEvent struct {
 	//	*AgentEvent_Heartbeat
 	//	*AgentEvent_DeployResult
 	//	*AgentEvent_ContainerState
+	//	*AgentEvent_BackupResult
 	Payload       isAgentEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -108,6 +109,15 @@ func (x *AgentEvent) GetContainerState() *ContainerState {
 	return nil
 }
 
+func (x *AgentEvent) GetBackupResult() *BackupResult {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentEvent_BackupResult); ok {
+			return x.BackupResult
+		}
+	}
+	return nil
+}
+
 type isAgentEvent_Payload interface {
 	isAgentEvent_Payload()
 }
@@ -128,6 +138,10 @@ type AgentEvent_ContainerState struct {
 	ContainerState *ContainerState `protobuf:"bytes,4,opt,name=container_state,json=containerState,proto3,oneof"`
 }
 
+type AgentEvent_BackupResult struct {
+	BackupResult *BackupResult `protobuf:"bytes,5,opt,name=backup_result,json=backupResult,proto3,oneof"`
+}
+
 func (*AgentEvent_Register) isAgentEvent_Payload() {}
 
 func (*AgentEvent_Heartbeat) isAgentEvent_Payload() {}
@@ -135,6 +149,8 @@ func (*AgentEvent_Heartbeat) isAgentEvent_Payload() {}
 func (*AgentEvent_DeployResult) isAgentEvent_Payload() {}
 
 func (*AgentEvent_ContainerState) isAgentEvent_Payload() {}
+
+func (*AgentEvent_BackupResult) isAgentEvent_Payload() {}
 
 // OrchestratorCommand is sent from orchestrator → agent (downward direction).
 type OrchestratorCommand struct {
@@ -145,6 +161,8 @@ type OrchestratorCommand struct {
 	//	*OrchestratorCommand_Rollback
 	//	*OrchestratorCommand_CaddyConfig
 	//	*OrchestratorCommand_Teardown
+	//	*OrchestratorCommand_Backup
+	//	*OrchestratorCommand_Restore
 	Payload       isOrchestratorCommand_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -223,6 +241,24 @@ func (x *OrchestratorCommand) GetTeardown() *TeardownRequest {
 	return nil
 }
 
+func (x *OrchestratorCommand) GetBackup() *BackupRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*OrchestratorCommand_Backup); ok {
+			return x.Backup
+		}
+	}
+	return nil
+}
+
+func (x *OrchestratorCommand) GetRestore() *RestoreRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*OrchestratorCommand_Restore); ok {
+			return x.Restore
+		}
+	}
+	return nil
+}
+
 type isOrchestratorCommand_Payload interface {
 	isOrchestratorCommand_Payload()
 }
@@ -243,6 +279,14 @@ type OrchestratorCommand_Teardown struct {
 	Teardown *TeardownRequest `protobuf:"bytes,4,opt,name=teardown,proto3,oneof"`
 }
 
+type OrchestratorCommand_Backup struct {
+	Backup *BackupRequest `protobuf:"bytes,5,opt,name=backup,proto3,oneof"`
+}
+
+type OrchestratorCommand_Restore struct {
+	Restore *RestoreRequest `protobuf:"bytes,6,opt,name=restore,proto3,oneof"`
+}
+
 func (*OrchestratorCommand_Deploy) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_Rollback) isOrchestratorCommand_Payload() {}
@@ -250,6 +294,10 @@ func (*OrchestratorCommand_Rollback) isOrchestratorCommand_Payload() {}
 func (*OrchestratorCommand_CaddyConfig) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_Teardown) isOrchestratorCommand_Payload() {}
+
+func (*OrchestratorCommand_Backup) isOrchestratorCommand_Payload() {}
+
+func (*OrchestratorCommand_Restore) isOrchestratorCommand_Payload() {}
 
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -428,19 +476,22 @@ var File_shuttle_v1_agent_proto protoreflect.FileDescriptor
 const file_shuttle_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x16shuttle/v1/agent.proto\x12\n" +
-	"shuttle.v1\x1a\x17shuttle/v1/deploy.proto\"\x93\x02\n" +
+	"shuttle.v1\x1a\x17shuttle/v1/deploy.proto\"\xd4\x02\n" +
 	"\n" +
 	"AgentEvent\x129\n" +
 	"\bregister\x18\x01 \x01(\v2\x1b.shuttle.v1.RegisterRequestH\x00R\bregister\x125\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x15.shuttle.v1.HeartbeatH\x00R\theartbeat\x12A\n" +
 	"\rdeploy_result\x18\x03 \x01(\v2\x1a.shuttle.v1.DeployResponseH\x00R\fdeployResult\x12E\n" +
-	"\x0fcontainer_state\x18\x04 \x01(\v2\x1a.shuttle.v1.ContainerStateH\x00R\x0econtainerStateB\t\n" +
-	"\apayload\"\x90\x02\n" +
+	"\x0fcontainer_state\x18\x04 \x01(\v2\x1a.shuttle.v1.ContainerStateH\x00R\x0econtainerState\x12?\n" +
+	"\rbackup_result\x18\x05 \x01(\v2\x18.shuttle.v1.BackupResultH\x00R\fbackupResultB\t\n" +
+	"\apayload\"\xfd\x02\n" +
 	"\x13OrchestratorCommand\x123\n" +
 	"\x06deploy\x18\x01 \x01(\v2\x19.shuttle.v1.DeployRequestH\x00R\x06deploy\x129\n" +
 	"\brollback\x18\x02 \x01(\v2\x1b.shuttle.v1.RollbackRequestH\x00R\brollback\x12C\n" +
 	"\fcaddy_config\x18\x03 \x01(\v2\x1e.shuttle.v1.CaddyConfigRequestH\x00R\vcaddyConfig\x129\n" +
-	"\bteardown\x18\x04 \x01(\v2\x1b.shuttle.v1.TeardownRequestH\x00R\bteardownB\t\n" +
+	"\bteardown\x18\x04 \x01(\v2\x1b.shuttle.v1.TeardownRequestH\x00R\bteardown\x123\n" +
+	"\x06backup\x18\x05 \x01(\v2\x19.shuttle.v1.BackupRequestH\x00R\x06backup\x126\n" +
+	"\arestore\x18\x06 \x01(\v2\x1a.shuttle.v1.RestoreRequestH\x00R\arestoreB\t\n" +
 	"\apayload\"J\n" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
@@ -477,27 +528,33 @@ var file_shuttle_v1_agent_proto_goTypes = []any{
 	(*Heartbeat)(nil),           // 3: shuttle.v1.Heartbeat
 	(*ContainerState)(nil),      // 4: shuttle.v1.ContainerState
 	(*DeployResponse)(nil),      // 5: shuttle.v1.DeployResponse
-	(*DeployRequest)(nil),       // 6: shuttle.v1.DeployRequest
-	(*RollbackRequest)(nil),     // 7: shuttle.v1.RollbackRequest
-	(*CaddyConfigRequest)(nil),  // 8: shuttle.v1.CaddyConfigRequest
-	(*TeardownRequest)(nil),     // 9: shuttle.v1.TeardownRequest
+	(*BackupResult)(nil),        // 6: shuttle.v1.BackupResult
+	(*DeployRequest)(nil),       // 7: shuttle.v1.DeployRequest
+	(*RollbackRequest)(nil),     // 8: shuttle.v1.RollbackRequest
+	(*CaddyConfigRequest)(nil),  // 9: shuttle.v1.CaddyConfigRequest
+	(*TeardownRequest)(nil),     // 10: shuttle.v1.TeardownRequest
+	(*BackupRequest)(nil),       // 11: shuttle.v1.BackupRequest
+	(*RestoreRequest)(nil),      // 12: shuttle.v1.RestoreRequest
 }
 var file_shuttle_v1_agent_proto_depIdxs = []int32{
-	2, // 0: shuttle.v1.AgentEvent.register:type_name -> shuttle.v1.RegisterRequest
-	3, // 1: shuttle.v1.AgentEvent.heartbeat:type_name -> shuttle.v1.Heartbeat
-	5, // 2: shuttle.v1.AgentEvent.deploy_result:type_name -> shuttle.v1.DeployResponse
-	4, // 3: shuttle.v1.AgentEvent.container_state:type_name -> shuttle.v1.ContainerState
-	6, // 4: shuttle.v1.OrchestratorCommand.deploy:type_name -> shuttle.v1.DeployRequest
-	7, // 5: shuttle.v1.OrchestratorCommand.rollback:type_name -> shuttle.v1.RollbackRequest
-	8, // 6: shuttle.v1.OrchestratorCommand.caddy_config:type_name -> shuttle.v1.CaddyConfigRequest
-	9, // 7: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
-	0, // 8: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
-	1, // 9: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
-	9, // [9:10] is the sub-list for method output_type
-	8, // [8:9] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	2,  // 0: shuttle.v1.AgentEvent.register:type_name -> shuttle.v1.RegisterRequest
+	3,  // 1: shuttle.v1.AgentEvent.heartbeat:type_name -> shuttle.v1.Heartbeat
+	5,  // 2: shuttle.v1.AgentEvent.deploy_result:type_name -> shuttle.v1.DeployResponse
+	4,  // 3: shuttle.v1.AgentEvent.container_state:type_name -> shuttle.v1.ContainerState
+	6,  // 4: shuttle.v1.AgentEvent.backup_result:type_name -> shuttle.v1.BackupResult
+	7,  // 5: shuttle.v1.OrchestratorCommand.deploy:type_name -> shuttle.v1.DeployRequest
+	8,  // 6: shuttle.v1.OrchestratorCommand.rollback:type_name -> shuttle.v1.RollbackRequest
+	9,  // 7: shuttle.v1.OrchestratorCommand.caddy_config:type_name -> shuttle.v1.CaddyConfigRequest
+	10, // 8: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
+	11, // 9: shuttle.v1.OrchestratorCommand.backup:type_name -> shuttle.v1.BackupRequest
+	12, // 10: shuttle.v1.OrchestratorCommand.restore:type_name -> shuttle.v1.RestoreRequest
+	0,  // 11: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
+	1,  // 12: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
+	12, // [12:13] is the sub-list for method output_type
+	11, // [11:12] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_agent_proto_init() }
@@ -511,12 +568,15 @@ func file_shuttle_v1_agent_proto_init() {
 		(*AgentEvent_Heartbeat)(nil),
 		(*AgentEvent_DeployResult)(nil),
 		(*AgentEvent_ContainerState)(nil),
+		(*AgentEvent_BackupResult)(nil),
 	}
 	file_shuttle_v1_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*OrchestratorCommand_Deploy)(nil),
 		(*OrchestratorCommand_Rollback)(nil),
 		(*OrchestratorCommand_CaddyConfig)(nil),
 		(*OrchestratorCommand_Teardown)(nil),
+		(*OrchestratorCommand_Backup)(nil),
+		(*OrchestratorCommand_Restore)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
