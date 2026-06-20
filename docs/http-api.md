@@ -77,6 +77,22 @@ curl -H "Authorization: Bearer $TOKEN" \
 Returns an array of deploy records (`deploy_id`, `service`, `host`, `sha`,
 `status`, `triggered_by`, timestamps).
 
+## `GET /deploys/{id}/logs`
+
+The captured output of one deploy or rollback (by `deploy_id`), in emission
+order. Read tier.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/deploys/1781969825034340000-1/logs"
+```
+
+Returns an array of log lines (`at`, `stream` = `stdout`/`stderr`, `text`). The
+agent batches a deploy's output into the final result, so this is a point-in-time
+read, not a live stream. An unknown id — or a deploy recorded before logs were
+stored, or one that failed before the agent ran — returns `[]`. Surfaced in the
+UI's Deploys tab via a per-row **Logs** button.
+
 ## `GET /audit`
 
 The control-plane audit log, newest first: who did what (deploy, rollback,

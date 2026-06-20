@@ -90,6 +90,7 @@ shuttle agent --driver synology --orchestrator … --host nas1
 | `GET  /healthz`                    | none   | Liveness probe                                   |
 | `GET  /metrics`                    | none   | Prometheus metrics                               |
 | `GET  /deploys`                    | bearer | List deploy ledger records                       |
+| `GET  /deploys/{id}/logs`          | bearer | Captured output of one deploy/rollback           |
 | `POST /deploy/{service}?sha=…`     | bearer | Manually deploy a service at a commit            |
 | `POST /rollback?service=…&steps=N` | bearer | Roll a service back N deploys                    |
 | `GET  /overview`                   | bearer | Host + service health snapshot (backs the UI)    |

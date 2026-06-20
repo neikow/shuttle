@@ -3,6 +3,7 @@ import type {
   CheckReport,
   ControlToken,
   CreatedToken,
+  DeployLog,
   DeployRecord,
   EnrollResult,
   Host,
@@ -51,6 +52,8 @@ export const api = {
     get<DeployRecord[] | null>(
       "/deploys" + (service ? `?service=${encodeURIComponent(service)}` : ""),
     ).then((d) => d ?? []),
+  deployLogs: (id: string) =>
+    get<DeployLog[] | null>(`/deploys/${encodeURIComponent(id)}/logs`).then((l) => l ?? []),
   hosts: () => get<Host[] | null>("/hosts").then((h) => h ?? []),
   plan: (ref?: string) =>
     get<PlanReport>("/plan" + (ref ? `?ref=${encodeURIComponent(ref)}` : "")),

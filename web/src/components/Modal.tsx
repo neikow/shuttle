@@ -9,11 +9,13 @@ export function Modal({
   onClose,
   children,
   footer,
+  wide,
 }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -34,7 +36,7 @@ export function Modal({
         aria-modal="true"
         aria-label={typeof title === "string" ? title : undefined}
         onClick={(e) => e.stopPropagation()}
-        className="w-96 max-w-full border border-[var(--color-border)] bg-[var(--color-panel)]"
+        className={`${wide ? "w-[52rem]" : "w-96"} max-w-full border border-[var(--color-border)] bg-[var(--color-panel)]`}
       >
         <div className="border-b border-[var(--color-border)] px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--color-muted)]">
           {title}
