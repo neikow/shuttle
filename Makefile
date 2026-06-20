@@ -1,9 +1,7 @@
-.PHONY: build build-ui web web-install web-dev web-test web-check test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
+.PHONY: build build-ui web web-install web-dev web-test web-check test test-unit test-integration lint proto clean dev-up dev-down dev-logs dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
-DEV_DIR := .dev
-AGENT_WORK_DIR = agent-work
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
@@ -79,42 +77,41 @@ certs:
 	openssl x509 -req -in certs/agent.csr -CA certs/ca.crt -CAkey certs/ca.key \
 		-CAcreateserial -out certs/agent.crt -days 3650
 
-# Scaffold a local git-driven dev environment: an editable IaC repo seeded from
-# examples/repo plus an orchestrator config wired to it (server TLS + token auth).
-# Re-runnable: it preserves an existing .dev/iac so your edits survive.
-dev-repo: build
-	@[ -f certs/ca.crt ] || $(MAKE) certs
-	@mkdir -p $(DEV_DIR)
-	@if [ ! -d $(DEV_DIR)/iac/.git ]; then \
-		rm -rf $(DEV_DIR)/iac; \
-		cp -r examples/repo $(DEV_DIR)/iac; \
-		git -C $(DEV_DIR)/iac init -q -b main; \
-		git -C $(DEV_DIR)/iac add -A; \
-		git -C $(DEV_DIR)/iac -c user.email=dev@shuttle.local -c user.name=shuttle-dev commit -qm "seed dev IaC repo"; \
-		echo "scaffolded $(DEV_DIR)/iac (git repo seeded from examples/repo)"; \
-	else \
-		echo "$(DEV_DIR)/iac already exists; leaving your edits intact"; \
-	fi
-	@sed -e "s|__REPO_URL__|file://$(abspath $(DEV_DIR))/iac|" \
-	     -e "s|__CERT_DIR__|$(abspath certs)|" \
-	     -e "s|__DEV_DIR__|$(abspath $(DEV_DIR))|" \
-	     deploy/config.dev.example.yml > $(DEV_DIR)/orchestrator.yml
-	@echo "wrote $(DEV_DIR)/orchestrator.yml"
-	@echo ""
-	@echo "Start the orchestrator:"
-	@echo "  ./$(BINARY) orchestrator --config $(DEV_DIR)/orchestrator.yml"
-	@echo "Enroll an agent (new terminal), then run the printed command + --ca certs/ca.crt:"
-	@echo "  ./$(BINARY) enroll --url http://127.0.0.1:8099 --token test-bearer"
-	@echo "  # add --caddy to the agent command to run a managed ingress sidecar"
-	@echo ""
-	@echo "Edit $(DEV_DIR)/iac (hosts.yaml, services/<name>/) and commit;"
-	@echo "the reconciler picks up new commits within ~60s. List deploys:"
-	@echo "  curl -s -H 'Authorization: Bearer test-bearer' http://127.0.0.1:8099/deploys"
+DEV_CLUSTER_DIR := .dev-cluster
+DEV_COMPOSE := deploy/docker-compose.dev.yml
 
-# Remove the scaffolded dev environment (repo, config, ledger data).
-dev-clean:
-	rm -rf $(DEV_DIR)
-	rm -rf $(AGENT_WORK_DIR)
+# One-command dev cluster: orchestrator + embedded UI + two SIMULATED REMOTE
+# HOSTS, each an isolated Docker-in-Docker daemon running a self-enrolling agent
+# that deploys into its own engine. Seeds an editable IaC git repo on first run.
+# UI: http://localhost:8080/ui/  (bearer token: test-bearer)
+dev-up:
+	@mkdir -p $(DEV_CLUSTER_DIR)
+	@if [ ! -d $(DEV_CLUSTER_DIR)/iac/.git ]; then \
+		rm -rf $(DEV_CLUSTER_DIR)/iac; \
+		cp -r deploy/dev/iac $(DEV_CLUSTER_DIR)/iac; \
+		git -C $(DEV_CLUSTER_DIR)/iac init -q -b main; \
+		git -C $(DEV_CLUSTER_DIR)/iac add -A; \
+		git -C $(DEV_CLUSTER_DIR)/iac -c user.email=dev@shuttle.local -c user.name=shuttle-dev commit -qm "seed dev cluster IaC"; \
+		echo "seeded $(DEV_CLUSTER_DIR)/iac"; \
+	else \
+		echo "$(DEV_CLUSTER_DIR)/iac already exists; leaving your edits intact"; \
+	fi
+	docker compose -f $(DEV_COMPOSE) up --build -d
+	@echo ""
+	@echo "Dev cluster up."
+	@echo "  UI:    http://localhost:8080/ui/   (paste token: test-bearer)"
+	@echo "  Hosts: web1, web2 — each an isolated Docker-in-Docker engine"
+	@echo "  Edit $(DEV_CLUSTER_DIR)/iac and commit; the reconciler deploys within ~60s."
+	@echo "  Logs:  make dev-logs     Tear down: make dev-down"
+
+# Follow logs from every cluster container.
+dev-logs:
+	docker compose -f $(DEV_COMPOSE) logs -f
+
+# Tear the cluster down and remove its volumes + seeded repo.
+dev-down:
+	docker compose -f $(DEV_COMPOSE) down -v
+	rm -rf $(DEV_CLUSTER_DIR)
 
 # Start the Gitea dev container for testing private repo auth.
 dev-gitea:

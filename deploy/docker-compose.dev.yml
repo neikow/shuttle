@@ -1,0 +1,73 @@
+# One-command dev cluster (drive it with `make dev-up`).
+#
+# orchestrator  — control plane + embedded UI (/ui/), wired to a local git IaC
+#                 repo bind-mounted at /iac.
+# host-web1/2   — simulated remote servers: each is an isolated Docker-in-Docker
+#                 daemon running a shuttle agent that self-enrolls over the
+#                 control plane and deploys into its OWN docker engine. This
+#                 mirrors real managed hosts far better than sharing the host
+#                 socket.
+#
+# UI: http://localhost:8080/ui/   (paste bearer token: test-bearer)
+name: shuttle-dev
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: deploy/dev/Dockerfile
+      target: orchestrator
+    command: ["orchestrator", "--config", "/etc/shuttle/config.yml"]
+    ports:
+      - "8080:8080" # HTTP control plane + UI
+      - "9090:9090" # gRPC (agents dial in)
+    volumes:
+      - ./dev/config.dev.yml:/etc/shuttle/config.yml:ro
+      - ../.dev-cluster/iac:/iac
+      - orch-data:/var/lib/shuttle
+    restart: unless-stopped
+
+  host-web1:
+    build:
+      context: ..
+      dockerfile: deploy/dev/Dockerfile
+      target: host
+    privileged: true # required to run an inner Docker daemon
+    environment:
+      HOST: web1
+      BEARER: test-bearer
+      ORCH_URL: http://orchestrator:8080
+      ORCH_GRPC: orchestrator:9090
+      DOCKER_TLS_CERTDIR: "" # inner daemon on the unix socket, no TLS
+    volumes:
+      - web1-docker:/var/lib/docker
+      - web1-work:/var/lib/shuttle-agent
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+  host-web2:
+    build:
+      context: ..
+      dockerfile: deploy/dev/Dockerfile
+      target: host
+    privileged: true
+    environment:
+      HOST: web2
+      BEARER: test-bearer
+      ORCH_URL: http://orchestrator:8080
+      ORCH_GRPC: orchestrator:9090
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - web2-docker:/var/lib/docker
+      - web2-work:/var/lib/shuttle-agent
+    depends_on:
+      - orchestrator
+    restart: unless-stopped
+
+volumes:
+  orch-data:
+  web1-docker:
+  web1-work:
+  web2-docker:
+  web2-work:

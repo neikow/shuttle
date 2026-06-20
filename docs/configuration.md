@@ -26,8 +26,8 @@ The orchestrator reads a YAML config file (`--config`, default `config.yml`).
 Parsing is **strict** — unknown keys are rejected. `bearer_token` is required;
 everything else has a default or disables a feature when empty.
 
-See `deploy/config.example.yml` (insecure dev) and `deploy/config.mtls.example.yml`
-(mTLS) for ready-to-edit templates.
+See `deploy/config.example.yml` for a ready-to-edit template (it documents the
+`grpc_tls_*` keys for server/mutual TLS inline).
 
 ## Keys
 

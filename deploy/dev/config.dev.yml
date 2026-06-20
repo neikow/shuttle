@@ -1,0 +1,25 @@
+# Orchestrator config for the one-command dev cluster (`make dev-up`).
+# Plaintext everywhere and a hard-coded bearer — DEV ONLY.
+bearer_token: "test-bearer"
+grpc_addr: ":9090"
+http_addr: ":8080"
+data_dir: /var/lib/shuttle
+
+# IaC repo bind-mounted at /iac (a git repo seeded by `make dev-up`). Edit the
+# host-side .dev-cluster/iac and commit; the reconciler pulls within ~60s.
+repo_url: "file:///iac"
+repo_branch: "main"
+webhook_secret: "dev-webhook-secret"
+
+# The demo services declare no env_schema, so no external secrets provider.
+secrets_provider: "none"
+
+# No Caddy in this loop.
+caddy_admin_url: ""
+
+# Token-auth enrollment over plaintext gRPC (logs a cleartext warning — fine for
+# dev). The simulated hosts self-enroll via POST /enroll, so the Enroll UI and
+# the full enroll -> redeem -> connect path are exercised end-to-end.
+agent_token_auth: true
+advertise_addr: "orchestrator:9090"
+advertise_control_url: "http://orchestrator:8080"
