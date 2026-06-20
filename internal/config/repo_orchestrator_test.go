@@ -123,6 +123,27 @@ func TestLoadRepoOrchestratorConfig_UnknownKey(t *testing.T) {
 	}
 }
 
+func TestLoadRepoOrchestratorConfig_CommentOnly(t *testing.T) {
+	// `shuttle init` scaffolds a comment-only orchestrator.yaml when there are no
+	// overrides; that's present-but-empty, not an error.
+	dir := t.TempDir()
+	write(t, dir, "orchestrator.yaml", "# no overrides yet\n# caddy_admin_url: ...\n")
+
+	cfg, ok, err := config.LoadRepoOrchestratorConfig(dir)
+	if err != nil {
+		t.Fatalf("comment-only file should not error, got %v", err)
+	}
+	if !ok {
+		t.Fatal("expected ok=true for present file")
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil empty cfg")
+	}
+	if cfg.CaddyAdminURL != "" {
+		t.Errorf("expected empty CaddyAdminURL, got %q", cfg.CaddyAdminURL)
+	}
+}
+
 func TestLoadRepoOrchestratorConfig_MalformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "orchestrator.yaml", `caddy_admin_url: {unclosed`)
