@@ -5,8 +5,9 @@ Shuttle is a single binary. Install it on your control host (to run
 `shuttle agent`). The same binary does both.
 
 ::: tip Just trying it out?
-You don't need to install anything — the [Quickstart](/guide/quickstart) runs the
-whole stack in containers from a `git clone`.
+Grab the binary below, then the [Quickstart](/guide/quickstart) gets a secure
+orchestrator and a running service on this machine in ~3 minutes via
+`shuttle init` — no cloud account, no cluster.
 :::
 
 ## Prebuilt binary (recommended)

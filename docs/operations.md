@@ -39,20 +39,25 @@ requires and verifies client certs; an insecure agent is rejected.
 
 ## Bootstrap with `shuttle init`
 
-`shuttle init` is an interactive wizard that sets up a complete orchestrator
-environment in one command. Run it once on the orchestrator server:
+`shuttle init` is an interactive, **secure-by-default** wizard that sets up a
+complete orchestrator environment in one command. Run it once on the orchestrator
+server:
 
 ```sh
 shuttle init [--dir /etc/shuttle]
 ```
 
-It prompts for:
+Press Enter through it and you get a secure setup; pick non-default answers for
+the advanced paths. It prompts for:
 
-- Orchestrator addresses, gRPC transport (insecure / server TLS + token / mTLS)
-- Bearer token and webhook secret (auto-generated if left blank)
-- IaC repo directory to scaffold, and an optional remote URL
+- Orchestrator addresses and the externally reachable control URL
+- Agent transport: **token enrollment over TLS** (default), mutual TLS, or
+  insecure. The token path can **generate a self-signed orchestrator cert** for
+  you (agents pin it on first use and receive it at enrollment — no CA to copy)
+- Bearer token and webhook secret (auto-generated if left blank, written 0600)
+- The IaC repo: a **starter** example service, an **empty** scaffold, or an
+  **existing** remote URL (no local scaffold)
 - Secrets provider (none or Infisical, with credentials written to `.env`)
-- Caddy admin URL and HTTPS-redirect toggle
 - Whether to write GitHub Actions workflows (deploy-on-push + PR plan-comment)
 
 Outputs:
@@ -60,11 +65,14 @@ Outputs:
 | File | Location | Notes |
 |------|----------|-------|
 | `config.yml` | `--dir` (default `.`) | Mode 0600; bootstrap secrets never go in git |
+| `certs/` | `--dir` | Self-signed orchestrator cert/key (token path, if generated); key 0600 |
 | `.env` | `--dir` | Mode 0600; Infisical creds; loaded at startup |
 | IaC git repo | prompted path | `hosts.yaml`, `services/`, `orchestrator.yaml`, optional `.github/workflows/` |
 
-Running `shuttle init` a second time in the same directory is safe — existing
-files are never overwritten.
+A **starter** repo with no remote points `repo_url` at the local repo via
+`file://`, so the orchestrator drives it directly — a real first deploy with
+nothing to push. Running `shuttle init` a second time in the same directory is
+safe: existing files (including a real cert) are never overwritten.
 
 ## Running on real hosts
 

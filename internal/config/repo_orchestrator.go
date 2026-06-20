@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -46,6 +47,12 @@ func LoadRepoOrchestratorConfig(repoDir string) (*RepoOrchestratorConfig, bool, 
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
+		// An empty or comment-only document (io.EOF) is valid: it declares no
+		// overrides. `shuttle init` scaffolds exactly such a file, so treat it as
+		// present-but-empty rather than a parse error.
+		if errors.Is(err, io.EOF) {
+			return &cfg, true, nil
+		}
 		return nil, true, fmt.Errorf("orchestrator.yaml: %w", err)
 	}
 	return &cfg, true, nil

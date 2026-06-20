@@ -12,16 +12,25 @@ the server you'll deploy to. The server needs Docker with Compose v2.
 ## 1. Bootstrap
 
 On your control host, run the wizard once. It generates a bearer token + webhook
-secret, writes `config.yml` and `.env` (mode 0600), and scaffolds an IaC repo:
+secret, writes `config.yml` (mode 0600), and scaffolds an IaC repo:
 
 ```sh
 shuttle init
 ```
 
-It asks for your orchestrator address, gRPC transport (insecure / server TLS +
-token / mTLS), secrets provider, and whether to write GitHub Actions workflows.
-Sensible defaults throughout — press Enter to accept. Re-running is safe; it never
+The wizard is **secure by default** — press Enter through it and you get TLS with
+SSH-like token enrollment, including a self-signed orchestrator cert generated for
+you (no `openssl`, no CA to distribute). It also asks for your control URL, the
+secrets provider, the repo to use (a starter example, an empty scaffold, or your
+own remote), and whether to write GitHub Actions workflows. Mutual TLS and an
+insecure local link are available if you pick them. Re-running is safe; it never
 overwrites your edits.
+
+::: tip Deploying to a remote server
+For a real host, set the **externally reachable control URL** to your public
+HTTPS endpoint (e.g. `https://orchestrator.example.com:8080`) when asked — `enroll`
+uses it to pin the orchestrator's cert in the join command, and CI reads it too.
+:::
 
 ::: details Prefer to write the config by hand?
 A minimal `config.yml`:
