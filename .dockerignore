@@ -1,0 +1,9 @@
+.git
+.dev
+.dev-cluster
+agent-work
+certs
+web/node_modules
+web/dist
+**/*.log
+/shuttle

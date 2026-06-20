@@ -1,0 +1,3 @@
+name: api
+host: web2
+update_policy: recreate

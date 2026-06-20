@@ -37,21 +37,20 @@ secret management, and multi-host fan-out.
 See [docs/architecture.md](docs/architecture.md) for the full design and the
 rationale behind each choice.
 
-## Quickstart (local dev stack)
+## Quickstart (local dev cluster)
 
-Brings up orchestrator + agent + Caddy with Docker Compose:
-
-```sh
-docker compose -f deploy/docker-compose.yml up --build
-```
-
-The HTTP control plane is on `:8080`, gRPC on `:9090`, Caddy admin on `:2019`.
-For a mutual-TLS link between orchestrator and agent:
+Brings up the orchestrator (with the embedded web UI) plus two **simulated
+remote hosts** — each an isolated Docker-in-Docker engine running a
+self-enrolling agent that deploys into its own engine:
 
 ```sh
-make certs
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.mtls.yml up --build
+make dev-up
 ```
+
+Open the UI at <http://localhost:8080/ui/> and paste the bearer token
+`test-bearer`. The HTTP control plane is on `:8080`, gRPC on `:9090`. Follow
+logs with `make dev-logs`; tear it down with `make dev-down`. See
+`docs/operations.md` for details (and mTLS).
 
 ## Build & test
 

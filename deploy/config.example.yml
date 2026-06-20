@@ -72,8 +72,7 @@ secrets_provider: "none"
 # gRPC TLS (optional). Unset here => the gRPC transport is insecure (dev only).
 #   cert + key      => orchestrator serves TLS (pair with agent_token_auth below).
 #   cert + key + ca => mutual TLS: agents must present a client cert.
-# For the mTLS dev stack use config.mtls.example.yml via docker-compose.mtls.yml
-# (run `make certs` first). To enable manually:
+# Run `make certs` to generate dev material, then set the keys below:
 # grpc_tls_cert: /etc/shuttle/certs/orchestrator.crt
 # grpc_tls_key: /etc/shuttle/certs/orchestrator.key
 # grpc_tls_ca: /etc/shuttle/certs/ca.crt

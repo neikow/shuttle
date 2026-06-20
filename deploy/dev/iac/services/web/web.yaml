@@ -1,0 +1,5 @@
+name: web
+host: web1
+# recreate keeps the dev loop simple (no Caddy needed for rolling); flip to
+# rolling to exercise the zero-downtime path.
+update_policy: recreate
