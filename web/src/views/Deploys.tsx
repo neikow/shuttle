@@ -1,6 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { Empty, Panel, Sha, StatusDot } from "../components/ui";
+import type { DeployRecord } from "../types";
+import { canDeploy } from "../role";
+import { useRole } from "../role-context";
+import { Button, Empty, Panel, Sha, StatusDot } from "../components/ui";
+import { ConfirmDialog } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 function ago(iso: string): string {
   const d = Date.now() - new Date(iso).getTime();
@@ -13,11 +19,33 @@ function ago(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+type Pending =
+  | { kind: "redeploy"; service: string; sha: string }
+  | { kind: "rollback"; service: string };
+
 export function Deploys() {
+  const role = useRole();
+  const mayDeploy = canDeploy(role);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [pending, setPending] = useState<Pending | null>(null);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["deploys"],
     queryFn: () => api.deploys(),
     refetchInterval: 5000,
+  });
+
+  const mut = useMutation({
+    mutationFn: (p: Pending) =>
+      p.kind === "redeploy" ? api.deploy(p.service, p.sha) : api.rollback(p.service, 1),
+    onSuccess: (_res, p) => {
+      toast.ok(`${p.kind === "redeploy" ? "Deploy" : "Rollback"} queued for ${p.service}.`);
+      setPending(null);
+      void qc.invalidateQueries({ queryKey: ["deploys"] });
+      void qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (e) => toast.err(`Failed: ${(e as Error).message}`),
   });
 
   return (
@@ -38,10 +66,11 @@ export function Deploys() {
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Trigger</th>
               <th className="px-3 py-2 font-medium">When</th>
+              {mayDeploy && <th className="px-3 py-2"></th>}
             </tr>
           </thead>
           <tbody>
-            {data.map((d) => (
+            {data.map((d: DeployRecord) => (
               <tr
                 key={d.DeployID}
                 className="border-b border-[var(--color-border)]/50 hover:bg-[var(--color-panel-2)]"
@@ -56,10 +85,49 @@ export function Deploys() {
                 </td>
                 <td className="px-3 py-2 text-[var(--color-muted)]">{d.TriggeredBy}</td>
                 <td className="px-3 py-2 text-[var(--color-muted)]">{ago(d.StartedAt)}</td>
+                {mayDeploy && (
+                  <td className="px-3 py-2 text-right">
+                    <span className="inline-flex gap-1.5">
+                      <Button
+                        onClick={() =>
+                          setPending({ kind: "redeploy", service: d.Service, sha: d.SHA })
+                        }
+                      >
+                        Redeploy
+                      </Button>
+                      <Button onClick={() => setPending({ kind: "rollback", service: d.Service })}>
+                        Rollback
+                      </Button>
+                    </span>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {pending && (
+        <ConfirmDialog
+          title={pending.kind === "redeploy" ? "Redeploy service" : "Rollback service"}
+          message={
+            pending.kind === "redeploy" ? (
+              <>
+                Redeploy <span className="font-medium">{pending.service}</span> at SHA{" "}
+                <code className="mono">{pending.sha.slice(0, 12)}</code>?
+              </>
+            ) : (
+              <>
+                Roll <span className="font-medium">{pending.service}</span> back one deploy (to the
+                previously-recorded SHA)?
+              </>
+            )
+          }
+          confirmLabel={pending.kind === "redeploy" ? "Redeploy" : "Rollback"}
+          busy={mut.isPending}
+          onConfirm={() => mut.mutate(pending)}
+          onCancel={() => setPending(null)}
+        />
       )}
     </Panel>
   );

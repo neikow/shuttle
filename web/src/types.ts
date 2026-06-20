@@ -74,6 +74,48 @@ export interface Overview {
   hosts: OverviewHost[];
 }
 
+// Resolved identity of the calling token (GET /whoami). name is empty for the
+// static bootstrap bearer.
+export interface WhoAmI {
+  name: string;
+  role: string;
+}
+
+// ControlToken marshals with the ledger's JSON tags (snake_case).
+export interface ControlToken {
+  id: string;
+  name: string;
+  role: string;
+  created_at: string;
+  revoked_at?: string;
+}
+
+// Returned once by POST /tokens — the plaintext token is only ever shown here.
+export interface CreatedToken {
+  id: string;
+  name: string;
+  role: string;
+  token: string;
+}
+
+// RepoWebhook has no server-side JSON tags, so it marshals with Go field names
+// (PascalCase), like DeployRecord.
+export interface RepoWebhook {
+  ID: string;
+  Service: string;
+  CreatedAt: string;
+}
+
+// EnrollResult is the POST /enroll response: a single-use join token bound to a
+// host. The SPKI cert pin can't be computed in-browser, so the full
+// `shuttle agent join` one-liner is assembled by the operator's CLI.
+export interface EnrollResult {
+  id: string;
+  host: string;
+  join_token: string;
+  expires_at_unix_ms: number;
+}
+
 export interface ShuttleEvent {
   type: string;
   service?: string;

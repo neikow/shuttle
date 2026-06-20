@@ -62,7 +62,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/deploy`, `/rollback`, `/deploys`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`). `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
@@ -450,20 +450,33 @@ These are deliberate. Don't reverse them without updating this file.
   bus's nil-safety lets the notifier be wholly optional (`NewNotifier` returns
   nil when no targets are configured, and `Run` is a no-op on nil).
 - **Service-specific deploy webhooks — 256-bit ID as the secret, no HMAC.** `POST /webhooks/repo` creates a webhook scoped to one service, returning a random 256-bit ID stored in the ledger (`repo_webhooks` table). `POST /webhook/repo/{id}` triggers a `ForceDeploy` of the bound service with no additional auth — the ID entropy is sufficient. This is the simplest integration point for external systems (container registries, third-party CI) that need to trigger a single-service redeploy without exposing the orchestrator bearer token. Managed via `EnableRepoWebhooks` (called only when git sync is configured).
-- **Web UI: embedded React SPA, build-tag-gated, read-only v1.** `web/` is a
-  Vite + TS + Tailwind-v4 + Radix dashboard (sharp aesthetic — radius forced near
-  0). It consumes the *existing* control-plane endpoints (`/deploys`, `/events`
-  SSE, `/plan`, `/check`, `/hosts`) — no new read backend. Shipped inside the
-  single binary via `//go:embed` behind the `embedui` build tag (`web/embed.go`
-  vs `embed_stub.go`), so a plain `go build ./...` needs no `web/dist` and the
-  default test/lint gate is unaffected; `make build-ui` and goreleaser build with
-  the tag after `make web`. `ui.go` serves the bundle **unauthenticated** under
-  `/ui/` (SPA fallback to `index.html`) — the API stays `bearerAuth`-protected
-  and the browser app authenticates its own calls with a token the user pastes
-  (kept in `localStorage`), matching the current static-bearer model (OIDC later).
-  SSE auth needs a header, which `EventSource` can't set, so the events view uses
-  `@microsoft/fetch-event-source`. Mutations (deploy/rollback/prune) are
-  deliberately **not** in v1.
+- **Web UI: embedded React SPA, build-tag-gated, with role-gated mutations.**
+  `web/` is a Vite + TS + Tailwind-v4 + Radix dashboard (sharp aesthetic — radius
+  forced near 0). It consumes the *existing* control-plane endpoints — no new read
+  backend — and now drives the existing RBAC'd **mutation** endpoints behind
+  role-gated screens. Shipped inside the single binary via `//go:embed` behind the
+  `embedui` build tag (`web/embed.go` vs `embed_stub.go`), so a plain `go build
+  ./...` needs no `web/dist` and the default Go test/lint gate is unaffected;
+  `make build-ui` and goreleaser build with the tag after `make web`. `ui.go`
+  serves the bundle **unauthenticated** under `/ui/` (SPA fallback to
+  `index.html`) — the API stays `requireRole`-protected and the browser app
+  authenticates its own calls with a token the user pastes (kept in
+  `localStorage`). SSE auth needs a header, which `EventSource` can't set, so the
+  events view uses `@microsoft/fetch-event-source`.
+  **Mutations are gated client-side by the caller's role** (`GET /whoami` →
+  `{name, role}`; `web/src/role.ts` mirrors the Go `read<deploy<admin` order):
+  operational actions — redeploy, rollback (Deploys/Plan), prune (Overview) — show
+  at the **deploy** tier; token CRUD, repo-webhook CRUD, and agent enrollment
+  (Tokens/Webhooks tabs + Hosts) show at the **admin** tier. This gating is
+  convenience only — `requireRole` is the real gate, so a forged role just earns a
+  401/403 on the request. None of the exposed mutations edit desired service
+  config, so the drift reconciler never fights the UI; **git write-back config
+  editing is deliberately out of scope** (a separate, larger feature). The
+  enrollment screen can't compute the server SPKI pin in-browser, so it surfaces
+  the join token + expiry and defers the fully-pinned one-liner to `shuttle
+  enroll`/`shuttle agent join`. Frontend has its own test gate (Vitest + React
+  Testing Library, `make web-test`), run in a dedicated CI `web` job; the role
+  matrix is also asserted end-to-end in `test/integration/ui_mutations_test.go`.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

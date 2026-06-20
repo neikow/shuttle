@@ -328,6 +328,7 @@ func NewHTTPServer(token string, store *ledger.Store, registry *Registry) *HTTPS
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
+	s.mux.HandleFunc("GET /whoami", s.requireRole(RoleRead, s.handleWhoami))
 	s.mux.HandleFunc("GET /overview", s.requireRole(RoleRead, s.handleOverview))
 	s.mux.HandleFunc("GET /deploys", s.requireRole(RoleRead, s.handleListDeploys))
 	s.mux.HandleFunc("GET /audit", s.requireRole(RoleRead, s.handleListAudit))
@@ -404,6 +405,19 @@ func (s *HTTPServer) handleReadyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+}
+
+// handleWhoami returns the resolved identity of the calling token: its name
+// (empty for the static bootstrap bearer) and role. The UI uses it to decide
+// which mutation screens and actions to show; server-side requireRole remains
+// the real gate. requireRole has already stashed the identity in the context.
+func (s *HTTPServer) handleWhoami(w http.ResponseWriter, r *http.Request) {
+	id, _ := identityFrom(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"name": id.Name,
+		"role": string(id.Role),
+	})
 }
 
 func (s *HTTPServer) handleListDeploys(w http.ResponseWriter, r *http.Request) {
