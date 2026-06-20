@@ -1,84 +1,83 @@
-# Quickstart
+# Quickstart — running in 3 minutes
 
-## Local dev stack
+Spin up a complete Shuttle environment — orchestrator, web UI, two managed hosts,
+and a live service instance — with **one command**. No cloud account, no config
+to write, nothing to enroll by hand.
 
-Bring up orchestrator + agent + Caddy with Docker Compose:
+## What you need
 
-```sh
-docker compose -f deploy/docker-compose.yml up --build
-```
+- **Docker** with Compose v2 (`docker compose version`)
+- **git**
 
-- HTTP control plane: `:8080`
-- gRPC (agents dial in): `:9090`
-- Caddy admin API: `:2019`
+That's it. You don't need Go installed — everything builds inside containers.
 
-The agent mounts the Docker socket so it can run compose deploys, and dials the
-orchestrator over an **insecure** gRPC channel (dev only). For a mutual-TLS link
-between orchestrator and agent:
+## 1. Get it running
 
 ```sh
-make certs
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.mtls.yml up --build
+git clone https://github.com/neikow/shuttle.git
+cd shuttle
+make dev-up
 ```
 
-See [Operations](/operations#local-dev-stack) for details.
+The first `make dev-up` builds the images (~2 min on a cold machine); after that
+it's seconds. When it finishes you have:
 
-## Build & test
+- an **orchestrator** + embedded **web UI** on <http://localhost:8080/ui/>
+- **two managed hosts** (`web1`, `web2`) — each an isolated Docker engine running
+  a self-enrolling agent, mirroring real remote servers
+- a seeded **IaC repo** at `.dev-cluster/iac/` declaring a sample `web` and `api`
+  service
+
+## 2. Watch your first instance come up
+
+Open <http://localhost:8080/ui/> and paste the token **`test-bearer`**.
+
+- The **Overview** tab shows `web1` and `web2` connecting.
+- Within ~60s the orchestrator pulls the IaC repo and deploys the sample `web`
+  service (a `traefik/whoami` container) onto `web1`. It flips to **running**.
+- The **Deploys** tab records the deploy in the append-only ledger.
+
+You now have an orchestrator and a running service instance. 🎉
+
+## 3. Change something and redeploy
+
+The IaC repo is just git. Edit a service, commit, and the reconciler rolls it out
+within ~60s — exactly how a real deploy works.
 
 ```sh
-make build          # -> ./shuttle (version stamped from git)
-make test           # go test -race ./internal/...
-make lint           # golangci-lint (v2)
-make proto          # regenerate gen/ from proto/ via buf
-make certs          # generate dev mTLS CA + orchestrator + agent certs
+cd .dev-cluster/iac
+
+# change the service's displayed name
+sed -i '' 's/web@web1/hello-shuttle/' services/web/docker-compose.yml   # macOS
+# (Linux: sed -i 's/web@web1/hello-shuttle/' services/web/docker-compose.yml)
+
+git commit -am "rename whoami instance"
 ```
 
-## Run
+Watch the **Deploys** tab: a new deploy appears, and the **Rollback** button next
+to the previous one will put it back with a single click.
+
+## 4. Tear it down
 
 ```sh
-# Bootstrap a new environment (interactive wizard)
-shuttle init
-
-# Orchestrator (reads config.yml; see deploy/config.example.yml)
-shuttle orchestrator --config /etc/shuttle/config.yml
-
-# Enroll a host: pick from the IaC repo's hosts, get a ready-to-run agent command
-shuttle enroll --url https://orch.example.com:8080 --token "$BEARER_TOKEN"
-
-# Agent (on a managed host; --host must match a name in hosts.yaml)
-shuttle agent --orchestrator orch.example.com:9090 --host web1 --token <token>   # token enrollment
-shuttle agent --orchestrator orch.example.com:9090 --host web1 \
-  --cert agent.crt --key agent.key --ca ca.crt          # mTLS (omit for insecure dev)
-
-# Synology DSM target
-shuttle agent --driver synology --orchestrator … --host nas1
+make dev-down
 ```
 
-## Web UI
+Removes the containers, their volumes, and the seeded repo.
 
-Build the binary with the embedded dashboard:
+## What just happened
 
-```sh
-make build-ui   # runs make web, then embeds web/dist (-tags embedui)
-```
+This is the full Shuttle pipeline, end to end:
 
-The UI is served under `/ui/` (unauthenticated static bundle; the browser
-authenticates its own API calls with the bearer token you paste into the UI).
-During development, `make web-dev` starts a Vite dev server that proxies API
-requests to a local orchestrator on `:8080`.
+1. You committed to the **IaC repo** → the orchestrator detected the new SHA.
+2. It diffed desired (repo) vs actual (ledger), **rendered** the service's compose
+   file, and dispatched it down the gRPC stream to the agent on `web1`.
+3. The **agent** ran `docker compose up` in its own engine and reported the result.
+4. The orchestrator recorded it in the **ledger** — which is what makes the
+   one-click rollback possible.
 
-## IaC repository layout
+See [How it works](/guide/getting-started#how-it-works) for the architecture, or
+go straight to a real deployment:
 
-```
-hosts.yaml                            # hosts + labels
-orchestrator.yaml                     # repo-managed orchestrator overrides (optional)
-services/<name>/<name>.yaml           # service def: host, domains, env, port
-services/<name>/docker-compose.yml    # local compose  (XOR with a remote pointer)
-```
-
-`orchestrator.yaml` lets you change Caddy settings, secrets paths, and Git
-credentials via a git commit — no orchestrator restart needed. See the
-[IaC repository schema](/iac-repo) for the full layout and
-[Configuration](/configuration#repo-managed-config-orchestratoryaml) for the
-config split. A working sample lives in
-[`examples/repo/`](https://github.com/neikow/shuttle/tree/main/examples/repo).
+- [Installation](/guide/installation) — install the `shuttle` binary or image.
+- [Deploy to a real host](/guide/first-deployment) — your own server, in minutes.

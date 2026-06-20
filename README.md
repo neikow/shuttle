@@ -49,8 +49,8 @@ make dev-up
 
 Open the UI at <http://localhost:8080/ui/> and paste the bearer token
 `test-bearer`. The HTTP control plane is on `:8080`, gRPC on `:9090`. Follow
-logs with `make dev-logs`; tear it down with `make dev-down`. See
-`docs/operations.md` for details (and mTLS).
+logs with `make dev-logs`; tear it down with `make dev-down`. Full walkthrough:
+the [3-minute Quickstart](https://neikow.github.io/shuttle/guide/quickstart).
 
 ## Build & test
 

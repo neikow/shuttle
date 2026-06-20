@@ -39,9 +39,9 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
+      { text: 'Quickstart', link: '/guide/quickstart' },
       { text: 'Guide', link: '/guide/getting-started' },
-      { text: 'Architecture', link: '/architecture' },
-      { text: 'API', link: '/http-api' },
+      { text: 'Reference', link: '/architecture' },
       {
         text: 'v0.1.0',
         items: [
@@ -59,10 +59,17 @@ export default defineConfig({
 
     sidebar: [
       {
-        text: 'Introduction',
+        text: 'Get started',
         items: [
           { text: 'What is Shuttle?', link: '/guide/getting-started' },
-          { text: 'Quickstart', link: '/guide/quickstart' },
+          { text: 'Quickstart (3 min)', link: '/guide/quickstart' },
+        ],
+      },
+      {
+        text: 'Go to production',
+        items: [
+          { text: 'Installation', link: '/guide/installation' },
+          { text: 'Deploy to a real host', link: '/guide/first-deployment' },
         ],
       },
       {

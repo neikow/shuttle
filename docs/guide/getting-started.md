@@ -1,17 +1,36 @@
 # What is Shuttle?
 
-Shuttle is a self-hosted, git-driven Infrastructure-as-Code deployment platform.
-It ships as a single Go binary that watches an IaC git repository and rolls
-changes out to your own hosts over Docker Compose — with an append-only deploy
-ledger, one-command rollback, drift detection, secrets injection, and automatic
-Caddy ingress.
+Shuttle deploys your apps to **your own servers** from a **git repository** — no
+SaaS, no control-plane bill, no Kubernetes. Push a commit, and your services roll
+out over Docker Compose with zero-downtime, a full deploy history, and one-click
+rollback.
 
-Think Portainer's spirit (own your infra, no SaaS), plus full rollback history,
-secret management, and multi-host fan-out.
+Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 
-::: tip Status
-**v0.1.0** — first release. The core pipeline works end-to-end.
+::: tip Want to see it first?
+[**Get a full environment running in 3 minutes →**](/guide/quickstart)
 :::
+
+## Why Shuttle
+
+- **You own everything.** Your servers, your data. The deploy history lives in a
+  single SQLite file you can back up with one command.
+- **Git is the source of truth.** Your infrastructure is a repo. A deploy is a
+  commit; a rollback is redeploying an older one.
+- **Zero-downtime by default.** New containers come up and pass health checks
+  *before* the old ones are removed — a bad deploy never takes you offline.
+- **Self-healing.** Agents report what's actually running; the orchestrator pulls
+  reality back to what the repo declares.
+- **No inbound holes.** Agents dial *out* to the orchestrator, so your managed
+  hosts need no open ports.
+- **One binary.** Everything ships as a single Go binary — `shuttle orchestrator`
+  on your control host, `shuttle agent` on each server.
+
+## Is it for me?
+
+Shuttle fits if you run a handful of services on a few VMs or a home lab and want
+git-driven deploys without operating Kubernetes or paying a PaaS. It's **not** a
+container scheduler — it deploys declared services to declared hosts, predictably.
 
 ## How it works
 
@@ -29,31 +48,19 @@ secret management, and multi-host fan-out.
                             Caddy Admin API ──► TLS ingress routes
 ```
 
-- **Orchestrator** is the brain: it pulls the IaC repo, diffs the desired state
-  against the deploy ledger, renders each service's compose + env (with
-  secrets), and dispatches deploy commands to agents. It also pushes ingress
-  routes to Caddy.
-- **Agents** are dumb executors. They dial *out* to the orchestrator (no inbound
-  firewall holes), receive rendered compose files, and shell out to
-  `docker compose`. They report container state back so the orchestrator can
-  detect and heal drift.
+- The **orchestrator** is the brain. It watches your IaC repo, figures out what
+  changed, renders each service's compose file + secrets, and tells agents what to
+  run. It also configures Caddy for HTTPS ingress.
+- **Agents** are dumb executors on each host. They dial out to the orchestrator,
+  receive a finished compose file, and run it — then report back what's running so
+  drift can be healed.
 
-See the [Architecture](/architecture) page for the full design and the rationale
-behind each decision.
-
-## A single binary, two subcommands
-
-One artifact to ship and version. The orchestrator/agent split is a runtime
-flag, not a separate build:
-
-```sh
-shuttle orchestrator --config /etc/shuttle/config.yml
-shuttle agent --orchestrator orch.example.com:9090 --host web1 --token <token>
-```
+Want the full design and the reasoning behind each choice? See the
+[Architecture](/architecture) reference.
 
 ## Next steps
 
-- [Quickstart](/guide/quickstart) — bring up a local dev cluster in one command.
-- [Configuration reference](/configuration) — every `config.yml` key.
-- [IaC repository schema](/iac-repo) — how to lay out your deploy repo.
-- [Operations](/operations) — running on real hosts, mTLS, enrollment, releases.
+1. [**Quickstart**](/guide/quickstart) — a complete environment in 3 minutes.
+2. [**Installation**](/guide/installation) — install the binary or container image.
+3. [**Deploy to a real host**](/guide/first-deployment) — orchestrator + your own
+   server, deploying your first service.
