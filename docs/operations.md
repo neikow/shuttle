@@ -172,6 +172,80 @@ match one. For production, issue certs from your own CA with matching SANs and
 distribute the agent cert/key/CA to each host. mTLS is **on** only when the
 orchestrator config sets all three `grpc_tls_*` keys.
 
+## Backups
+
+Shuttle backs up a service's **persistent data** (Docker volumes or a postgres
+dump), separate from `shuttle backup`, which snapshots the deploy *ledger*.
+
+Two pieces configure it:
+
+1. **Per-service policy** in the IaC repo (`backup:` in the service YAML) — the
+   engine (`volume`/`postgres`), schedule, retention, and `before_deploy`. See
+   [iac-repo.md](iac-repo.md).
+2. **Host wiring** in `config.yml` (`backups:`) — the backend credentials and the
+   store/target defaults services inherit. See
+   [configuration.md](configuration.md#backups).
+
+```yaml
+# config.yml
+backups:
+  default_store: restic
+  default_target: "s3:s3.amazonaws.com/my-bucket"
+  env:
+    - { key: RESTIC_PASSWORD, infisical_key: RESTIC_PASSWORD }
+    - { key: AWS_ACCESS_KEY_ID, infisical_key: AWS_ACCESS_KEY_ID }
+    - { key: AWS_SECRET_ACCESS_KEY, infisical_key: AWS_SECRET_ACCESS_KEY }
+```
+
+```yaml
+# services/db/db.yaml
+name: db
+host: data1
+backup:
+  engine: postgres
+  db_service: db          # compose service of the database container
+  db_user: postgres
+  schedule: daily
+  before_deploy: true
+  retention: { keep_daily: 7, keep_weekly: 4 }
+```
+
+**When backups run:**
+
+- **Scheduled** — a scheduler ticks (`backups.poll_interval`, default 5m) and
+  dispatches a service's backup once its `schedule` interval has elapsed.
+- **Before a deploy** — with `before_deploy: true`, a best-effort snapshot is
+  taken before each deploy/rollback (a 5-minute cooldown prevents a crash-loop
+  drift heal from snapshotting every tick).
+- **Manually** — on demand from the control plane.
+
+**Manage from the CLI** (talks to a running orchestrator):
+
+```sh
+shuttle backup-service db --url https://orchestrator:8080 --token $SHUTTLE_TOKEN
+shuttle backups --service db --url … --token …
+shuttle restore-service db --yes --url … --token …          # latest successful backup
+shuttle restore-service db --backup-id <id> --yes --url … --token …
+```
+
+`restore-service` is **destructive** (it overwrites live data) and admin-tier; it
+confirms unless `--yes` is passed. Restore is always cold: the service is stopped,
+the data is restored, then the service is started again.
+
+**Engines:**
+
+- `volume` — tars the project's named Docker volumes. With the restic store the
+  tars are uncompressed so restic dedups effectively across snapshots.
+- `postgres` — runs `pg_dump` (one database) or `pg_dumpall` (all + roles) inside
+  the DB container; `PGPASSWORD` is pulled automatically from the service's
+  secrets. The agent host needs the database client tools only inside the
+  container (it `docker exec`s them), not on the host.
+
+The agent needs Docker (for the helper containers that tar volumes and run
+`restic/restic`); nothing else is installed on the host. Backend credentials are
+passed to the helper containers via environment passthrough — never written to
+disk or the process arguments.
+
 ## Synology DSM target
 
 A Synology NAS runs the agent natively against **Container Manager** (DSM 7.2+):
