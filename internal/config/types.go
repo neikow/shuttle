@@ -76,6 +76,54 @@ type OrchestratorConfig struct {
 	// HTTP control plane, layered on top of the static bearer + named control
 	// tokens. Empty issuer disables it.
 	OIDC OIDCConfig `yaml:"oidc"`
+	// Backups configures service data backups: the backend credentials (resolved
+	// from the secrets provider and injected into the backup process env, never
+	// persisted), the default store/target services inherit, and the scheduler
+	// tick. Lives in config.yml — not the repo-managed orchestrator.yaml — because
+	// a restic password / S3 key is a secret reference that must not be committed
+	// to the IaC repo. Empty leaves backups disabled.
+	Backups BackupConfig `yaml:"backups"`
+}
+
+// BackupConfig is the orchestrator's bootstrap backup configuration. Per-service
+// backup *policy* (engine, schedule, retention) lives in the IaC repo; this is
+// the host-side wiring that policy can't carry: secret-resolved backend
+// credentials and the defaults services inherit.
+type BackupConfig struct {
+	// Env lists secret keys resolved from the provider and injected into every
+	// backup/restore process env (e.g. RESTIC_PASSWORD, AWS_ACCESS_KEY_ID). The
+	// values are fetched fresh per operation and never written to disk — mirrors
+	// the git_credentials model.
+	Env []BackupCredential `yaml:"env"`
+	// DefaultStore / DefaultTarget fill in a service's backup block when it omits
+	// store/target, so most services need only declare an engine + schedule.
+	DefaultStore  string `yaml:"default_store"`
+	DefaultTarget string `yaml:"default_target"`
+	// PollInterval is how often the backup scheduler checks for due scheduled
+	// backups (e.g. "5m"). Empty defaults to 5m. The per-service schedule decides
+	// whether a given service is actually due.
+	PollInterval string `yaml:"poll_interval"`
+}
+
+// BackupCredential references a secret to inject into the backup process env.
+// Mirrors GitCredential: the value is resolved from the secrets provider at
+// runtime, never stored in config.
+type BackupCredential struct {
+	// Key is the environment variable name set in the backup process (e.g.
+	// RESTIC_PASSWORD).
+	Key string `yaml:"key"`
+	// InfisicalKey is the secret key holding the value.
+	InfisicalKey string `yaml:"infisical_key"`
+	// InfisicalEnv and InfisicalPath optionally override the lookup scope. When
+	// empty, the provider's defaults are used.
+	InfisicalEnv  string `yaml:"infisical_env"`
+	InfisicalPath string `yaml:"infisical_path"`
+}
+
+// Enabled reports whether the backup subsystem is configured (any credential or
+// default target present).
+func (c BackupConfig) Enabled() bool {
+	return len(c.Env) > 0 || c.DefaultTarget != "" || c.DefaultStore != ""
 }
 
 // OIDCConfig configures OpenID Connect bearer-token authentication for the HTTP
@@ -191,6 +239,9 @@ type Service struct {
 	// UpdatePolicy is how the agent applies a deploy: "rolling" (default,
 	// zero-downtime) or "recreate". Canonicalized at load (never empty).
 	UpdatePolicy string
+	// Backup is the service's repo-managed backup policy, or nil when the
+	// service declares no `backup:` block.
+	Backup *ServiceBackup
 }
 
 // ServiceSource is either a local compose file or a remote pointer.
@@ -229,5 +280,6 @@ type serviceFile struct {
 	DeleteVolumes deleteVolumesPolicy `yaml:"delete_volumes"`
 	SecretPath    string              `yaml:"secret_path"`
 	UpdatePolicy  string              `yaml:"update_policy"`
+	Backup        *serviceBackup      `yaml:"backup"`
 	Remote        *RemotePointer      `yaml:"remote"`
 }
