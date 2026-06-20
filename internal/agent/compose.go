@@ -64,6 +64,13 @@ type Driver interface {
 	// named volumes are deleted too. A missing workspace is treated as success
 	// (nothing to tear down).
 	Down(ctx context.Context, service, workDir string, removeVolumes bool) (<-chan LogLine, error)
+	// Backup captures the service's persistent data (named volumes or a postgres
+	// dump) and stores it locally or in a restic repository. It returns the log
+	// stream and a single-value outcome channel delivered when the operation ends.
+	Backup(ctx context.Context, p BackupParams) (<-chan LogLine, <-chan BackupOutcome, error)
+	// Restore reverses a prior backup into the service (cold: stop, restore data,
+	// start).
+	Restore(ctx context.Context, p RestoreParams) (<-chan LogLine, <-chan BackupOutcome, error)
 }
 
 // ComposeDriver shells out to the Docker Compose CLI. The executable and the
