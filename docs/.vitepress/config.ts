@@ -43,7 +43,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Reference', link: '/architecture' },
       {
-        text: 'v0.2.0',
+        text: 'v0.3.0',
         items: [
           {
             text: 'Releases',
