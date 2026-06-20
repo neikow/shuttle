@@ -4,6 +4,53 @@ All notable changes to Shuttle are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-20
+
+An onboarding release. v0.3.0 makes the first five minutes secure *and* easy:
+`shuttle init` now defaults to an encrypted, authenticated setup and generates
+the TLS material itself, and a single verified command installs the binary.
+Backward compatible — existing configs, and the wizard's advanced paths, are
+unchanged.
+
+> Shuttle is **alpha**: the CLI, config, and HTTP API may still change between
+> releases without a deprecation path. Pin a version for anything you rely on.
+
+### Onboarding
+
+- **`shuttle init` is secure by default.** Pressing Enter through the wizard now
+  yields token enrollment over TLS — not an insecure demo. It **generates the
+  orchestrator's self-signed cert inline**, so there's no `openssl` / `make certs`
+  step and no CA to distribute: agents trust-on-first-use pin the cert and
+  receive it at enrollment.
+- **Pick your starting repo.** The wizard scaffolds a runnable **starter** repo
+  (a `whoami` service + a `local` host), an **empty** scaffold, or points at an
+  **existing** remote. A local starter with no remote self-drives via a `file://`
+  `repo_url`, so the very first deploy works with nothing to push.
+- **`config.yml` gains `advertise_control_url`**, so `shuttle enroll --config`
+  needs no `--url`.
+
+### Installation
+
+- **Verified one-line install:**
+  `curl -sSfL https://neikow.github.io/shuttle/install | bash`. It detects
+  OS/arch, always verifies the published SHA-256 checksum, and verifies the
+  keyless cosign signature when `cosign` is installed. Configurable via
+  `SHUTTLE_VERSION`, `SHUTTLE_INSTALL_DIR`, `SHUTTLE_OS` / `SHUTTLE_ARCH`, and
+  `SHUTTLE_NO_VERIFY`.
+
+### Fixes
+
+- A comment-only `orchestrator.yaml` (what `init` scaffolds) is now treated as
+  present-but-empty instead of logging an `orchestrator.yaml invalid` warning on
+  every reconcile.
+
+### Documentation
+
+- README rewritten around the project description, end-user install, and an easy
+  contributor onboarding; the guides (quickstart, first deployment, installation,
+  operations) now run through `shuttle init`.
+- **Alpha disclaimer** added across the README and docs.
+
 ## [0.2.0] - 2026-06-20
 
 A large maturity release. v0.1.0 proved the pipeline end to end; v0.2.0 makes it
@@ -110,5 +157,6 @@ back to an append-only SQLite ledger that powers rollback and drift detection.
 Includes mTLS, token enrollment, Caddy ingress, the Synology driver, and
 GoReleaser-published archives + images.
 
+[0.3.0]: https://github.com/neikow/shuttle/releases/tag/v0.3.0
 [0.2.0]: https://github.com/neikow/shuttle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/neikow/shuttle/releases/tag/v0.1.0
