@@ -1,4 +1,4 @@
-.PHONY: build build-ui web web-install web-dev test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
+.PHONY: build build-ui web web-install web-dev web-test web-check test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -26,6 +26,14 @@ web: web-install
 # Run the Vite dev server (proxies API calls to a local orchestrator on :8080).
 web-dev:
 	cd web && npm run dev
+
+# Run the frontend unit/component tests (Vitest + React Testing Library).
+web-test: web-install
+	cd web && npm run test
+
+# Typecheck + build the frontend (catches TS + bundling errors in CI).
+web-check: web-install
+	cd web && npm run build
 
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/shuttle

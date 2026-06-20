@@ -1,8 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { PlanAction } from "../types";
+import { canDeploy } from "../role";
+import { useRole } from "../role-context";
 import { Button, Empty, Panel, Sha } from "../components/ui";
+import { ConfirmDialog } from "../components/Modal";
+import { useToast } from "../components/Toast";
 
 const ACTION: Record<PlanAction, { sym: string; color: string }> = {
   create: { sym: "+", color: "var(--color-ok)" },
@@ -12,9 +16,25 @@ const ACTION: Record<PlanAction, { sym: string; color: string }> = {
 };
 
 export function Plan() {
+  const role = useRole();
+  const mayDeploy = canDeploy(role);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [pending, setPending] = useState<{ service: string; sha: string } | null>(null);
   const [ref, setRef] = useState("");
   const [submittedRef, setSubmittedRef] = useState<string | undefined>(undefined);
   const [tick, setTick] = useState(0);
+
+  const deployMut = useMutation({
+    mutationFn: (p: { service: string; sha: string }) => api.deploy(p.service, p.sha),
+    onSuccess: (_res, p) => {
+      toast.ok(`Deploy queued for ${p.service}.`);
+      setPending(null);
+      void qc.invalidateQueries({ queryKey: ["deploys"] });
+      void qc.invalidateQueries({ queryKey: ["overview"] });
+    },
+    onError: (e) => toast.err(`Deploy failed: ${(e as Error).message}`),
+  });
 
   const plan = useQuery({
     queryKey: ["plan", submittedRef, tick],
@@ -86,11 +106,20 @@ export function Plan() {
                 </span>
                 <span className="font-medium">{s.service}</span>
                 {s.host && <span className="text-[var(--color-muted)]">@{s.host}</span>}
-                {s.action === "update" && (
-                  <span className="ml-auto text-[var(--color-muted)]">
-                    <Sha value={s.current_sha} /> → <Sha value={s.desired_sha} />
-                  </span>
-                )}
+                <span className="ml-auto flex items-center gap-3">
+                  {s.action === "update" && (
+                    <span className="text-[var(--color-muted)]">
+                      <Sha value={s.current_sha} /> → <Sha value={s.desired_sha} />
+                    </span>
+                  )}
+                  {mayDeploy && (s.action === "create" || s.action === "update") && s.desired_sha && (
+                    <Button
+                      onClick={() => setPending({ service: s.service, sha: s.desired_sha! })}
+                    >
+                      Deploy
+                    </Button>
+                  )}
+                </span>
               </div>
             ))}
           </div>
@@ -135,6 +164,22 @@ export function Plan() {
           </div>
         )}
       </Panel>
+
+      {pending && (
+        <ConfirmDialog
+          title="Deploy service"
+          message={
+            <>
+              Deploy <span className="font-medium">{pending.service}</span> at SHA{" "}
+              <code className="mono">{pending.sha.slice(0, 12)}</code>?
+            </>
+          }
+          confirmLabel="Deploy"
+          busy={deployMut.isPending}
+          onConfirm={() => deployMut.mutate(pending)}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }
