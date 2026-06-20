@@ -90,6 +90,7 @@ OIDC is purely additive.
 | `roles_claim` | `groups` | Token claim read for role mapping. Its value may be a string or a list of strings. |
 | `role_mapping` | — (**required** with issuer) | Maps a value found in `roles_claim` to a role (`read`/`deploy`/`admin`). The highest-ranked matched role wins; a token mapping to nothing is authenticated but **403**. |
 | `username_claim` | `sub` | Claim used as the caller's identity (the audit actor). |
+| `scopes` | `openid profile email` | OAuth2 scopes the **web UI** requests during its browser login. Does not affect server-side verification — only what the SPA asks for so the ID token carries the claims (e.g. `groups`) this config maps. Advertised at `GET /auth/config`. |
 
 ```yaml
 oidc:
@@ -97,6 +98,7 @@ oidc:
   audience: "shuttle"
   roles_claim: "groups"
   username_claim: "email"
+  scopes: "openid profile email groups"
   role_mapping:
     shuttle-admins: admin
     shuttle-deployers: deploy
@@ -106,6 +108,18 @@ oidc:
 Your IdP must include Shuttle's `audience` in the token's `aud` and emit the
 configured `roles_claim`. OIDC verification only runs on JWT-shaped tokens, so
 the static bearer and control tokens are never affected.
+
+#### Web UI login
+
+When `oidc:` is set, the dashboard's login screen shows **Sign in with SSO**
+alongside the paste-a-token field. The browser reads the unauthenticated
+`GET /auth/config` (issuer, client ID, scopes), runs a standard Authorization
+Code + PKCE flow against your IdP (handled by `oidc-client-ts`), and uses the
+returned **ID token** as its bearer for every API call — so the UI honours the
+same role mapping and audit identity as the API. Register the UI's redirect URI
+with your IdP: the orchestrator's `/ui/` URL (e.g.
+`https://orchestrator.example.com/ui/`). The static bearer and control tokens
+still work in the same field for break-glass / CI access.
 
 ### Flag fallbacks
 

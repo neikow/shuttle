@@ -56,6 +56,30 @@ oidc:
 		return code == http.StatusOK
 	})
 
+	// The UI discovers OIDC via the unauthenticated GET /auth/config, which must
+	// advertise the issuer + client_id so the browser can run the PKCE flow.
+	{
+		code, body := httpDo(t, http.MethodGet, base+"/auth/config", "")
+		if code != http.StatusOK {
+			t.Fatalf("GET /auth/config: want 200, got %d: %s", code, body)
+		}
+		var ac struct {
+			OIDCEnabled bool   `json:"oidc_enabled"`
+			Issuer      string `json:"issuer"`
+			ClientID    string `json:"client_id"`
+			Scopes      string `json:"scopes"`
+		}
+		if err := json.Unmarshal([]byte(body), &ac); err != nil {
+			t.Fatalf("decode /auth/config: %v (%s)", err, body)
+		}
+		if !ac.OIDCEnabled || ac.Issuer != oidc.issuer || ac.ClientID != "shuttle" {
+			t.Fatalf("unexpected /auth/config: %+v", ac)
+		}
+		if ac.Scopes != "openid profile email" {
+			t.Fatalf("default scopes not advertised: %q", ac.Scopes)
+		}
+	}
+
 	adminJWT := oidc.mint(t, map[string]any{"sub": "u-admin", "email": "boss@corp.example", "groups": []string{"sh-admins"}})
 	readJWT := oidc.mint(t, map[string]any{"sub": "u-read", "email": "viewer@corp.example", "groups": []string{"sh-viewers"}})
 

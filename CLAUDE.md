@@ -56,7 +56,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
 | `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup, else OIDC JWT via `looksLikeJWT`+`SetOIDC`), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name / OIDC subject as actor. |
-| `oidc.go` | `OIDCAuthenticator`: per-user OpenID Connect auth. `NewOIDCAuthenticator` does discovery (`github.com/coreos/go-oidc`) against the issuer at boot; `verify` checks JWT signature/JWKS + issuer + `audience`, maps the `roles_claim` through `role_mapping`→`Role` (highest wins), identity = `username_claim`. The third source in `resolveRole`. |
+| `oidc.go` | `OIDCAuthenticator`: per-user OpenID Connect auth. `NewOIDCAuthenticator` does discovery (`github.com/coreos/go-oidc`) against the issuer at boot; `verify` checks JWT signature/JWKS + issuer + `audience`, maps the `roles_claim` through `role_mapping`→`Role` (highest wins), identity = `username_claim`. The third source in `resolveRole`. Also carries the non-secret `PublicConfig()` (issuer/client_id/scopes) served at `GET /auth/config` so the web UI can run a browser PKCE login. |
 | `control_tokens_http.go` | `POST /tokens` (mint, returns plaintext once), `GET /tokens` (list, no hashes), `DELETE /tokens/{id}` (revoke) — all admin-only; create/revoke audited (`token.create`/`token.revoke`). |
 | `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; per-agent build version; `Send(host, cmd)`; `Snapshot` (host, last-seen, version). |
@@ -64,7 +64,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/auth/config`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`, via `cspForUI` which adds the OIDC issuer origin to `connect-src` when OIDC is enabled so the SPA can reach the IdP). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `GET /auth/config` (unauthenticated) advertises the OIDC issuer/client_id/scopes so the UI can run a browser PKCE login. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
@@ -75,7 +75,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
-| `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with the pasted bearer token, so control-plane endpoints stay `bearerAuth`-protected. SPA fallback to `index.html` for client routes. |
+| `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with a bearer token — either pasted (static/control token) or obtained via the OIDC **Sign in with SSO** browser PKCE login (see the OIDC web-UI decision) — so control-plane endpoints stay `requireRole`-protected. SPA fallback to `index.html` for client routes. |
 | `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Consumed by the SSE stream (`/events`), metrics (`metrics.go`), and outbound notifications (`notify.go`). |
 
 ## Request flows
@@ -312,6 +312,25 @@ These are deliberate. Don't reverse them without updating this file.
   unreachable issuer fails the orchestrator at boot rather than silently denying
   every user. This realizes the per-user identity the RBAC/audit work was built
   toward; the role model and `requireRole` enforcement are reused unchanged.
+- **OIDC web-UI login = browser PKCE, ID token as bearer.** The API already
+  accepts an OIDC JWT as a bearer (the third `resolveRole` source above), so the
+  UI login is purely a *frontend* flow that obtains such a token. When `oidc:` is
+  configured, the dashboard's gate shows **Sign in with SSO** next to the
+  paste-token field. It reads the unauthenticated `GET /auth/config`
+  (issuer/client_id/scopes — `OIDCAuthenticator.PublicConfig`) and runs an
+  Authorization Code + **PKCE** flow via `oidc-client-ts` (a maintained,
+  security-reviewed library — same "don't hand-roll the crypto-adjacent bits"
+  stance as using coreos/go-oidc server-side), then uses the returned **ID
+  token** (`aud` = the configured audience/client_id, which is exactly what
+  `verify` checks) as the bearer for every API call — mirrored into the existing
+  `localStorage` token so the rest of the app is unchanged. The redirect URI is
+  the orchestrator's own `/ui/`. Two server-side seams were needed: the public
+  `GET /auth/config` advertiser, and relaxing the UI **CSP** `connect-src` to
+  include the issuer origin (`cspForUI`) so the browser may reach the IdP for
+  discovery + the token exchange (the login redirect itself is a top-level
+  navigation, not subject to `connect-src`). The static bearer + control tokens
+  still work in the same field for break-glass / CI. No silent token refresh in
+  v1 — an expired ID token earns a 401 and drops back to the gate.
 - **Audit log = append-only actor+action record, separate from the deploys
   ledger.** Every control-plane *mutation* (`deploy`, `rollback`, `prune`,
   `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`) writes an
@@ -476,9 +495,13 @@ These are deliberate. Don't reverse them without updating this file.
   `make build-ui` and goreleaser build with the tag after `make web`. `ui.go`
   serves the bundle **unauthenticated** under `/ui/` (SPA fallback to
   `index.html`) — the API stays `requireRole`-protected and the browser app
-  authenticates its own calls with a token the user pastes (kept in
-  `localStorage`). SSE auth needs a header, which `EventSource` can't set, so the
-  events view uses `@microsoft/fetch-event-source`.
+  authenticates its own calls with a bearer token kept in `localStorage`. That
+  token is either **pasted** (static bearer / control token) or obtained via
+  **Sign in with SSO** — an OIDC Authorization Code + PKCE browser login
+  (`oidc-client-ts`, gated on `GET /auth/config`) whose ID token becomes the
+  bearer (see the OIDC web-UI decision). SSE auth needs a header, which
+  `EventSource` can't set, so the events view uses
+  `@microsoft/fetch-event-source`.
   **Mutations are gated client-side by the caller's role** (`GET /whoami` →
   `{name, role}`; `web/src/role.ts` mirrors the Go `read<deploy<admin` order):
   operational actions — redeploy, rollback (Deploys/Plan), prune (Overview) — show
