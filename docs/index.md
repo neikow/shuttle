@@ -10,11 +10,11 @@ hero:
     that powers one-command rollback and drift detection.
   actions:
     - theme: brand
-      text: Get started
-      link: /guide/getting-started
-    - theme: alt
-      text: Quickstart
+      text: Get running in 3 minutes
       link: /guide/quickstart
+    - theme: alt
+      text: What is Shuttle?
+      link: /guide/getting-started
     - theme: alt
       text: View on GitHub
       link: https://github.com/neikow/shuttle
