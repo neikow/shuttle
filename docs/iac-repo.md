@@ -1,7 +1,7 @@
 # IaC repository schema
 
 The orchestrator deploys whatever this repository declares. A working sample
-lives in [`examples/repo/`](../examples/repo).
+lives in [`examples/repo/`](https://github.com/neikow/shuttle/tree/main/examples/repo).
 
 ## Layout
 

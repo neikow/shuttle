@@ -1,4 +1,4 @@
-.PHONY: build build-ui web web-install web-dev web-test web-check test test-unit test-integration lint proto clean dev-up dev-down dev-logs dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
+.PHONY: build build-ui web web-install web-dev web-test web-check docs docs-install docs-dev docs-build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
@@ -32,6 +32,21 @@ web-test: web-install
 # Typecheck + build the frontend (catches TS + bundling errors in CI).
 web-check: web-install
 	cd web && npm run build
+
+# Install the docs site deps (VitePress).
+docs-install:
+	cd docs && npm ci
+
+# Run the VitePress dev server (live-reload docs at http://localhost:5173/shuttle/).
+docs-dev: docs-install
+	cd docs && npm run docs:dev
+
+# Build the static docs site into docs/.vitepress/dist.
+docs-build: docs-install
+	cd docs && npm run docs:build
+
+# Alias: build the docs site.
+docs: docs-build
 
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/shuttle
