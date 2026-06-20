@@ -12,6 +12,10 @@ Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 > **Status: v0.2.0** — web dashboard, RBAC + OIDC, audit log, secrets,
 > zero-downtime deploys, observability, and a signed supply chain. See the
 > [changelog](CHANGELOG.md).
+>
+> ⚠️ **Alpha software.** It's tested and usable, but the CLI, config, and HTTP
+> API may change between releases without a deprecation path. Pin a version for
+> anything you rely on.
 
 ## Highlights
 
@@ -56,18 +60,23 @@ Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 
 ## Install
 
-Grab the binary for your platform (linux/darwin × amd64/arm64) from the
-[latest release](https://github.com/neikow/shuttle/releases/latest):
+The install script detects your platform, downloads the matching release,
+verifies its SHA-256 checksum (and the [cosign](https://docs.sigstore.dev/)
+signature when `cosign` is present), then installs the binary:
 
 ```sh
-VERSION=0.2.0
-curl -sSL "https://github.com/neikow/shuttle/releases/download/v${VERSION}/shuttle_${VERSION}_$(uname -s | tr A-Z a-z)_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
-  | tar -xz shuttle && sudo install shuttle /usr/local/bin/
-shuttle version
+curl -sSfL https://neikow.github.io/shuttle/install | bash
 ```
 
-Releases are [cosign](https://docs.sigstore.dev/)-signed and ship an SBOM. Other
-methods — container image, `go install`, building from source — are in the
+Configurable via env vars — `SHUTTLE_VERSION`, `SHUTTLE_INSTALL_DIR`,
+`SHUTTLE_OS`/`SHUTTLE_ARCH`:
+
+```sh
+curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_VERSION=0.2.0 bash
+```
+
+Releases ship an SBOM and keyless cosign signatures. Other methods — container
+image, `go install`, building from source, manual download — are in the
 [Installation guide](https://neikow.github.io/shuttle/guide/installation).
 
 ## Get running

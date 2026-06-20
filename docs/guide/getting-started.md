@@ -7,6 +7,12 @@ rollback.
 
 Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 
+::: warning Alpha software
+Shuttle is in **alpha**. It's tested and usable, but the CLI, config, and HTTP
+API may change between releases without a deprecation path. Pin a version for
+anything you rely on.
+:::
+
 ::: tip Want to see it first?
 [**Get a full environment running in 3 minutes →**](/guide/quickstart)
 :::
