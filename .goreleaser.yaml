@@ -4,9 +4,11 @@ project_name: shuttle
 before:
   hooks:
     - go mod download
-    # Build the React UI so the embedui tag can embed web/dist.
-    - cd web && npm ci
-    - cd web && npm run build
+    # Build the React UI so the embedui tag can embed web/dist. GoReleaser splits
+    # each hook into argv and execs it directly (no shell), so `cd web && …`
+    # would try to exec "cd"; wrap in `sh -c` to get a shell for the cd + chain.
+    - sh -c "cd web && npm ci"
+    - sh -c "cd web && npm run build"
 
 builds:
   - id: shuttle
