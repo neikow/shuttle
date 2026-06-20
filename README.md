@@ -8,7 +8,9 @@ rollback, drift detection, secrets injection, and automatic Caddy ingress.
 Think Portainer's spirit (own your infra, no SaaS), plus full rollback history,
 secret management, and multi-host fan-out.
 
-> Status: **v0.1.0** — first release. Core pipeline is working end-to-end.
+> Status: **v0.2.0** — maturity release: web dashboard, RBAC + OIDC, audit log,
+> secrets, zero-downtime deploys, observability, and a signed supply chain. See
+> the [changelog](CHANGELOG.md).
 
 ## How it works
 
