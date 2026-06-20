@@ -19,6 +19,8 @@ make build      # version-stamped binary (no embedded UI)
 make build-ui   # binary WITH the embedded web UI (runs `make web` first, -tags embedui)
 make web        # build the React UI into web/dist (npm ci + vite build)
 make web-dev    # Vite dev server, proxies API to a local orchestrator on :8080
+make web-test   # frontend unit/component tests (Vitest + RTL)
+make dev-up     # full dev cluster: orchestrator + UI + 2 Docker-in-Docker hosts (dev-down/dev-logs)
 make test       # go test -race ./internal/...   (unit; this is the default gate)
 make test-integration # go test -race -tags integration ./test/integration/... (real Docker; opt-in)
 make lint       # golangci-lint run ./...         (v2 config — see CI notes below)

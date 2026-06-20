@@ -1,0 +1,9 @@
+hosts:
+  - name: web1
+    labels:
+      region: eu-west
+      role: edge
+  - name: web2
+    labels:
+      region: us-east
+      role: edge

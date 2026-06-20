@@ -1,0 +1,6 @@
+services:
+  web:
+    image: traefik/whoami:latest
+    environment:
+      WHOAMI_NAME: web@web1
+    restart: unless-stopped

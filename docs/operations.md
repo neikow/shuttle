@@ -1,33 +1,41 @@
 # Operations
 
-How to run Shuttle: the dev stack, mTLS, real hosts, the Synology target, and
+How to run Shuttle: the dev cluster, mTLS, real hosts, the Synology target, and
 releases.
 
-## Local dev stack
+## Local dev cluster
 
-`deploy/docker-compose.yml` brings up orchestrator + agent + Caddy:
+`make dev-up` brings up a complete cluster: the orchestrator (with the embedded
+web UI) wired to a local git IaC repo, plus two **simulated remote hosts** —
+each an isolated Docker-in-Docker engine running a shuttle agent that
+self-enrolls over the control plane and deploys into its own engine. This
+mirrors real managed hosts far better than sharing the host's Docker socket.
 
 ```sh
-docker compose -f deploy/docker-compose.yml up --build
+make dev-up      # build + start; UI at http://localhost:8080/ui/ (token: test-bearer)
+make dev-logs    # follow every container's logs
+make dev-down    # stop + remove volumes and the seeded repo
 ```
 
-- HTTP control plane: `:8080`
+- HTTP control plane + UI: `:8080`
 - gRPC (agents dial in): `:9090`
-- Caddy admin API: `:2019`
 
-The agent mounts the Docker socket so it can run compose deploys, and dials the
-orchestrator over an **insecure** gRPC channel (dev only).
+The IaC repo is seeded to `.dev-cluster/iac`; edit it and commit, and the
+reconciler deploys the change within ~60s. The cluster runs over plaintext with
+a fixed bearer token — **dev only** (the hosts self-enroll via `POST /enroll`,
+which also exercises the enrollment flow end-to-end).
+
+Files: `deploy/docker-compose.dev.yml` + `deploy/dev/` (Dockerfile, host
+entrypoint, config, seed repo).
 
 ### With mTLS
 
-```sh
-make certs
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.mtls.yml up --build
-```
-
-The overlay swaps in `config.mtls.example.yml` (which sets `grpc_tls_*`) and
-passes the agent its client cert/key/CA. The orchestrator then requires and
-verifies client certs; an insecure agent is rejected.
+mTLS secures the orchestrator↔agent gRPC link in real deployments (the dev
+cluster above runs plaintext). Generate dev material with `make certs`, then set
+`grpc_tls_cert`/`grpc_tls_key` (server TLS) or add `grpc_tls_ca` (mutual TLS) in
+the orchestrator config — see the commented keys in `deploy/config.example.yml`.
+Agents then dial with `--cert/--key/--ca`. With mutual TLS the orchestrator
+requires and verifies client certs; an insecure agent is rejected.
 
 ## Bootstrap with `shuttle init`
 
