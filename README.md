@@ -158,6 +158,7 @@ VitePress; `make docs-dev` to preview locally).
 - [Architecture & design decisions](https://neikow.github.io/shuttle/architecture)
 - [Configuration reference](https://neikow.github.io/shuttle/configuration)
 - [IaC repository schema](https://neikow.github.io/shuttle/iac-repo)
+- [Editor support (language server + VS Code)](https://neikow.github.io/shuttle/editor)
 - [HTTP API reference](https://neikow.github.io/shuttle/http-api)
 - [Operations: deploying, mTLS, Synology, releases](https://neikow.github.io/shuttle/operations)
 
