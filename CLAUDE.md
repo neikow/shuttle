@@ -621,21 +621,30 @@ These are deliberate. Don't reverse them without updating this file.
   YAML files, shipped as a subcommand of the one binary (consistent with the
   single-artifact design — no separate language-server binary to version). It is
   built **on `internal/config`, not a duplicate schema**: diagnostics come from the
-  same strict decoder the loader uses (`ValidateBytes`), and completion keys come
-  from **reflection over the config structs** (`FieldNamesAt`), so the editor can
-  never drift from what the orchestrator accepts — adding a field to a struct
-  surfaces in completion for free. The JSON-RPC/LSP transport is **hand-rolled**
-  (stdio framing + the ~6 methods an editor needs) rather than pulling an LSP
-  framework, matching the project's minimal-dep bias (like the dotenv parser and
-  migration runner). Validation is **single-file and disk-free** so it runs on the
-  unsaved buffer; cross-file *references* (host/cert/provider names) are read from
-  sibling files on disk for completion, but whole-repo referential *diagnostics*
-  (a full `config.Load`) are deliberately deferred — single-file strict decode
-  already catches the common typo/unknown-key/syntax errors with positions. The
-  VS Code client (`editors/vscode/`) is a thin `vscode-languageclient` wrapper that
-  just launches `shuttle lsp`; highlighting stays VS Code's built-in YAML. `config.yml`
-  is excluded from the client's default selector (name too generic) though the
-  server handles it.
+  same strict decoder the loader uses (`ValidateBytes`), and completion keys + types
+  come from **reflection over the config structs** (`FieldNamesAt`/`FieldsAt`), so
+  the editor can never drift from what the orchestrator accepts — adding a field to a
+  struct surfaces in completion for free. Beyond the strict decode (unknown
+  keys/type mismatches/syntax), `ValidateBytes` runs a **node-based semantic pass**
+  (`config/semantic.go`) that the decode can't catch — invalid **enum** values,
+  missing **required** fields, and **intra-file** references (a `dns.yml` certificate
+  naming an undeclared provider) — positioned from the YAML node tree, with the
+  allowed value sets and required-key map living in `config/enums.go` (one source
+  shared by validation *and* completion). The JSON-RPC/LSP transport is
+  **hand-rolled** (stdio framing + the ~6 methods an editor needs) rather than
+  pulling an LSP framework, matching the project's minimal-dep bias (like the dotenv
+  parser and migration runner). The transport selector arg some clients append
+  (`--stdio`) is accepted as a no-op flag on `shuttle lsp` so the spawn doesn't fail.
+  `ValidateBytes` stays **single-file and disk-free** so it runs on the unsaved
+  buffer; **cross-file** *references* that need sibling files (a service `host` in
+  `hosts.yaml`, a `tls_certificate` in `dns.yml`) are checked in the **lsp layer**
+  (`lsp/references.go`, reading the siblings the same way completion does, skipped
+  when the sibling is absent so a standalone edit isn't false-flagged), keeping
+  `config` disk-free. A whole-repo `config.Load`-backed diagnostic (e.g. the
+  compose-source XOR, secret resolution) is still deferred. The VS Code client
+  (`editors/vscode/`) is a thin `vscode-languageclient` wrapper that just launches
+  `shuttle lsp`; highlighting stays VS Code's built-in YAML. `config.yml` is excluded
+  from the client's default selector (name too generic) though the server handles it.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

@@ -20,14 +20,22 @@ type.
 - **Completion**
   - field names valid at the cursor's nesting (e.g. top-level service keys, or the
     keys inside an `external:` / `backup:` block, or a `dns.yml` provider/certificate
-    item);
+    item), with each item's **type** and a `(required)` marker, and keys already
+    present in the block filtered out;
   - enum values — `update_policy` (`rolling`/`recreate`), `delete_volumes`, a dns
-    provider `type` (`ovh`), `secrets_provider`, a notification `type`, …;
+    provider `type` (`ovh`), `secrets_provider`, a notification `type`, `backup`
+    `engine`/`store`, … — plus `true`/`false` for any boolean field;
   - cross-file references — `host:` completes from `hosts.yaml`, `tls_certificate:`
     from `dns.yml`, and a certificate's `provider:` from the providers in the same
     file.
-- **Diagnostics** — unknown keys, type mismatches, and YAML syntax errors, live on
-  every edit (single-file; it runs on the unsaved buffer).
+- **Diagnostics**, live on every edit (single-file; it runs on the unsaved buffer):
+  - unknown keys, type mismatches, and YAML syntax errors;
+  - invalid enum values (e.g. `update_policy: bogus`) and missing required fields
+    (a service with no `name`/`host`, a notification with no `url`, …);
+  - references — a `dns.yml` certificate naming an undeclared `provider`, and
+    (reading the sibling files) a service `host` not in `hosts.yaml` or a
+    `tls_certificate` not in `dns.yml`. A cross-file check is skipped when its
+    sibling file isn't found, so editing a service in isolation never false-flags.
 
 Syntax highlighting is your editor's built-in YAML highlighting — the language
 server adds the Shuttle-specific intelligence on top.
@@ -62,3 +70,27 @@ understood, but isn't claimed by default because the name is generic.
 stdio is the only transport. Clients that append a `--stdio` argument to select
 it (e.g. `vscode-languageclient`) work as-is — `shuttle lsp` accepts the flag as
 a no-op.
+
+## Troubleshooting
+
+- **`shuttle lsp` prints nothing when run by hand.** That's expected — it waits
+  for an LSP client to send framed JSON-RPC on stdin. It isn't meant to be run
+  interactively. To smoke-test the binary:
+
+  ```sh
+  printf 'Content-Length: 58\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | shuttle lsp
+  ```
+
+  A healthy server replies with a `Content-Length` header and an `initialize`
+  result naming `shuttle-lsp`.
+
+- **Is the VS Code client running?** The extension activates on opening a YAML
+  file and only attaches to the IaC files above, so open e.g. a
+  `services/<name>/<name>.yaml` first. The "Shuttle IaC" output channel is created
+  lazily on the first log line, so a healthy idle server may show **no** channel —
+  set `"shuttle.trace.server": "verbose"` to force JSON-RPC tracing into the
+  channel, or just check **Developer: Show Running Extensions**.
+
+- **Server fails to start / "unknown flag".** Make sure the `shuttle` binary
+  invoked by the client is recent. On macOS a GUI-launched VS Code may not inherit
+  your shell `PATH`, so set `shuttle.lsp.path` to an absolute path.
