@@ -84,8 +84,10 @@ func RoutesForHost(repo *config.Repo, host string) ([]CaddyRoute, error) {
 
 // HostCaddyConfigJSON builds the Caddy JSON config a host's sidecar should run,
 // or (nil, false) when the host has no routable services. httpPort/httpsPort are
-// the ports the sidecar listens on (default 80/443 when 0).
-func HostCaddyConfigJSON(repo *config.Repo, host string, httpsRedirect bool, httpPort, httpsPort int) ([]byte, bool, error) {
+// the ports the sidecar listens on (default 80/443 when 0); tlsPolicies are the
+// resolved DNS-challenge automation policies relevant to this host (nil for the
+// default per-domain HTTP-01 behavior).
+func HostCaddyConfigJSON(repo *config.Repo, host string, httpsRedirect bool, httpPort, httpsPort int, tlsPolicies []map[string]any) ([]byte, bool, error) {
 	routes, err := RoutesForHost(repo, host)
 	if err != nil {
 		return nil, false, err
@@ -93,7 +95,7 @@ func HostCaddyConfigJSON(repo *config.Repo, host string, httpsRedirect bool, htt
 	if len(routes) == 0 {
 		return nil, false, nil
 	}
-	data, err := json.Marshal(buildCaddyConfig(routes, httpsRedirect, httpPort, httpsPort))
+	data, err := json.Marshal(buildCaddyConfig(routes, httpsRedirect, httpPort, httpsPort, tlsPolicies))
 	if err != nil {
 		return nil, false, err
 	}
@@ -113,12 +115,13 @@ func parseSnippet(snippet string) ([]any, error) {
 	return handlers, nil
 }
 
-// ApplyRoutes replaces the entire Caddy config with the given routes.
-// Each route: HTTPS + auto-TLS via Let's Encrypt.
-func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute, httpsRedirect bool) error {
-	// The central Caddy (caddy_admin_url) is not host-scoped, so it keeps the
-	// standard ports; per-host ports apply only to agent sidecars.
-	cfg := buildCaddyConfig(routes, httpsRedirect, config.DefaultCaddyHTTPPort, config.DefaultCaddyHTTPSPort)
+// ApplyRoutes replaces the entire Caddy config with the given routes. Each route
+// gets HTTPS + auto-TLS: DNS-challenge issuance for domains covered by
+// tlsPolicies, else per-domain Let's Encrypt (HTTP-01). The central Caddy
+// (caddy_admin_url) is not host-scoped, so it keeps the standard 80/443 ports;
+// per-host ports apply only to agent sidecars.
+func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute, httpsRedirect bool, tlsPolicies []map[string]any) error {
+	cfg := buildCaddyConfig(routes, httpsRedirect, config.DefaultCaddyHTTPPort, config.DefaultCaddyHTTPSPort, tlsPolicies)
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
@@ -140,14 +143,17 @@ func (c *CaddyClient) ApplyRoutes(ctx context.Context, routes []CaddyRoute, http
 	return nil
 }
 
-// buildCaddyConfig produces a minimal Caddy JSON config for the given routes.
 // httpPort/httpsPort are the ports Caddy listens on (default 80/443 when 0).
 // When httpsRedirect is true, the app server listens on the HTTPS port only, so
 // Caddy's automatic HTTPS stands up its own HTTP-port server that 308-redirects
 // to HTTPS (and still serves ACME HTTP-01 challenges). When false, the server
 // also listens on the HTTP port and serves plaintext directly — claiming it
 // suppresses the auto-redirect.
-func buildCaddyConfig(routes []CaddyRoute, httpsRedirect bool, httpPort, httpsPort int) map[string]any {
+//
+// tlsPolicies, when non-empty, add an `apps.tls.automation` block so the listed
+// subjects (incl. wildcards) are issued via a DNS-01 challenge; domains not
+// covered by any policy keep Caddy's default automation (per-domain HTTP-01).
+func buildCaddyConfig(routes []CaddyRoute, httpsRedirect bool, httpPort, httpsPort int, tlsPolicies []map[string]any) map[string]any {
 	if httpPort == 0 {
 		httpPort = config.DefaultCaddyHTTPPort
 	}
@@ -177,21 +183,31 @@ func buildCaddyConfig(routes []CaddyRoute, httpsRedirect bool, httpPort, httpsPo
 		})
 	}
 
-	// No explicit tls block: every route matches specific domains, so Caddy's
-	// automatic HTTPS provisions certs for those hostnames (Let's Encrypt for
-	// public domains, an internal CA for *.localhost). on-demand TLS is avoided
-	// because it requires a separate permission module.
-	return map[string]any{
-		"admin": map[string]any{"disabled": false},
-		"apps": map[string]any{
-			"http": map[string]any{
-				"servers": map[string]any{
-					"shuttle": map[string]any{
-						"listen": listen,
-						"routes": servers,
-					},
+	// Without a tls block, every route matches specific domains so Caddy's
+	// automatic HTTPS provisions certs for those hostnames over HTTP-01 (Let's
+	// Encrypt for public domains, an internal CA for *.localhost). A DNS-managed
+	// certificate instead contributes an automation policy (DNS-01), which is what
+	// lets a wildcard be issued. on-demand TLS is avoided (needs a permission
+	// module).
+	apps := map[string]any{
+		"http": map[string]any{
+			"servers": map[string]any{
+				"shuttle": map[string]any{
+					"listen": listen,
+					"routes": servers,
 				},
 			},
 		},
+	}
+	if len(tlsPolicies) > 0 {
+		apps["tls"] = map[string]any{
+			"automation": map[string]any{
+				"policies": tlsPolicies,
+			},
+		}
+	}
+	return map[string]any{
+		"admin": map[string]any{"disabled": false},
+		"apps":  apps,
 	}
 }
