@@ -16,6 +16,7 @@ type CheckReport struct {
 	SHA            string                     `json:"sha"`
 	HasProvider    bool                       `json:"has_provider"`
 	GitCredentials []GitCredentialCheckResult `json:"git_credentials,omitempty"`
+	DNSProviders   []DNSCredentialCheckResult `json:"dns_providers,omitempty"`
 	Services       []ServiceCheck             `json:"services,omitempty"`
 }
 
@@ -39,10 +40,16 @@ type ServiceCheck struct {
 // Warnings do not fail the check.
 func (s ServiceCheck) OK() bool { return s.Err == "" && len(s.MissingKeys) == 0 }
 
-// OK reports whether every service and git credential in the report passed.
+// OK reports whether every service, git credential, and DNS provider in the
+// report passed.
 func (r *CheckReport) OK() bool {
 	for _, gc := range r.GitCredentials {
 		if gc.Err != "" {
+			return false
+		}
+	}
+	for _, dp := range r.DNSProviders {
+		if dp.Err != "" {
 			return false
 		}
 	}
@@ -52,6 +59,41 @@ func (r *CheckReport) OK() bool {
 		}
 	}
 	return true
+}
+
+// DNSCredentialCheckResult is the per-provider outcome of CheckDNSCredentials:
+// whether every credential the DNS provider declares resolves in the secrets
+// provider. Err names the first failing credential.
+type DNSCredentialCheckResult struct {
+	Provider string `json:"provider"`
+	Type     string `json:"type"`
+	Err      string `json:"error,omitempty"`
+}
+
+// CheckDNSCredentials verifies that every dns.yml provider's credential
+// references resolve in the secrets provider. Returns one result per provider
+// (nil when the repo has no dns.yml).
+func (g *GitSyncer) CheckDNSCredentials(ctx context.Context, repo *config.Repo) []DNSCredentialCheckResult {
+	if repo.DNS == nil {
+		return nil
+	}
+	var results []DNSCredentialCheckResult
+	for _, p := range repo.DNS.Providers {
+		r := DNSCredentialCheckResult{Provider: p.Name, Type: p.Type}
+		switch {
+		case len(p.Credentials) > 0 && g.secrets == nil:
+			r.Err = "no secrets provider configured"
+		default:
+			for field, ref := range p.Credentials {
+				if _, err := g.secrets.Get(ctx, secrets.Scope{Env: ref.InfisicalEnv, Path: ref.InfisicalPath}, ref.InfisicalKey); err != nil {
+					r.Err = fmt.Sprintf("credential %q (%s): %v", field, ref.InfisicalKey, err)
+					break
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results
 }
 
 // GitCredentialCheckResult is the per-credential outcome of CheckGitCredentials.
@@ -116,7 +158,12 @@ func (g *GitSyncer) CheckRef(ctx context.Context, ref string) (*CheckReport, err
 // checkRepo validates an already-loaded repo+SHA: git-credential availability,
 // per-service env_schema resolution, and rolling-update warnings.
 func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string) *CheckReport {
-	report := &CheckReport{SHA: sha, HasProvider: g.secrets != nil, GitCredentials: g.CheckGitCredentials(ctx)}
+	report := &CheckReport{
+		SHA:            sha,
+		HasProvider:    g.secrets != nil,
+		GitCredentials: g.CheckGitCredentials(ctx),
+		DNSProviders:   g.CheckDNSCredentials(ctx, repo),
+	}
 	for _, svc := range repo.Services {
 		sc := g.checkService(ctx, svc)
 		sc.Warnings = g.rollingCheck(ctx, svc)

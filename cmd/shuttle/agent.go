@@ -46,10 +46,15 @@ Authenticate one of these ways:
 		tok, _ := cmd.Flags().GetString("token")
 		driverName, _ := cmd.Flags().GetString("driver")
 		dockerBin, _ := cmd.Flags().GetString("docker-bin")
+		caddyImage, _ := cmd.Flags().GetString("caddy-image")
 
 		driver, err := agent.NewDriver(driverName, dockerBin)
 		if err != nil {
 			return err
+		}
+
+		if caddyImage == "" {
+			caddyImage = defaultCaddyImage(Version)
 		}
 
 		// After a `shuttle agent join`, the token and orchestrator CA are
@@ -79,6 +84,7 @@ Authenticate one of these ways:
 			ServerName:   serverName,
 			Token:        tok,
 			DockerBin:    dockerBin,
+			CaddyImage:   caddyImage,
 		}
 
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -99,8 +105,25 @@ func init() {
 	agentCmd.Flags().String("token", "", "Host-scoped enrollment token (from `shuttle enroll`)")
 	agentCmd.Flags().String("driver", "compose", "Deploy driver: 'compose' (Docker Compose) or 'synology' (DSM Container Manager)")
 	agentCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
+	agentCmd.Flags().String("caddy-image", "", "Caddy sidecar image (default ghcr.io/neikow/shuttle-caddy:<version>); override with a custom xcaddy build for other DNS providers")
 	_ = agentCmd.MarkFlagRequired("orchestrator")
 	_ = agentCmd.MarkFlagRequired("host")
 
 	agentCmd.AddCommand(joinCmd)
+}
+
+// caddyImageRepo is the shipped Caddy image (stock Caddy + DNS-challenge provider
+// plugins). The DNS challenge needs a provider plugin compiled in, which the
+// stock caddy:2-alpine image lacks.
+const caddyImageRepo = "ghcr.io/neikow/shuttle-caddy"
+
+// defaultCaddyImage picks the sidecar image tag aligned with the agent build:
+// the release version for a stamped binary, else :latest for a dev build. The
+// release pipeline publishes a shuttle-caddy tag for every shuttle tag.
+func defaultCaddyImage(version string) string {
+	tag := "latest"
+	if version != "" && version != "dev" {
+		tag = version
+	}
+	return caddyImageRepo + ":" + tag
 }

@@ -37,7 +37,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
-| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
+| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo — hosts/services + the optional `dns.yml` via `dns.go`: DNS-challenge providers + certificates, `DomainCoveredBy` wildcard matching), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation + the `control_tokens` table (`CreateControlToken`, `LookupControlToken`, `ListControlTokens`, `RevokeControlToken`) — named, role-scoped HTTP bearer tokens (hashed at rest) backing RBAC + the `deploy_logs` table (`RecordDeployLogs`, `DeployLogs`) — captured agent output per deploy, keyed by deploy_id, append-only (also reused for backup/restore operation logs, keyed by the operation id) + the `service_backups` table (`RecordBackup`, `MarkBackupResult`, `ListBackups`, `BackupByID`, `LatestBackupStart`, `LatestSuccessfulBackup`) — one row per service-data backup attempt (engine/store/target/snapshot/size/status), the restore-point catalog. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
@@ -65,7 +65,8 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `backup_http.go` | `EnableBackups`: `POST /backup/{service}` (deploy), `GET /backups` + `GET /backups/{id}/logs` (read), `POST /restore` (admin). Dispatchers held as fields for testability; backup/restore audited. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
-| `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
+| `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection; `buildCaddyConfig` emits the `http` app routes and, when DNS certs apply, the `tls.automation` policies. |
+| `dns.go` | `resolveTLSPolicies` — turns the repo's `dns.yml` certificates into Caddy `tls.automation` policies (ACME DNS-01 issuer per provider), resolving provider credentials from the secrets provider and injecting them inline. Filtered per host (cert included only where the host serves a covered domain or a service pins it). |
 | `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/backup`, `/backups`, `/backups/{id}/logs`, `/restore`, `/healthz`, `/readyz`, `/auth/config`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`, via `cspForUI` which adds the OIDC issuer origin to `connect-src` when OIDC is enabled so the SPA can reach the IdP). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `GET /auth/config` (unauthenticated) advertises the OIDC issuer/client_id/scopes so the UI can run a browser PKCE login. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
@@ -258,7 +259,33 @@ These are deliberate. Don't reverse them without updating this file.
   (`-p` can't be altered live), detecting the current ports via labels stamped at
   create time. The central `ApplyRoutes` Caddy (`caddy_admin_url`) is not
   host-scoped, so it keeps 80/443. Moving off the standard ports breaks ACME
-  HTTP-01 (terminate TLS upstream or use the DNS challenge — see issue #87).
+  HTTP-01 (terminate TLS upstream or use the DNS challenge — see below).
+- **DNS-challenge certificates: `dns.yml` in the repo, secrets from the
+  provider, wildcards via DNS-01.** The default ingress provisions a cert per
+  hostname over HTTP-01, which can't issue wildcards and needs `:80` reachable.
+  An optional repo-root `dns.yml` declares named DNS **providers** (type +
+  endpoint + per-field credential *references*) and **certificates** (subjects
+  incl. `*.zone`, issued via a provider). The orchestrator turns each certificate
+  into a Caddy `tls.automation` policy with an ACME **DNS-01** issuer, so one
+  wildcard cert serves every subdomain (one ACME order, not N — dodges rate
+  limits) and provisioning needs no inbound `:80`/`:443`. Cert/routing are
+  **decoupled**: `dns.yml` owns the cert lifecycle; a service just declares its
+  `domains` and Caddy auto-serves a covered hostname from the matching wildcard
+  (optional `tls_certificate:` pins one explicitly / forces DNS-01 on an apex).
+  A domain covered by no certificate falls back to the existing per-domain
+  HTTP-01 — no regression. **Provider credentials are secrets, never repo state**:
+  resolved from the secrets provider per reconcile and injected *inline* into the
+  pushed Caddy config (over the TLS agent stream, never to disk/argv — the
+  `git_credentials`/`backups.env` model). Policies are **per-host filtered** (a
+  cert is emitted only where the host serves a covered domain or a service pins
+  it) so unrelated hosts don't order wildcards they never serve. The DNS-01
+  challenge needs the provider plugin compiled into Caddy, which stock
+  `caddy:2-alpine` lacks — so a `ghcr.io/neikow/shuttle-caddy` image (xcaddy +
+  `caddy-dns/ovh`, built/cosign-signed by `release.yml`) is shipped and the agent
+  defaults its sidecar to it (version-aligned, `--caddy-image` overrides for
+  other providers). **OVH is the only provider type for now** — add a type to
+  `dnsProviderSpecs` *and* its plugin to `Dockerfile.caddy` together. `shuttle
+  check` verifies the provider credentials resolve.
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
   `Fake` backs tests. `Get`/`GetAll` take a `Scope{Env, Path}`: a service's
   `env_from` is the environment (empty → `INFISICAL_ENV`), and the folder comes

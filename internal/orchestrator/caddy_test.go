@@ -50,7 +50,7 @@ func TestRoutesFromRepo_snippet(t *testing.T) {
 		t.Fatalf("want 1 route with 1 snippet handler, got %+v", routes)
 	}
 
-	cfg := buildCaddyConfig(routes, false, 0, 0)
+	cfg := buildCaddyConfig(routes, false, 0, 0, nil)
 	srv := cfg["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["shuttle"].(map[string]any)
 	route0 := srv["routes"].([]any)[0].(map[string]any)
 	handle := route0["handle"].([]any)
@@ -71,10 +71,10 @@ func TestBuildCaddyConfig_httpsRedirect(t *testing.T) {
 		srv := cfg["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["shuttle"].(map[string]any)
 		return srv["listen"].([]string)
 	}
-	if l := listenOf(buildCaddyConfig(routes, false, 0, 0)); len(l) != 2 {
+	if l := listenOf(buildCaddyConfig(routes, false, 0, 0, nil)); len(l) != 2 {
 		t.Errorf("redirect off: listen = %v, want [:80 :443]", l)
 	}
-	l := listenOf(buildCaddyConfig(routes, true, 0, 0))
+	l := listenOf(buildCaddyConfig(routes, true, 0, 0, nil))
 	if len(l) != 1 || l[0] != ":443" {
 		t.Errorf("redirect on: listen = %v, want [:443] only (Caddy adds the :80 redirect)", l)
 	}
@@ -86,11 +86,11 @@ func TestBuildCaddyConfig_customPorts(t *testing.T) {
 		srv := cfg["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)["shuttle"].(map[string]any)
 		return srv["listen"].([]string)
 	}
-	l := listenOf(buildCaddyConfig(routes, false, 8080, 8443))
+	l := listenOf(buildCaddyConfig(routes, false, 8080, 8443, nil))
 	if len(l) != 2 || l[0] != ":8080" || l[1] != ":8443" {
 		t.Errorf("custom ports: listen = %v, want [:8080 :8443]", l)
 	}
-	r := listenOf(buildCaddyConfig(routes, true, 8080, 8443))
+	r := listenOf(buildCaddyConfig(routes, true, 8080, 8443, nil))
 	if len(r) != 1 || r[0] != ":8443" {
 		t.Errorf("custom ports + redirect: listen = %v, want [:8443]", r)
 	}
@@ -136,7 +136,7 @@ func TestHostCaddyConfigJSON(t *testing.T) {
 		},
 	}
 
-	data, ok, err := HostCaddyConfigJSON(repo, "web1", false, 0, 0)
+	data, ok, err := HostCaddyConfigJSON(repo, "web1", false, 0, 0, nil)
 	if err != nil || !ok {
 		t.Fatalf("web1: ok=%v err=%v", ok, err)
 	}
@@ -148,7 +148,7 @@ func TestHostCaddyConfigJSON(t *testing.T) {
 		t.Errorf("config missing apps: %s", data)
 	}
 
-	if _, ok, _ := HostCaddyConfigJSON(repo, "web3", false, 0, 0); ok {
+	if _, ok, _ := HostCaddyConfigJSON(repo, "web3", false, 0, 0, nil); ok {
 		t.Error("web3 has no routable services; expected ok=false")
 	}
 }
@@ -171,7 +171,7 @@ func TestApplyRoutes(t *testing.T) {
 	routes := []CaddyRoute{
 		{Domain: "app.example.com", Upstream: "localhost:8080"},
 	}
-	if err := client.ApplyRoutes(context.Background(), routes, false); err != nil {
+	if err := client.ApplyRoutes(context.Background(), routes, false, nil); err != nil {
 		t.Fatalf("ApplyRoutes: %v", err)
 	}
 	if received == nil {
@@ -194,7 +194,7 @@ func TestApplyRoutes_serverError(t *testing.T) {
 	defer srv.Close()
 
 	client := NewCaddyClient(srv.URL)
-	err := client.ApplyRoutes(context.Background(), []CaddyRoute{{Domain: "x.com", Upstream: "localhost:80"}}, false)
+	err := client.ApplyRoutes(context.Background(), []CaddyRoute{{Domain: "x.com", Upstream: "localhost:80"}}, false, nil)
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
 	}

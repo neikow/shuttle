@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+#
+# shuttle-caddy: stock Caddy with the DNS-challenge provider plugins Shuttle
+# supports. The DNS-01 challenge (and thus wildcard certificates) needs the
+# provider plugin compiled into the Caddy binary, which the upstream
+# caddy:2-alpine image does not ship. Keep the --with list in lockstep with the
+# provider types in internal/config/dns.go (dnsProviderSpecs).
+#
+# Built and pushed as ghcr.io/neikow/shuttle-caddy by the release workflow; the
+# agent defaults its sidecar to this image (see cmd/shuttle/agent.go).
+FROM caddy:2-builder-alpine AS build
+RUN xcaddy build \
+	--with github.com/caddy-dns/ovh
+
+FROM caddy:2-alpine
+COPY --from=build /usr/bin/caddy /usr/bin/caddy

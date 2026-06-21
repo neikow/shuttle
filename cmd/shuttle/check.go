@@ -139,6 +139,17 @@ func renderCheck(out io.Writer, report *orchestrator.CheckReport) {
 		}
 	}
 
+	if len(report.DNSProviders) > 0 {
+		_, _ = fmt.Fprintf(out, "checking %d DNS provider(s):\n", len(report.DNSProviders))
+		for _, dp := range report.DNSProviders {
+			if dp.Err != "" {
+				_, _ = fmt.Fprintf(out, "  ✗ %s (%s): %s\n", dp.Provider, dp.Type, dp.Err)
+			} else {
+				_, _ = fmt.Fprintf(out, "  ✓ %s (%s): credentials present\n", dp.Provider, dp.Type)
+			}
+		}
+	}
+
 	if !report.HasProvider {
 		_, _ = fmt.Fprintf(out, "! secrets provider not configured; skipping secret checks\n")
 	}

@@ -297,7 +297,7 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 		return nil, err
 	}
 	g.applyRoutes(ctx, repo)
-	g.dispatchHostCaddyConfigs(repo)
+	g.dispatchHostCaddyConfigs(ctx, repo)
 	current, err := g.store.CurrentSHAs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("current state: %w", err)
@@ -466,24 +466,35 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 		slog.Error("derive caddy routes failed", "err", err)
 		return
 	}
-	if err := caddy.ApplyRoutes(ctx, routes, httpsRedirect); err != nil {
+	// host=="" -> the central Caddy serves every host's domains.
+	policies, err := g.resolveTLSPolicies(ctx, repo, "")
+	if err != nil {
+		slog.Error("resolve DNS TLS policies failed; falling back to HTTP-01", "err", err)
+		policies = nil
+	}
+	if err := caddy.ApplyRoutes(ctx, routes, httpsRedirect, policies); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return
 	}
-	slog.Info("caddy routes applied", "count", len(routes))
+	slog.Info("caddy routes applied", "count", len(routes), "tls_policies", len(policies))
 }
 
 // dispatchHostCaddyConfigs pushes each host its Caddy ingress config, so an
 // agent running a Caddy sidecar (--caddy) can apply it via CaddyConfigRequest.
 // Hosts with no routable services, or whose agent is not connected, are skipped.
-func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
+func (g *GitSyncer) dispatchHostCaddyConfigs(ctx context.Context, repo *config.Repo) {
 	httpsRedirect := g.httpsRedirect
 	if rc := g.liveRepoCfg.Load(); rc != nil && rc.HTTPSRedirect != nil {
 		httpsRedirect = *rc.HTTPSRedirect
 	}
 	for _, h := range repo.Hosts {
 		httpPort, httpsPort := h.HTTPPortOrDefault(), h.HTTPSPortOrDefault()
-		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect, httpPort, httpsPort)
+		policies, err := g.resolveTLSPolicies(ctx, repo, h.Name)
+		if err != nil {
+			slog.Error("resolve DNS TLS policies failed; falling back to HTTP-01", "host", h.Name, "err", err)
+			policies = nil
+		}
+		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect, httpPort, httpsPort, policies)
 		if err != nil {
 			slog.Error("build caddy config failed", "host", h.Name, "err", err)
 			continue

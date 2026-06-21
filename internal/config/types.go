@@ -213,6 +213,9 @@ func (c *OrchestratorConfig) ServerTLSEnabled() bool {
 type Repo struct {
 	Hosts    []Host
 	Services []Service
+	// DNS is the optional dns.yml: DNS-challenge certificate providers and the
+	// (wildcard) certificates they issue. Nil when the repo has no dns.yml.
+	DNS *DNSConfig
 }
 
 type Host struct {
@@ -264,6 +267,11 @@ type Service struct {
 	EnvSchema    []string `yaml:"env_schema"`
 	Port         int      `yaml:"port"` // traffic port Caddy dials for this service's domains
 	CaddySnippet string   `yaml:"caddy_snippet"`
+	// TLSCertificate optionally pins this service's domains to a named
+	// certificate declared in dns.yml (forcing its DNS challenge). Empty lets
+	// Caddy auto-match the domain to a covering certificate, else fall back to
+	// per-domain HTTP-01.
+	TLSCertificate string `yaml:"tls_certificate"`
 	// DeleteVolumes is the canonical volume-deletion policy when this service is
 	// removed from the repo: "immediate", "manual" (default), or a duration
 	// string (e.g. "7 days") after which volumes are deleted.
@@ -305,16 +313,17 @@ type hostsFile struct {
 }
 
 type serviceFile struct {
-	Name          string              `yaml:"name"`
-	Host          string              `yaml:"host"`
-	Domains       []string            `yaml:"domains"`
-	EnvFrom       string              `yaml:"env_from"`
-	EnvSchema     []string            `yaml:"env_schema"`
-	Port          int                 `yaml:"port"`
-	CaddySnippet  string              `yaml:"caddy_snippet"`
-	DeleteVolumes deleteVolumesPolicy `yaml:"delete_volumes"`
-	SecretPath    string              `yaml:"secret_path"`
-	UpdatePolicy  string              `yaml:"update_policy"`
-	Backup        *serviceBackup      `yaml:"backup"`
-	Remote        *RemotePointer      `yaml:"remote"`
+	Name           string              `yaml:"name"`
+	Host           string              `yaml:"host"`
+	Domains        []string            `yaml:"domains"`
+	EnvFrom        string              `yaml:"env_from"`
+	EnvSchema      []string            `yaml:"env_schema"`
+	Port           int                 `yaml:"port"`
+	CaddySnippet   string              `yaml:"caddy_snippet"`
+	TLSCertificate string              `yaml:"tls_certificate"`
+	DeleteVolumes  deleteVolumesPolicy `yaml:"delete_volumes"`
+	SecretPath     string              `yaml:"secret_path"`
+	UpdatePolicy   string              `yaml:"update_policy"`
+	Backup         *serviceBackup      `yaml:"backup"`
+	Remote         *RemotePointer      `yaml:"remote"`
 }
