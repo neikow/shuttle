@@ -200,11 +200,26 @@ func loadService(rootDir, dir string) (*Service, error) {
 		Backup:         backup,
 	}
 
-	if raw.Remote != nil && hasCompose {
-		return nil, fmt.Errorf("XOR violation: %s has both a remote pointer and docker-compose.yml", name)
+	// Exactly one source: local compose, remote pointer, or external upstream.
+	nSources := 0
+	for _, has := range []bool{hasCompose, raw.Remote != nil, raw.External != nil} {
+		if has {
+			nSources++
+		}
+	}
+	if nSources > 1 {
+		return nil, fmt.Errorf("XOR violation: %s declares more than one of docker-compose.yml / remote / external", name)
 	}
 
 	switch {
+	case raw.External != nil:
+		if raw.External.Upstream == "" {
+			return nil, fmt.Errorf("%s: external.upstream is required", name)
+		}
+		if len(raw.Domains) == 0 {
+			return nil, fmt.Errorf("%s: an external service needs at least one domain to route", name)
+		}
+		svc.Source = *raw.External
 	case raw.Remote != nil:
 		svc.Source = *raw.Remote
 	case hasCompose:
@@ -214,7 +229,7 @@ func loadService(rootDir, dir string) (*Service, error) {
 		}
 		svc.Source = LocalCompose{Path: rel}
 	default:
-		return nil, fmt.Errorf("no source: need either docker-compose.yml or remote pointer")
+		return nil, fmt.Errorf("no source: need a docker-compose.yml, a remote pointer, or an external upstream")
 	}
 
 	return svc, nil

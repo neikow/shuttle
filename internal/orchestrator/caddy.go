@@ -36,22 +36,47 @@ type CaddyRoute struct {
 	Handlers []any
 }
 
-// RoutesFromRepo derives the desired Caddy routes from the repo. Each service
-// domain maps to an upstream of <host>:<port>; services without domains or a
-// port are skipped (nothing to route). A service's
+// RoutesFromRepo derives the desired Caddy routes from the repo. Each managed
+// service domain maps to an upstream of <host>:<port>; an external service maps
+// to its declared upstream verbatim. Services without domains (or a non-external
+// service without a port) are skipped (nothing to route). A service's
 // caddy_snippet, when set, must be a JSON array of Caddy HTTP handler objects;
 // an invalid snippet is a hard error.
 func RoutesFromRepo(repo *config.Repo) ([]CaddyRoute, error) {
+	return routesFromRepo(repo, "", false)
+}
+
+// RoutesForHost derives Caddy routes for a single host's sidecar. Unlike
+// RoutesFromRepo (used by the central Caddy), a managed service's upstream dials
+// the service NAME, which is the network alias the agent assigns when it joins
+// the service's containers to the shared Caddy network — so Caddy reaches them as
+// "<service>:<port>" on that network. An external service's upstream is dialed
+// verbatim (Shuttle never joins it to the network — the operator makes it
+// reachable, e.g. by attaching it to the shared `shuttle` network).
+func RoutesForHost(repo *config.Repo, host string) ([]CaddyRoute, error) {
+	return routesFromRepo(repo, host, true)
+}
+
+// routesFromRepo is the shared route derivation. host=="" includes every host
+// (central Caddy); otherwise only that host. byAlias selects the managed-service
+// upstream form: the service name alias (sidecar) vs <host>:<port> (central).
+func routesFromRepo(repo *config.Repo, host string, byAlias bool) ([]CaddyRoute, error) {
 	var routes []CaddyRoute
 	for _, svc := range repo.Services {
-		if len(svc.Domains) == 0 || svc.Port == 0 {
+		if host != "" && svc.Host != host {
+			continue
+		}
+		if len(svc.Domains) == 0 {
+			continue
+		}
+		upstream, ok := routeUpstream(svc, byAlias)
+		if !ok {
 			continue
 		}
 		handlers, err := parseSnippet(svc.CaddySnippet)
 		if err != nil {
 			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
 		}
-		upstream := svc.Host + ":" + strconv.Itoa(svc.Port)
 		for _, domain := range svc.Domains {
 			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
 		}
@@ -59,27 +84,21 @@ func RoutesFromRepo(repo *config.Repo) ([]CaddyRoute, error) {
 	return routes, nil
 }
 
-// RoutesForHost derives Caddy routes for a single host's sidecar. Unlike
-// RoutesFromRepo (used by the central Caddy), upstreams dial the service NAME,
-// which is the network alias the agent assigns when it joins the service's
-// containers to the shared Caddy network — so Caddy reaches them as
-// "<service>:<port>" on that network.
-func RoutesForHost(repo *config.Repo, host string) ([]CaddyRoute, error) {
-	var routes []CaddyRoute
-	for _, svc := range repo.Services {
-		if svc.Host != host || len(svc.Domains) == 0 || svc.Port == 0 {
-			continue
-		}
-		handlers, err := parseSnippet(svc.CaddySnippet)
-		if err != nil {
-			return nil, fmt.Errorf("service %q caddy_snippet: %w", svc.Name, err)
-		}
-		upstream := svc.Name + ":" + strconv.Itoa(svc.Port)
-		for _, domain := range svc.Domains {
-			routes = append(routes, CaddyRoute{Domain: domain, Upstream: upstream, Handlers: handlers})
-		}
+// routeUpstream returns the Caddy dial target for a service, or ok=false when it
+// is not routable (a managed service with no port). External services dial their
+// declared upstream verbatim; managed services dial <service>:<port> (byAlias,
+// for a host sidecar) or <host>:<port> (central Caddy).
+func routeUpstream(svc config.Service, byAlias bool) (string, bool) {
+	if ext, isExt := svc.Source.(config.ExternalService); isExt {
+		return ext.Upstream, ext.Upstream != ""
 	}
-	return routes, nil
+	if svc.Port == 0 {
+		return "", false
+	}
+	if byAlias {
+		return svc.Name + ":" + strconv.Itoa(svc.Port), true
+	}
+	return svc.Host + ":" + strconv.Itoa(svc.Port), true
 }
 
 // HostCaddyConfigJSON builds the Caddy JSON config a host's sidecar should run,

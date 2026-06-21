@@ -195,9 +195,9 @@ backup:                   # optional; service data backup policy
   `backups.env` (see [configuration.md](configuration.md#backups)). The host needs
   the `restic` path / `docker` reachable to the agent.
 
-## Compose source — exactly one
+## Service source — exactly one
 
-Each service must have **exactly one** compose source (XOR), or the sync fails:
+Each service must declare **exactly one** source (XOR), or the sync fails:
 
 ### Local compose
 
@@ -219,8 +219,37 @@ remote:
 ```
 
 The orchestrator shallow-clones the pointer repo into a cache and reads the file
-at `path`. Declaring both a remote pointer and a local `docker-compose.yml` is a
-validation error ("XOR violation"); declaring neither is also an error.
+at `path`.
+
+### External (proxy-only)
+
+An `external:` block for a service Shuttle should **route to but not deploy** —
+e.g. infrastructure running beside the agent that you bootstrap out-of-band (an
+Infisical instance, a database UI, anything already running):
+
+```yaml
+name: infisical
+host: web1
+domains: ["infisical.example.com"]
+external:
+  upstream: "infisical:8080"   # dialed verbatim by the host's Caddy sidecar
+```
+
+Shuttle skips it in every lifecycle path — no deploy, diff, drift heal, teardown,
+or backup — and only emits a **Caddy route** for it: HTTPS (HTTP-01, or a
+[`dns.yml`](#dnsyml-optional) wildcard) + reverse proxy to `upstream`.
+`caddy_snippet` and `tls_certificate` apply as normal; `port`, `env_schema`,
+`backup`, and `update_policy` are not used.
+
+**You** make `upstream` reachable from the Caddy sidecar (a container on the
+shared `shuttle` docker network). The simplest way is to attach the external
+container to that network (`networks: [shuttle]` as an external network in its own
+compose) so `name:port` resolves; otherwise use `host.docker.internal:port` via a
+host-gateway. The upstream is plain HTTP (Caddy terminates TLS and proxies HTTP
+to it).
+
+Declaring more than one source is a validation error ("XOR violation"); declaring
+none is also an error.
 
 ## How it maps to a deploy
 

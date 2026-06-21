@@ -108,6 +108,9 @@ func (g *GitSyncer) BackupService(ctx context.Context, service string, trigger l
 	if err != nil {
 		return "", "", err
 	}
+	if svc.IsExternal() {
+		return "", "", fmt.Errorf("service %q is external (proxy-only); Shuttle does not manage its data", service)
+	}
 	backupID = newID()
 	req, b, err := g.buildBackupRequest(ctx, *svc, backupID)
 	if err != nil {
@@ -142,6 +145,9 @@ func (g *GitSyncer) RestoreService(ctx context.Context, service, backupID string
 	svc, err := g.serviceFromWorkingRepo(ctx, service)
 	if err != nil {
 		return "", "", "", err
+	}
+	if svc.IsExternal() {
+		return "", "", "", fmt.Errorf("service %q is external (proxy-only); Shuttle does not manage its data", service)
 	}
 	b := g.resolveBackup(*svc)
 	if b == nil {

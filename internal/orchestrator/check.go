@@ -165,6 +165,9 @@ func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string
 		DNSProviders:   g.CheckDNSCredentials(ctx, repo),
 	}
 	for _, svc := range repo.Services {
+		if svc.IsExternal() {
+			continue // proxy-only: no compose/env_schema to validate
+		}
 		sc := g.checkService(ctx, svc)
 		sc.Warnings = g.rollingCheck(ctx, svc)
 		report.Services = append(report.Services, sc)
