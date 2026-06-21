@@ -482,7 +482,8 @@ func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
 		httpsRedirect = *rc.HTTPSRedirect
 	}
 	for _, h := range repo.Hosts {
-		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect)
+		httpPort, httpsPort := h.HTTPPortOrDefault(), h.HTTPSPortOrDefault()
+		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect, httpPort, httpsPort)
 		if err != nil {
 			slog.Error("build caddy config failed", "host", h.Name, "err", err)
 			continue
@@ -492,7 +493,11 @@ func (g *GitSyncer) dispatchHostCaddyConfigs(repo *config.Repo) {
 		}
 		cmd := &shuttlev1.OrchestratorCommand{
 			Payload: &shuttlev1.OrchestratorCommand_CaddyConfig{
-				CaddyConfig: &shuttlev1.CaddyConfigRequest{ConfigJson: string(cfgJSON)},
+				CaddyConfig: &shuttlev1.CaddyConfigRequest{
+					ConfigJson: string(cfgJSON),
+					HttpPort:   int32(httpPort),
+					HttpsPort:  int32(httpsPort),
+				},
 			},
 		}
 		if err := g.registry.Send(h.Name, cmd); err != nil {
