@@ -54,6 +54,9 @@ code --install-extension shuttle-iac-*.vsix
 ```
 
 Requirements: the `shuttle` binary on your `PATH` (or set `shuttle.lsp.path`).
+`make dev-install` builds a version-stamped binary and copies it to
+`/usr/local/bin` (override with `PREFIX=…`; use `sudo` if that dir isn't
+writable) — a reliable PATH location for a GUI-launched editor.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
