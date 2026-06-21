@@ -58,3 +58,7 @@ Any LSP-capable editor can use it — point your client at `shuttle lsp` (stdio
 transport) and attach it to the IaC YAML files (`hosts.yaml`,
 `services/**/*.yaml`, `dns.yml`, `orchestrator.yaml`). `config.yml` is also
 understood, but isn't claimed by default because the name is generic.
+
+stdio is the only transport. Clients that append a `--stdio` argument to select
+it (e.g. `vscode-languageclient`) work as-is — `shuttle lsp` accepts the flag as
+a no-op.

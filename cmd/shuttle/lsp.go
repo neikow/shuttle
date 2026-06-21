@@ -24,3 +24,10 @@ This command speaks LSP on stdin/stdout and is meant to be launched by an editor
 		return lsp.NewServer(os.Stdin, os.Stdout, Version).Run()
 	},
 }
+
+func init() {
+	// vscode-languageclient (and most LSP clients) append --stdio to the server
+	// command to select the transport. stdio is the only transport this server
+	// speaks, so accept the flag as a no-op rather than erroring on it.
+	lspCmd.Flags().Bool("stdio", false, "Use the stdio transport (the default and only transport; accepted for editor compatibility)")
+}
