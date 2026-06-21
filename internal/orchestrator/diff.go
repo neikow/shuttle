@@ -32,6 +32,9 @@ type CurrentState map[string]string // service → deployed SHA
 func ComputePlan(repo *config.Repo, current CurrentState, desiredSHA string) Plan {
 	var steps []Step
 	for _, svc := range repo.Services {
+		if svc.IsExternal() {
+			continue // external services are routed, never deployed
+		}
 		currentSHA, exists := current[svc.Name]
 		if !exists || currentSHA != desiredSHA {
 			steps = append(steps, Step{

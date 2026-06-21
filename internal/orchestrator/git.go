@@ -317,6 +317,9 @@ func (g *GitSyncer) Reconcile(ctx context.Context, onlyServices []string) ([]str
 func (g *GitSyncer) reconcileRemovals(ctx context.Context, repo *config.Repo) {
 	repoNames := make(map[string]bool, len(repo.Services))
 	for _, svc := range repo.Services {
+		if svc.IsExternal() {
+			continue // not deployed → no lifecycle row, nothing to tear down
+		}
 		repoNames[svc.Name] = true
 		if err := g.store.MarkServicePresent(ctx, svc.Name, svc.Host, svc.DeleteVolumes); err != nil {
 			slog.Error("mark service present failed", "service", svc.Name, "err", err)
@@ -528,6 +531,9 @@ func (g *GitSyncer) ForceDeploy(ctx context.Context, services []string) ([]strin
 	}
 	steps := make([]Step, 0, len(repo.Services))
 	for _, svc := range repo.Services {
+		if svc.IsExternal() {
+			continue // routed, never deployed
+		}
 		steps = append(steps, Step{Host: svc.Host, Service: svc.Name, Action: ActionDeploy, SHA: sha})
 	}
 	return g.dispatchPlan(ctx, repo, steps, toSet(services)), nil
@@ -587,6 +593,9 @@ func (g *GitSyncer) DeployAtSHA(ctx context.Context, service, sha string, trigge
 	}
 	if svc == nil {
 		return "", "", fmt.Errorf("service %q not found at %s", service, sha)
+	}
+	if svc.IsExternal() {
+		return "", "", fmt.Errorf("service %q is external (proxy-only) and cannot be deployed", service)
 	}
 
 	step := Step{Host: svc.Host, Service: svc.Name, Action: ActionDeploy, SHA: sha}

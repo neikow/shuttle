@@ -87,6 +87,9 @@ func buildPlanReport(repo *config.Repo, current map[string]string, sha string) P
 	report := PlanReport{SHA: sha}
 	inRepo := make(map[string]bool, len(repo.Services))
 	for _, svc := range repo.Services {
+		if svc.IsExternal() {
+			continue // routed, never deployed → not part of the deploy plan
+		}
 		inRepo[svc.Name] = true
 		cur, deployed := current[svc.Name]
 		action := PlanUnchanged
