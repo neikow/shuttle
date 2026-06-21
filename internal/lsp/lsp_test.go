@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -115,6 +116,47 @@ func TestCompleteAt_hostRefFromSibling(t *testing.T) {
 func TestCompleteAt_unknownFile(t *testing.T) {
 	if items := completeAt("/repo/README.md", "x", position{}); items != nil {
 		t.Errorf("unknown file should yield nil, got %v", items)
+	}
+}
+
+func TestCrossFileDiagnostics_host(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yaml"), []byte("hosts:\n  - name: web1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svcDir := filepath.Join(dir, "services", "api")
+	if err := os.MkdirAll(svcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(svcDir, "api.yaml")
+
+	// Unknown host → a cross-file diagnostic.
+	diags := diagnosticsFor(path, "name: api\nhost: nope\n")
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "unknown host") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want an unknown-host diagnostic, got %+v", diags)
+	}
+
+	// Known host → no cross-file diagnostic.
+	for _, d := range diagnosticsFor(path, "name: api\nhost: web1\n") {
+		if strings.Contains(d.Message, "unknown host") {
+			t.Errorf("web1 is declared; should not be flagged: %+v", d)
+		}
+	}
+}
+
+func TestCrossFileDiagnostics_noSiblingNoFalsePositive(t *testing.T) {
+	// No hosts.yaml on disk → the host reference can't be judged, so it isn't
+	// flagged (avoids false positives while editing standalone).
+	for _, d := range diagnosticsFor("/nowhere/services/api/api.yaml", "name: api\nhost: web1\n") {
+		if strings.Contains(d.Message, "unknown host") {
+			t.Errorf("missing hosts.yaml should not produce a host diagnostic: %+v", d)
+		}
 	}
 }
 

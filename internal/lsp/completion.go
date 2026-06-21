@@ -229,15 +229,23 @@ func refItems(names []string) []completionItem {
 // namesFromSibling finds a file by walking up from the edited file's directory,
 // reads it, and extracts names via parse.
 func namesFromSibling(filePath, fileName string, parse func([]byte) []string) []string {
+	names, _ := siblingNames(filePath, fileName, parse)
+	return names
+}
+
+// siblingNames is namesFromSibling that also reports whether the sibling file was
+// found, so a caller can distinguish "no such file" (skip) from "file present but
+// declares nothing" (an empty valid set).
+func siblingNames(filePath, fileName string, parse func([]byte) []string) (names []string, found bool) {
 	dir := filepath.Dir(filePath)
 	for {
 		candidate := filepath.Join(dir, fileName)
 		if data, err := os.ReadFile(candidate); err == nil {
-			return parse(data)
+			return parse(data), true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil // reached filesystem root
+			return nil, false // reached filesystem root
 		}
 		dir = parent
 	}
