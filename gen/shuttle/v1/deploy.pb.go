@@ -487,8 +487,15 @@ func (x *TeardownRequest) GetRemoveVolumes() bool {
 }
 
 type CaddyConfigRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ConfigJson    string                 `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ConfigJson string                 `protobuf:"bytes,1,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
+	// http_port / https_port are the ports the host's Caddy sidecar should listen
+	// on (and publish). The config_json's listen block already encodes the
+	// container-internal listen ports; these let the agent reconcile the
+	// container's host port publish mapping (recreating the sidecar when they
+	// change). Zero means the standard port (80 / 443).
+	HttpPort      int32 `protobuf:"varint,2,opt,name=http_port,json=httpPort,proto3" json:"http_port,omitempty"`
+	HttpsPort     int32 `protobuf:"varint,3,opt,name=https_port,json=httpsPort,proto3" json:"https_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -528,6 +535,20 @@ func (x *CaddyConfigRequest) GetConfigJson() string {
 		return x.ConfigJson
 	}
 	return ""
+}
+
+func (x *CaddyConfigRequest) GetHttpPort() int32 {
+	if x != nil {
+		return x.HttpPort
+	}
+	return 0
+}
+
+func (x *CaddyConfigRequest) GetHttpsPort() int32 {
+	if x != nil {
+		return x.HttpsPort
+	}
+	return 0
 }
 
 type CaddyConfigResponse struct {
@@ -1050,10 +1071,13 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"\x0fTeardownRequest\x12\x1b\n" +
 	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12%\n" +
-	"\x0eremove_volumes\x18\x03 \x01(\bR\rremoveVolumes\"5\n" +
+	"\x0eremove_volumes\x18\x03 \x01(\bR\rremoveVolumes\"q\n" +
 	"\x12CaddyConfigRequest\x12\x1f\n" +
 	"\vconfig_json\x18\x01 \x01(\tR\n" +
-	"configJson\";\n" +
+	"configJson\x12\x1b\n" +
+	"\thttp_port\x18\x02 \x01(\x05R\bhttpPort\x12\x1d\n" +
+	"\n" +
+	"https_port\x18\x03 \x01(\x05R\thttpsPort\";\n" +
 	"\x13CaddyConfigResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x91\x01\n" +

@@ -45,10 +45,21 @@ hosts:
     labels:
       region: eu-west
       role: edge
+    caddy:                # optional; relocate the host's Caddy sidecar ports
+      http_port: 8080     # default 80
+      https_port: 8443    # default 443
 ```
 
 - `name` is required and must be unique.
 - `labels` are free-form metadata.
+- `caddy.http_port` / `caddy.https_port` set the ports this host's Caddy sidecar
+  listens on (and publishes). Useful when the host shares `:80`/`:443` with
+  another process, or sits behind a load balancer that forwards to alternate
+  ports. Both the container's internal listen and the host-published port use
+  these values; they must differ and fall in `1–65535`. The orchestrator pushes
+  the change on the next reconcile and the agent recreates its sidecar to remap
+  the ports. **Note:** moving off `:80`/`:443` breaks ACME HTTP-01, so a
+  relocated host should terminate TLS upstream or use the DNS challenge.
 
 ## `services/<name>/<name>.yaml`
 

@@ -138,6 +138,46 @@ func TestLoad_unknownHost(t *testing.T) {
 	}
 }
 
+func TestLoad_hostCaddyPorts(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "hosts.yaml"),
+		"hosts:\n  - name: web1\n    caddy:\n      http_port: 8080\n      https_port: 8443\n  - name: web2\n")
+
+	repo, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := repo.Hosts[0].HTTPPortOrDefault(); got != 8080 {
+		t.Errorf("web1 http port = %d, want 8080", got)
+	}
+	if got := repo.Hosts[0].HTTPSPortOrDefault(); got != 8443 {
+		t.Errorf("web1 https port = %d, want 8443", got)
+	}
+	// web2 declares no caddy block -> defaults.
+	if got := repo.Hosts[1].HTTPPortOrDefault(); got != DefaultCaddyHTTPPort {
+		t.Errorf("web2 http port = %d, want %d", got, DefaultCaddyHTTPPort)
+	}
+	if got := repo.Hosts[1].HTTPSPortOrDefault(); got != DefaultCaddyHTTPSPort {
+		t.Errorf("web2 https port = %d, want %d", got, DefaultCaddyHTTPSPort)
+	}
+}
+
+func TestLoad_hostCaddyPorts_invalid(t *testing.T) {
+	tests := map[string]string{
+		"out of range": "hosts:\n  - name: web1\n    caddy:\n      http_port: 70000\n",
+		"equal ports":  "hosts:\n  - name: web1\n    caddy:\n      http_port: 8080\n      https_port: 8080\n",
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, "hosts.yaml"), body)
+			if _, err := Load(dir); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
 func TestLoad_malformedYAML(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "hosts.yaml"), "hosts: [\n")

@@ -58,6 +58,13 @@ message TeardownRequest {
 
 message CaddyConfigRequest {
   string config_json = 1;
+  // http_port / https_port are the ports the host's Caddy sidecar should listen
+  // on (and publish). The config_json's listen block already encodes the
+  // container-internal listen ports; these let the agent reconcile the
+  // container's host port publish mapping (recreating the sidecar when they
+  // change). Zero means the standard port (80 / 443).
+  int32 http_port = 2;
+  int32 https_port = 3;
 }
 
 message CaddyConfigResponse {

@@ -270,6 +270,12 @@ func handleCommand(
 	case *shuttlev1.OrchestratorCommand_Rollback:
 		return executeRollback(ctx, cfg, stream, driver, deployed, caddy, payload.Rollback)
 	case *shuttlev1.OrchestratorCommand_CaddyConfig:
+		// Reconcile the sidecar's published ports first (recreates it when the
+		// host's caddy ports changed) so the listen block in the pushed config
+		// matches the container's port mapping.
+		if err := caddy.reconcile(ctx, int(payload.CaddyConfig.HttpPort), int(payload.CaddyConfig.HttpsPort)); err != nil {
+			return fmt.Errorf("reconcile caddy sidecar: %w", err)
+		}
 		if err := caddy.apply(ctx, []byte(payload.CaddyConfig.ConfigJson)); err != nil {
 			return fmt.Errorf("apply caddy config: %w", err)
 		}
