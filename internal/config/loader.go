@@ -100,7 +100,12 @@ func Load(rootDir string) (*Repo, error) {
 		return nil, fmt.Errorf("services: %w", err)
 	}
 
-	repo := &Repo{Hosts: hosts, Services: services}
+	dns, err := loadDNS(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("dns: %w", err)
+	}
+
+	repo := &Repo{Hosts: hosts, Services: services, DNS: dns}
 	if err := repo.Validate(); err != nil {
 		return nil, err
 	}
@@ -181,17 +186,18 @@ func loadService(rootDir, dir string) (*Service, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	svc := &Service{
-		Name:          raw.Name,
-		Host:          raw.Host,
-		Domains:       raw.Domains,
-		EnvFrom:       raw.EnvFrom,
-		EnvSchema:     raw.EnvSchema,
-		Port:          raw.Port,
-		CaddySnippet:  raw.CaddySnippet,
-		DeleteVolumes: deleteVolumes,
-		SecretPath:    raw.SecretPath,
-		UpdatePolicy:  updatePolicy,
-		Backup:        backup,
+		Name:           raw.Name,
+		Host:           raw.Host,
+		Domains:        raw.Domains,
+		EnvFrom:        raw.EnvFrom,
+		EnvSchema:      raw.EnvSchema,
+		Port:           raw.Port,
+		CaddySnippet:   raw.CaddySnippet,
+		TLSCertificate: raw.TLSCertificate,
+		DeleteVolumes:  deleteVolumes,
+		SecretPath:     raw.SecretPath,
+		UpdatePolicy:   updatePolicy,
+		Backup:         backup,
 	}
 
 	if raw.Remote != nil && hasCompose {
@@ -238,6 +244,16 @@ func (r *Repo) Validate() error {
 		hostSet[h.Name] = true
 	}
 
+	if r.DNS != nil {
+		if err := r.DNS.validate(); err != nil {
+			return err
+		}
+	}
+	certNames := map[string]bool{}
+	if r.DNS != nil {
+		certNames = r.DNS.CertificateNames()
+	}
+
 	for _, svc := range r.Services {
 		if svc.Name == "" {
 			return fmt.Errorf("service missing name")
@@ -247,6 +263,9 @@ func (r *Repo) Validate() error {
 		}
 		if !hostSet[svc.Host] {
 			return fmt.Errorf("service %q references unknown host %q", svc.Name, svc.Host)
+		}
+		if svc.TLSCertificate != "" && !certNames[svc.TLSCertificate] {
+			return fmt.Errorf("service %q: tls_certificate %q is not declared in dns.yml", svc.Name, svc.TLSCertificate)
 		}
 	}
 	return nil
