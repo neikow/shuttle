@@ -38,15 +38,77 @@ func completeAt(path, text string, pos position) []completionItem {
 		return valueCompletions(kind, path2, strings.TrimSpace(key), path, text)
 	}
 
-	// Key context: offer the field names valid at this nesting.
-	names := config.FieldNamesAt(kind, path2)
-	items := make([]completionItem, 0, len(names))
-	for _, n := range names {
+	// Key context: offer the field names valid at this nesting, skipping keys
+	// already present in the current block, annotated with their type + whether
+	// the schema requires them.
+	present := presentSiblings(lines, pos.Line, curIndent)
+	fields := config.FieldsAt(kind, path2)
+	items := make([]completionItem, 0, len(fields))
+	for _, f := range fields {
+		if present[f.Name] {
+			continue
+		}
 		items = append(items, completionItem{
-			Label: n, Kind: ciField, InsertText: n + ": ", Detail: "shuttle " + string(kind),
+			Label: f.Name, Kind: ciField, InsertText: f.Name + ": ", Detail: fieldDetail(f),
 		})
 	}
 	return items
+}
+
+// fieldDetail renders a completion item's detail: the field's type, marked
+// "(required)" when the schema requires it at this nesting.
+func fieldDetail(f config.FieldInfo) string {
+	if f.Type == "" {
+		if f.Required {
+			return "required"
+		}
+		return ""
+	}
+	if f.Required {
+		return f.Type + " (required)"
+	}
+	return f.Type
+}
+
+// presentSiblings collects the keys already declared in the mapping block that
+// contains the cursor line (siblings at curIndent), so completion doesn't
+// re-suggest them. Indentation-based, mirroring parentPath: a line that dedents
+// past curIndent ends the block; a "- " at the lower indent contributes the list
+// element's first inline field.
+func presentSiblings(lines []string, lineIdx, curIndent int) map[string]bool {
+	present := map[string]bool{}
+	add := func(content string) {
+		content = strings.TrimPrefix(content, "- ")
+		if k, _, ok := strings.Cut(content, ":"); ok {
+			present[strings.TrimSpace(k)] = true
+		}
+	}
+	scan := func(start, step int) {
+		for i := start; i >= 0 && i < len(lines); i += step {
+			raw := lines[i]
+			trimmed := strings.TrimSpace(raw)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			indent := leadingSpaces(raw)
+			content := strings.TrimLeft(raw, " \t")
+			switch {
+			case indent == curIndent:
+				if strings.HasPrefix(content, "- ") {
+					return // a sibling list element, not a sibling key
+				}
+				add(content)
+			case indent < curIndent:
+				if strings.HasPrefix(content, "- ") {
+					add(content) // the current element's inline first field
+				}
+				return
+			}
+		}
+	}
+	scan(lineIdx-1, -1)
+	scan(lineIdx+1, +1)
+	return present
 }
 
 // parentPath returns the YAML key nesting that contains the line at lineIdx,
@@ -96,32 +158,56 @@ func valueCompletions(kind config.FileKind, parent []string, key, filePath, text
 	case config.FileKindService:
 		switch key {
 		case "update_policy":
-			return enumItems("rolling", "recreate")
+			return enumItems(config.UpdatePolicyValues...)
 		case "delete_volumes":
-			return enumItems("manual", "immediate", "true", "false")
+			return enumItems(config.DeleteVolumesValues...)
 		case "host":
 			return refItems(namesFromSibling(filePath, "hosts.yaml", hostNames))
 		case "tls_certificate":
 			return refItems(namesFromSibling(filePath, "dns.yml", certNames))
 		}
+		if last == "backup" {
+			switch key {
+			case "engine":
+				return enumItems(config.BackupEngineValues...)
+			case "store":
+				return enumItems(config.BackupStoreValues...)
+			}
+		}
 	case config.FileKindDNS:
 		switch {
 		case last == "providers" && key == "type":
-			return enumItems("ovh")
+			return enumItems(config.DNSProviderTypeNames()...)
 		case last == "certificates" && key == "provider":
 			return refItems(providerNames([]byte(text)))
 		}
 	case config.FileKindOrchestrator:
 		switch key {
 		case "secrets_provider":
-			return enumItems("infisical", "file", "none")
+			return enumItems(config.SecretsProviderValues...)
 		case "default_store":
-			return enumItems("local", "restic")
+			return enumItems(config.BackupStoreValues...)
 		case "type": // notifications[].type
-			return enumItems("slack", "discord", "webhook")
+			return enumItems(config.NotificationTypeValues...)
 		}
 	}
+	// Generic fallback: any boolean-typed field offers true/false.
+	if fieldHasType(kind, parent, key, "boolean") {
+		return enumItems("true", "false")
+	}
 	return nil
+}
+
+// fieldHasType reports whether the field named key at the given nesting has the
+// given friendly type (per config.FieldsAt) — used to offer true/false for any
+// boolean field without enumerating each one.
+func fieldHasType(kind config.FileKind, parent []string, key, typ string) bool {
+	for _, f := range config.FieldsAt(kind, parent) {
+		if f.Name == key {
+			return f.Type == typ
+		}
+	}
+	return false
 }
 
 func enumItems(values ...string) []completionItem {

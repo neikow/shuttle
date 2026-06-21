@@ -22,14 +22,50 @@ func labels(items []completionItem) []string {
 const svcPath = "/repo/services/api/api.yaml"
 
 func TestCompleteAt_topLevelKeys(t *testing.T) {
-	// Empty third line at the top level → service field names.
+	// Empty third line at the top level → service field names not already present.
 	text := "name: api\nhost: web1\n"
 	items := completeAt(svcPath, text, position{Line: 2, Character: 0})
 	got := labels(items)
-	for _, want := range []string{"host", "domains", "external", "tls_certificate"} {
+	for _, want := range []string{"domains", "external", "tls_certificate"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("top-level keys missing %q (got %v)", want, got)
 		}
+	}
+}
+
+func TestCompleteAt_skipsPresentKeys(t *testing.T) {
+	// name + host already present → not re-suggested; domains still offered.
+	text := "name: api\nhost: web1\n"
+	got := labels(completeAt(svcPath, text, position{Line: 2, Character: 0}))
+	if slices.Contains(got, "name") || slices.Contains(got, "host") {
+		t.Errorf("present keys should be filtered out, got %v", got)
+	}
+	if !slices.Contains(got, "domains") {
+		t.Errorf("domains should still be offered, got %v", got)
+	}
+}
+
+func TestCompleteAt_detailTypeAndRequired(t *testing.T) {
+	items := completeAt(svcPath, "", position{Line: 0, Character: 0})
+	byLabel := map[string]completionItem{}
+	for _, it := range items {
+		byLabel[it.Label] = it
+	}
+	if d := byLabel["host"].Detail; d != "string (required)" {
+		t.Errorf("host detail = %q, want %q", d, "string (required)")
+	}
+	if d := byLabel["port"].Detail; d != "integer" {
+		t.Errorf("port detail = %q, want %q", d, "integer")
+	}
+}
+
+func TestCompleteAt_genericBoolValue(t *testing.T) {
+	// before_deploy is a bool field inside backup: → true/false offered without
+	// being enumerated explicitly.
+	text := "backup:\n  before_deploy: "
+	got := labels(completeAt(svcPath, text, position{Line: 1, Character: len("  before_deploy: ")}))
+	if !slices.Equal(got, []string{"true", "false"}) {
+		t.Errorf("before_deploy values = %v, want [true false]", got)
 	}
 }
 
