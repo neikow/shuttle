@@ -224,6 +224,17 @@ func (r *Repo) Validate() error {
 		if hostSet[h.Name] {
 			return fmt.Errorf("duplicate host name %q", h.Name)
 		}
+		if h.Caddy != nil {
+			if err := validatePort(h.Caddy.HTTPPort); err != nil {
+				return fmt.Errorf("host %q caddy.http_port: %w", h.Name, err)
+			}
+			if err := validatePort(h.Caddy.HTTPSPort); err != nil {
+				return fmt.Errorf("host %q caddy.https_port: %w", h.Name, err)
+			}
+			if h.Caddy.HTTPPort != 0 && h.Caddy.HTTPPort == h.Caddy.HTTPSPort {
+				return fmt.Errorf("host %q caddy: http_port and https_port must differ (both %d)", h.Name, h.Caddy.HTTPPort)
+			}
+		}
 		hostSet[h.Name] = true
 	}
 
@@ -250,4 +261,12 @@ func strictDecode(data []byte, out any) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// validatePort accepts 0 (unset → default) or a valid TCP port.
+func validatePort(p int) error {
+	if p < 0 || p > 65535 {
+		return fmt.Errorf("%d out of range (1-65535)", p)
+	}
+	return nil
 }

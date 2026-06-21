@@ -218,6 +218,41 @@ type Repo struct {
 type Host struct {
 	Name   string            `yaml:"name"`
 	Labels map[string]string `yaml:"labels"`
+	// Caddy optionally overrides the host's Caddy sidecar listen/publish ports.
+	// Nil keeps the defaults (80 HTTP, 443 HTTPS).
+	Caddy *HostCaddy `yaml:"caddy"`
+}
+
+// HostCaddy configures the ports a host's Caddy sidecar listens on (and
+// publishes) for HTTP and HTTPS traffic. Both the container's internal listen
+// and the host-published port use these values, so an agent behind a load
+// balancer (or sharing the box with another service on :80/:443) can relocate
+// ingress. Zero/unset means the standard port (80 / 443).
+type HostCaddy struct {
+	HTTPPort  int `yaml:"http_port"`
+	HTTPSPort int `yaml:"https_port"`
+}
+
+// Default Caddy sidecar ports when a host declares no override.
+const (
+	DefaultCaddyHTTPPort  = 80
+	DefaultCaddyHTTPSPort = 443
+)
+
+// HTTPPortOrDefault returns the host's configured HTTP port, or the default.
+func (h Host) HTTPPortOrDefault() int {
+	if h.Caddy != nil && h.Caddy.HTTPPort != 0 {
+		return h.Caddy.HTTPPort
+	}
+	return DefaultCaddyHTTPPort
+}
+
+// HTTPSPortOrDefault returns the host's configured HTTPS port, or the default.
+func (h Host) HTTPSPortOrDefault() int {
+	if h.Caddy != nil && h.Caddy.HTTPSPort != 0 {
+		return h.Caddy.HTTPSPort
+	}
+	return DefaultCaddyHTTPSPort
 }
 
 type Service struct {
