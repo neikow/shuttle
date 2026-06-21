@@ -111,6 +111,7 @@ for an insecure dev link. Templates: `deploy/systemd/shuttle-agent.service`,
 | `--work-dir` | `./agent-work` | Where rendered compose files are written. |
 | `--driver` | `compose` | `compose` or `synology`. |
 | `--docker-bin` | — | Override the Docker executable path. |
+| `--caddy-image` | `ghcr.io/neikow/shuttle-caddy:<version>` | Caddy ingress sidecar image. The default bundles the OVH DNS plugin for [DNS-challenge certs](iac-repo#dnsyml-optional); override with a custom `xcaddy` build for another DNS provider. |
 | `--cert` / `--key` / `--ca` | — | TLS material. cert+key+ca → mutual TLS; ca only → verify the orchestrator and authenticate by token. |
 | `--server-name` | `orchestrator` | Expected SAN on the orchestrator cert. |
 | `--token` | — | Enrollment token (from `shuttle enroll`). |

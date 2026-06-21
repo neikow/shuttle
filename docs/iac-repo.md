@@ -8,6 +8,7 @@ lives in [`examples/repo/`](https://github.com/neikow/shuttle/tree/main/examples
 ```
 hosts.yaml                            # the hosts Shuttle may deploy to
 orchestrator.yaml                     # repo-managed orchestrator overrides (optional)
+dns.yml                               # DNS-challenge cert providers + certificates (optional)
 services/
   <name>/
     <name>.yaml                       # service definition (file name matches dir)
@@ -61,6 +62,49 @@ hosts:
   the ports. **Note:** moving off `:80`/`:443` breaks ACME HTTP-01, so a
   relocated host should terminate TLS upstream or use the DNS challenge.
 
+## `dns.yml` (optional)
+
+Defines DNS-challenge certificate providers and the certificates they issue, so
+service domains can be served by a **wildcard** certificate provisioned over an
+ACME DNS-01 challenge — the only challenge that mints wildcards and that works
+without the host being reachable on `:80`/`:443`.
+
+```yaml
+providers:
+  - name: ovh                 # referenced by certificates below
+    type: ovh                 # supported: ovh
+    endpoint: ovh-eu          # OVH API region (ovh-eu, ovh-ca, ...)
+    credentials:              # each value resolved from the secrets provider
+      application_key:    { infisical_key: OVH_APPLICATION_KEY }
+      application_secret: { infisical_key: OVH_APPLICATION_SECRET }
+      consumer_key:       { infisical_key: OVH_CONSUMER_KEY }
+
+certificates:
+  - name: star-example        # referenced by a service's tls_certificate (optional)
+    domains: ["*.example.com", "example.com"]
+    provider: ovh
+```
+
+- A service whose domain falls under a certificate's `domains` (exact or
+  wildcard, e.g. `app.example.com` under `*.example.com`) is **automatically**
+  served by that certificate — no per-service config. A domain covered by **no**
+  certificate keeps Caddy's default per-domain Let's Encrypt (HTTP-01).
+- **Provider credentials are secrets**, never committed: each field references a
+  key resolved from the secrets provider (`infisical_env`/`infisical_path`
+  optionally override the lookup scope). The orchestrator resolves them per
+  reconcile and injects them inline into the Caddy config it pushes over the
+  TLS-protected agent stream — they never touch disk or the process argv. The
+  same `backups.env`-style model as git credentials.
+- A certificate is provisioned only on hosts that actually serve one of its
+  domains (or pin it), so an unrelated host doesn't order a wildcard it never
+  uses.
+- **Requires a DNS-capable Caddy image.** The DNS challenge needs the provider
+  plugin compiled into Caddy. Agents default their sidecar to
+  `ghcr.io/neikow/shuttle-caddy` (stock Caddy + the OVH plugin); for another
+  provider, build your own with `xcaddy` and point the agent at it with
+  `--caddy-image`.
+- `shuttle check` validates that every provider's credentials resolve.
+
 ## `services/<name>/<name>.yaml`
 
 ```yaml
@@ -77,6 +121,7 @@ update_policy: rolling    # optional; "rolling" (default) or "recreate"
 delete_volumes: manual    # optional; volume deletion policy on removal (default: manual)
 caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
   [{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]
+tls_certificate: star-example  # optional; pin to a dns.yml certificate
 backup:                   # optional; service data backup policy
   engine: volume          # "volume" (tar named volumes) or "postgres" (pg_dump)
   schedule: daily         # optional; hourly/daily/weekly or a duration ("12h")
@@ -112,6 +157,11 @@ backup:                   # optional; service data backup policy
 - **`caddy_snippet`** must be a JSON array of Caddy HTTP handler objects. They are
   injected *ahead of* the `reverse_proxy` handler for the service's domains
   (headers, rewrites, auth, …). Invalid JSON is a hard error.
+- **`tls_certificate`** optionally pins this service's domains to a certificate
+  declared in [`dns.yml`](#dnsyml-optional), forcing its DNS challenge even when
+  the domain wouldn't auto-match (e.g. an apex also reachable over HTTP-01). Must
+  name a declared certificate. Usually unnecessary — a domain under a
+  certificate's `domains` is served by it automatically.
 - **`delete_volumes`** controls what happens to the service's named volumes when
   it is removed from the repo. When a service is deleted, the orchestrator always
   brings its containers down; this setting decides the *volumes*:

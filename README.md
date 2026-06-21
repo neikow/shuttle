@@ -34,7 +34,8 @@ Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
   or a local dir, and restore it from the control plane.
 - **Batteries included.** Secret injection (Infisical or file), per-user OIDC and
   role-scoped tokens, an audit log, Prometheus metrics, Slack/Discord
-  notifications, automatic Caddy ingress, and an embedded web dashboard.
+  notifications, automatic Caddy ingress (incl. DNS-challenge wildcard certs via
+  `dns.yml`), and an embedded web dashboard.
 - **One binary.** `shuttle orchestrator` on your control host, `shuttle agent` on
   each server — the split is a runtime flag, not a separate build.
 
