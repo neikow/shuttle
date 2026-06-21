@@ -65,7 +65,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `backup_http.go` | `EnableBackups`: `POST /backup/{service}` (deploy), `GET /backups` + `GET /backups/{id}/logs` (read), `POST /restore` (admin). Dispatchers held as fields for testability; backup/restore audited. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
-| `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection; `buildCaddyConfig` emits the `http` app routes and, when DNS certs apply, the `tls.automation` policies. |
+| `caddy.go` | Caddy Admin API client; `RoutesFromRepo`/`RoutesForHost` (`routeUpstream`: managed services dial the `<service>` alias / `<host>:<port>`, external services dial their `upstream` verbatim) + `caddy_snippet` injection; `buildCaddyConfig` emits the `http` app routes and, when DNS certs apply, the `tls.automation` policies. |
 | `dns.go` | `resolveTLSPolicies` — turns the repo's `dns.yml` certificates into Caddy `tls.automation` policies (ACME DNS-01 issuer per provider), resolving provider credentials from the secrets provider and injecting them inline. Filtered per host (cert included only where the host serves a covered domain or a service pins it). |
 | `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/backup`, `/backups`, `/backups/{id}/logs`, `/restore`, `/healthz`, `/readyz`, `/auth/config`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`, via `cspForUI` which adds the OIDC issuer origin to `connect-src` when OIDC is enabled so the SPA can reach the IdP). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `GET /auth/config` (unauthenticated) advertises the OIDC issuer/client_id/scopes so the UI can run a browser PKCE login. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
@@ -286,6 +286,23 @@ These are deliberate. Don't reverse them without updating this file.
   other providers). **OVH is the only provider type for now** — add a type to
   `dnsProviderSpecs` *and* its plugin to `Dockerfile.caddy` together. `shuttle
   check` verifies the provider credentials resolve.
+- **External (proxy-only) services: route, don't manage.** A service may declare
+  an `external: {upstream}` block instead of a compose/remote source. Shuttle then
+  **only emits a Caddy route** for it and skips it in *every* lifecycle path
+  (`ComputePlan`/diff, `Reconcile`/`ForceDeploy`/`DeployAtSHA`,
+  `service_lifecycle`/teardown, drift, backup, `check`'s env/compose validation —
+  each guards on `Service.IsExternal()`). The upstream is dialed **verbatim**
+  (`routeUpstream`), not via the `<service>` network alias, because Shuttle never
+  runs the container and so never joins it to the shared `shuttle` network — the
+  operator makes it reachable (attach it to that network, or `host.docker.internal`
+  via host-gateway). This puts Shuttle's HTTPS + reverse proxy (incl. `dns.yml`
+  wildcards, `caddy_snippet`, `tls_certificate`) in front of out-of-band infra —
+  the canonical case being an Infisical instance that Shuttle's *own* secrets
+  provider depends on (a service it can't deploy without a bootstrap cycle).
+  `external` is a third XOR source kind (`ExternalService`), mutually exclusive
+  with `docker-compose.yml`/`remote:`; it needs `domains` + `upstream` and ignores
+  `port`/`env_schema`/`backup`/`update_policy`. Upstream is plain HTTP (TLS
+  terminated at Caddy); HTTPS-to-backend is future work.
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
   `Fake` backs tests. `Get`/`GetAll` take a `Scope{Env, Path}`: a service's
   `env_from` is the environment (empty → `INFISICAL_ENV`), and the folder comes
