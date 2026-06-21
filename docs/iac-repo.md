@@ -20,6 +20,38 @@ services/
 
 Parsing is strict (unknown keys rejected) and validated on every sync.
 
+## Scaffolding (`shuttle scaffold`)
+
+Rather than hand-write these files, `shuttle scaffold` generates them from the
+same schema the loader uses — the output is validated before it's written, so it
+always parses. Run it in the repo root (or pass `--repo <dir>`); the VS Code
+extension wraps each of these in a command (see [editor support](editor#commands)).
+
+```sh
+# A service from a single image (writes services/web/{web.yaml,docker-compose.yml})
+shuttle scaffold service web --host web1 --kind docker --image nginx:latest \
+  --domain web.example.com --port 80
+
+# A compose service (skeleton docker-compose.yml to edit) or a proxy-only service
+shuttle scaffold service api --host web1 --kind compose
+shuttle scaffold service infisical --host web1 --kind external \
+  --upstream host.docker.internal:8222 --domain secrets.example.com
+
+# A host (appended to hosts.yaml, preserving comments)
+shuttle scaffold host web1 --label region=eu --label role=edge
+
+# A DNS-challenge provider + a certificate (appended to dns.yml)
+shuttle scaffold dns-provider ovh --type ovh --endpoint ovh-eu
+shuttle scaffold certificate star --provider ovh --domain '*.example.com' --domain example.com
+```
+
+`host`, `dns-provider`, and `certificate` append to the existing file via a YAML
+round-trip — your formatting and comments are kept, the entry lands in the right
+list, and a duplicate name is refused. `dns-provider` prefills the credential
+keys the provider type requires (e.g. OVH's `application_key` /
+`application_secret` / `consumer_key`), each pointing at a secrets-provider key
+you set. `service` refuses to overwrite an existing service.
+
 ## `orchestrator.yaml`
 
 Optional file in the repo root that overrides selected `config.yml` settings on
