@@ -42,6 +42,11 @@ func completeAt(path, text string, pos position) []completionItem {
 	// already present in the current block, annotated with their type + whether
 	// the schema requires them.
 	present := presentSiblings(lines, pos.Line, curIndent)
+	// A dns provider's credentials are keyed by names the provider *type* dictates,
+	// not by struct fields — offer those instead of descending into SecretRef.
+	if creds := credentialKeyItems(kind, path2, lines, pos.Line, present); creds != nil {
+		return creds
+	}
 	fields := config.FieldsAt(kind, path2)
 	items := make([]completionItem, 0, len(fields))
 	for _, f := range fields {
@@ -53,6 +58,52 @@ func completeAt(path, text string, pos position) []completionItem {
 		})
 	}
 	return items
+}
+
+// credentialKeyItems offers the credential keys a dns provider type requires
+// under its `credentials:` block (e.g. application_key/application_secret/
+// consumer_key for ovh), filtered by what's already present. The provider type is
+// read from the enclosing provider element's `type:`. Returns nil when not in
+// that context or the type is unknown/absent.
+func credentialKeyItems(kind config.FileKind, path []string, lines []string, lineIdx int, present map[string]bool) []completionItem {
+	if kind != config.FileKindDNS || len(path) < 2 {
+		return nil
+	}
+	if path[len(path)-1] != "credentials" || path[len(path)-2] != "providers" {
+		return nil
+	}
+	keys := config.DNSProviderCredentialKeys(enclosingValue(lines, lineIdx, "type"))
+	if keys == nil {
+		return nil
+	}
+	items := make([]completionItem, 0, len(keys))
+	for _, k := range keys {
+		if present[k] {
+			continue
+		}
+		items = append(items, completionItem{Label: k, Kind: ciField, InsertText: k + ":", Detail: "credential (object)"})
+	}
+	return items
+}
+
+// enclosingValue scans upward from lineIdx for `key: value`, stopping at the
+// start of the current list element ("- "), so it reads a field from the block
+// that contains the cursor (e.g. a dns provider's type while inside its
+// credentials). Returns "" when not found before the element boundary.
+func enclosingValue(lines []string, lineIdx int, key string) string {
+	for i := lineIdx - 1; i >= 0 && i < len(lines); i-- {
+		content := strings.TrimLeft(lines[i], " \t")
+		if elem, ok := strings.CutPrefix(content, "- "); ok {
+			if k, v, found := strings.Cut(elem, ":"); found && strings.TrimSpace(k) == key {
+				return strings.TrimSpace(v)
+			}
+			return "" // reached the enclosing list element's first line
+		}
+		if k, v, found := strings.Cut(content, ":"); found && strings.TrimSpace(k) == key {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // fieldDetail renders a completion item's detail: the field's type, marked

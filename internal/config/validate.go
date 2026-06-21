@@ -140,26 +140,13 @@ func rawStructFor(kind FileKind) reflect.Type {
 // FieldNamesAt returns the YAML key names valid at the given nesting path within
 // a file of the given kind, sorted. An empty path returns the top-level keys.
 // The path follows yaml keys into nested structs (dereferencing pointers, slice,
-// and map element types), so completion stays in lockstep with the Go structs.
-// An unresolvable path returns nil.
+// and array element types), so completion stays in lockstep with the Go structs.
+// A path segment into a map is a map *key*, so it steps to the map's value type
+// (a map's own keys are free-form data, not struct fields, so resolving directly
+// to a map returns nil). An unresolvable path returns nil.
 func FieldNamesAt(kind FileKind, path []string) []string {
-	t := rawStructFor(kind)
-	if t == nil {
-		return nil
-	}
-	for _, seg := range path {
-		t = elemType(t)
-		if t.Kind() != reflect.Struct {
-			return nil
-		}
-		ft, ok := fieldTypeByYAMLName(t, seg)
-		if !ok {
-			return nil
-		}
-		t = ft
-	}
-	t = elemType(t)
-	if t.Kind() != reflect.Struct {
+	t, ok := fieldStructAt(kind, path)
+	if !ok {
 		return nil
 	}
 	var names []string
@@ -185,23 +172,8 @@ type FieldInfo struct {
 // completion can show a useful detail and mark required fields. Same nesting
 // rules and lockstep-with-the-structs guarantee as FieldNamesAt.
 func FieldsAt(kind FileKind, path []string) []FieldInfo {
-	t := rawStructFor(kind)
-	if t == nil {
-		return nil
-	}
-	for _, seg := range path {
-		t = elemType(t)
-		if t.Kind() != reflect.Struct {
-			return nil
-		}
-		ft, ok := fieldTypeByYAMLName(t, seg)
-		if !ok {
-			return nil
-		}
-		t = ft
-	}
-	t = elemType(t)
-	if t.Kind() != reflect.Struct {
+	t, ok := fieldStructAt(kind, path)
+	if !ok {
 		return nil
 	}
 	required := make(map[string]bool)
@@ -246,12 +218,44 @@ func friendlyType(t reflect.Type) string {
 	}
 }
 
-// elemType unwraps pointer, slice, array, and map types to their element type so
-// a nesting path can descend into `[]Struct` / `map[string]Struct` / `*Struct`.
-func elemType(t reflect.Type) reflect.Type {
+// fieldStructAt resolves a nesting path to the struct whose fields are valid
+// there, or (nil,false). A struct segment is a field name; a map segment is a map
+// *key*, stepping to the map's value type (so `credentials:` → SecretRef only one
+// level deeper, under a credential name). Resolving directly onto a map or scalar
+// yields no known fields. Pointers/slices/arrays are unwrapped transparently.
+func fieldStructAt(kind FileKind, path []string) (reflect.Type, bool) {
+	t := rawStructFor(kind)
+	if t == nil {
+		return nil, false
+	}
+	for _, seg := range path {
+		t = unwrapContainer(t)
+		switch t.Kind() {
+		case reflect.Struct:
+			ft, ok := fieldTypeByYAMLName(t, seg)
+			if !ok {
+				return nil, false
+			}
+			t = ft
+		case reflect.Map:
+			t = t.Elem() // the segment is a map key → descend to the value type
+		default:
+			return nil, false
+		}
+	}
+	t = unwrapContainer(t)
+	if t.Kind() != reflect.Struct {
+		return nil, false
+	}
+	return t, true
+}
+
+// unwrapContainer unwraps pointer, slice, and array types to their element type.
+// Maps are deliberately not unwrapped here — a map's keys are data, not fields.
+func unwrapContainer(t reflect.Type) reflect.Type {
 	for {
 		switch t.Kind() {
-		case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		case reflect.Pointer, reflect.Slice, reflect.Array:
 			t = t.Elem()
 		default:
 			return t

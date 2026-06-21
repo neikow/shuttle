@@ -113,6 +113,33 @@ func TestCompleteAt_hostRefFromSibling(t *testing.T) {
 	}
 }
 
+func TestCompleteAt_credentialKeysByProviderType(t *testing.T) {
+	// Under a provider's credentials:, offer the keys the type requires, not the
+	// SecretRef fields.
+	text := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      "
+	got := labels(completeAt("/repo/dns.yml", text, position{Line: 4, Character: 6}))
+	if !slices.Equal(got, []string{"application_key", "application_secret", "consumer_key"}) {
+		t.Errorf("credential keys = %v, want ovh's required creds", got)
+	}
+	if slices.Contains(got, "infisical_key") {
+		t.Errorf("SecretRef fields should not appear at the credentials level: %v", got)
+	}
+
+	// Already-present keys are filtered.
+	text2 := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      application_key:\n        infisical_key: x\n      "
+	got2 := labels(completeAt("/repo/dns.yml", text2, position{Line: 6, Character: 6}))
+	if slices.Contains(got2, "application_key") {
+		t.Errorf("present credential should be filtered: %v", got2)
+	}
+
+	// One level deeper → SecretRef fields.
+	text3 := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      application_key:\n        "
+	got3 := labels(completeAt("/repo/dns.yml", text3, position{Line: 5, Character: 8}))
+	if !slices.Contains(got3, "infisical_key") {
+		t.Errorf("credential value should offer SecretRef fields, got %v", got3)
+	}
+}
+
 func TestCompleteAt_unknownFile(t *testing.T) {
 	if items := completeAt("/repo/README.md", "x", position{}); items != nil {
 		t.Errorf("unknown file should yield nil, got %v", items)

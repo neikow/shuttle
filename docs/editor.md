@@ -27,7 +27,10 @@ type.
     `engine`/`store`, … — plus `true`/`false` for any boolean field;
   - cross-file references — `host:` completes from `hosts.yaml`, `tls_certificate:`
     from `dns.yml`, and a certificate's `provider:` from the providers in the same
-    file.
+    file;
+  - a dns provider's `credentials:` keys follow the provider `type:` (e.g. `ovh`
+    offers `application_key`/`application_secret`/`consumer_key`), then each
+    credential's `infisical_key`/`infisical_env`/`infisical_path` one level deeper.
 - **Diagnostics**, live on every edit (single-file; it runs on the unsaved buffer):
   - unknown keys, type mismatches, and YAML syntax errors;
   - invalid enum values (e.g. `update_policy: bogus`) and missing required fields
