@@ -1,0 +1,54 @@
+{
+  "name": "shuttle-iac",
+  "displayName": "Shuttle IaC",
+  "description": "Schema-aware completion and validation for Shuttle IaC YAML files (hosts.yaml, services/*, dns.yml, orchestrator.yaml), backed by `shuttle lsp`.",
+  "version": "0.1.0",
+  "publisher": "neikow",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neikow/shuttle.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Shuttle",
+      "properties": {
+        "shuttle.lsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the Shuttle language server for IaC YAML files."
+        },
+        "shuttle.lsp.path": {
+          "type": "string",
+          "default": "shuttle",
+          "description": "Path to the `shuttle` binary used to run `shuttle lsp` (must be on PATH, or an absolute path)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.4.0"
+  }
+}
