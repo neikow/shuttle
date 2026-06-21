@@ -3,6 +3,9 @@
 The orchestrator deploys whatever this repository declares. A working sample
 lives in [`examples/repo/`](https://github.com/neikow/shuttle/tree/main/examples/repo).
 
+> 💡 Editing these files is much easier with [editor support](editor): `shuttle
+> lsp` gives completion and live validation driven by this same schema.
+
 ## Layout
 
 ```

@@ -34,10 +34,10 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot) + `lsp.go` (`shuttle lsp`: run the IaC language server over stdio). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
-| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo — hosts/services + the optional `dns.yml` via `dns.go`: DNS-challenge providers + certificates, `DomainCoveredBy` wildcard matching), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
+| `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo — hosts/services + the optional `dns.yml` via `dns.go`: DNS-challenge providers + certificates, `DomainCoveredBy` wildcard matching), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). `validate.go` adds the editor-facing surface used by `internal/lsp`: `DetectFileKind`, single-file `ValidateBytes` (strict decode → positioned `Problem`s, disk-free), and `FieldNamesAt` (reflection over the raw structs → completion keys per nesting). |
 | `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation + the `control_tokens` table (`CreateControlToken`, `LookupControlToken`, `ListControlTokens`, `RevokeControlToken`) — named, role-scoped HTTP bearer tokens (hashed at rest) backing RBAC + the `deploy_logs` table (`RecordDeployLogs`, `DeployLogs`) — captured agent output per deploy, keyed by deploy_id, append-only (also reused for backup/restore operation logs, keyed by the operation id) + the `service_backups` table (`RecordBackup`, `MarkBackupResult`, `ListBackups`, `BackupByID`, `LatestBackupStart`, `LatestSuccessfulBackup`) — one row per service-data backup attempt (engine/store/target/snapshot/size/status), the restore-point catalog. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
@@ -45,6 +45,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). `pin.go`: `SPKIPin` + `PinnedHTTPClient` for trust-on-first-use cert pinning during `agent join`. |
 | `internal/token/` | Agent enrollment + join token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
+| `internal/lsp/` | The `shuttle lsp` language server for IaC YAML files. Hand-rolled stdio JSON-RPC (`protocol.go`) + dispatch/doc-store (`server.go`); `diagnostics.go` validates a buffer via `config.ValidateBytes`; `completion.go` offers field names (`config.FieldNamesAt`, reflection over the config structs), enum values, and cross-file references (host/cert/provider names). Reuses `internal/config` so the editor stays in lockstep with the loader. Client lives in `editors/vscode/`. |
 | `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`) + the backup/restore engine (`backup.go`: `Driver.Backup`/`Restore` — tar named volumes or `pg_dump`, stored to a local dir or a restic repo; backend creds via `-e KEY` passthrough, never argv). |
 | `web/` | React + Vite + TS read-only dashboard (Tailwind v4 + Radix). `embed.go`/`embed_stub.go` gate embedding the built `dist/` behind the `embedui` build tag. Consumes the existing control-plane endpoints. |
 | `test/integration/` | End-to-end tests (`//go:build integration`) that drive the real `shuttle` binary against a live Docker daemon: build → orchestrator + agent → `POST /deploy` → container serves → ledger records success. Excluded from the default unit gate; run via `make test-integration`. An untagged `doc.go` keeps `go build ./...`/lint happy. |
@@ -615,6 +616,26 @@ These are deliberate. Don't reverse them without updating this file.
   enroll`/`shuttle agent join`. Frontend has its own test gate (Vitest + React
   Testing Library, `make web-test`), run in a dedicated CI `web` job; the role
   matrix is also asserted end-to-end in `test/integration/ui_mutations_test.go`.
+- **IaC language server reuses the loader; the editor is a thin client.** `shuttle
+  lsp` (`internal/lsp`) is a real LSP server (completion + diagnostics) for the IaC
+  YAML files, shipped as a subcommand of the one binary (consistent with the
+  single-artifact design — no separate language-server binary to version). It is
+  built **on `internal/config`, not a duplicate schema**: diagnostics come from the
+  same strict decoder the loader uses (`ValidateBytes`), and completion keys come
+  from **reflection over the config structs** (`FieldNamesAt`), so the editor can
+  never drift from what the orchestrator accepts — adding a field to a struct
+  surfaces in completion for free. The JSON-RPC/LSP transport is **hand-rolled**
+  (stdio framing + the ~6 methods an editor needs) rather than pulling an LSP
+  framework, matching the project's minimal-dep bias (like the dotenv parser and
+  migration runner). Validation is **single-file and disk-free** so it runs on the
+  unsaved buffer; cross-file *references* (host/cert/provider names) are read from
+  sibling files on disk for completion, but whole-repo referential *diagnostics*
+  (a full `config.Load`) are deliberately deferred — single-file strict decode
+  already catches the common typo/unknown-key/syntax errors with positions. The
+  VS Code client (`editors/vscode/`) is a thin `vscode-languageclient` wrapper that
+  just launches `shuttle lsp`; highlighting stays VS Code's built-in YAML. `config.yml`
+  is excluded from the client's default selector (name too generic) though the
+  server handles it.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

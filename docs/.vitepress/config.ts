@@ -78,6 +78,7 @@ export default defineConfig({
           { text: 'Architecture', link: '/architecture' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'IaC repository', link: '/iac-repo' },
+          { text: 'Editor support', link: '/editor' },
           { text: 'HTTP API', link: '/http-api' },
           { text: 'Operations', link: '/operations' },
         ],
