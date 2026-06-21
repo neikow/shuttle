@@ -66,6 +66,13 @@ update_policy: rolling    # optional; "rolling" (default) or "recreate"
 delete_volumes: manual    # optional; volume deletion policy on removal (default: manual)
 caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
   [{"handler":"headers","response":{"set":{"X-Frame-Options":["DENY"]}}}]
+backup:                   # optional; service data backup policy
+  engine: volume          # "volume" (tar named volumes) or "postgres" (pg_dump)
+  schedule: daily         # optional; hourly/daily/weekly or a duration ("12h")
+  before_deploy: true     # optional; snapshot before each deploy (best-effort)
+  store: restic           # optional; "restic" (default) or "local"; inherits backups.default_store
+  target: "s3:s3.amazonaws.com/my-bucket/store"  # optional; inherits backups.default_target
+  retention: { keep_daily: 7, keep_weekly: 4 }   # optional; restic forget policy
 ```
 
 ### Field notes
@@ -106,6 +113,26 @@ caddy_snippet: |          # optional; JSON array of Caddy HTTP handlers
 
   Accepts a YAML boolean or a quoted string. The policy in effect is the one
   recorded the last time the service was present in the repo.
+- **`backup`** declares a data-backup policy for the service. The orchestrator
+  backs up the service's *persistent data* (not its config — that lives in git):
+  - **`engine`** (required) — `volume` tars the project's named Docker volumes;
+    `postgres` runs `pg_dump`/`pg_dumpall` in the database container (set
+    `db_service`, optionally `db_user`/`db_name`).
+  - **`schedule`** — `hourly`, `daily`, `weekly`, or a duration (`"12h"`,
+    `"7 days"`). Omit it for no scheduled backups (manual / pre-deploy still work).
+  - **`before_deploy`** — when `true`, take a best-effort snapshot immediately
+    before each deploy/rollback, so a bad release has a fresh restore point.
+  - **`store`** — `restic` (default; dedup + encryption, local path or S3/B2/…) or
+    `local` (a plain tar/SQL file on the host). Inherits `backups.default_store`.
+  - **`target`** — the restic repository or local directory. Inherits
+    `backups.default_target`.
+  - **`retention`** — `keep_last`/`keep_daily`/`keep_weekly`/`keep_monthly` passed
+    to `restic forget` after each backup (restic store only).
+
+  Backend credentials (restic password, S3 keys) are **not** declared here — they
+  are secrets, resolved from the secrets provider via the orchestrator's
+  `backups.env` (see [configuration.md](configuration.md#backups)). The host needs
+  the `restic` path / `docker` reachable to the agent.
 
 ## Compose source — exactly one
 

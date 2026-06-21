@@ -277,6 +277,10 @@ func handleCommand(
 		return nil
 	case *shuttlev1.OrchestratorCommand_Teardown:
 		return executeTeardown(ctx, cfg, stream, driver, deployed, payload.Teardown)
+	case *shuttlev1.OrchestratorCommand_Backup:
+		return executeBackup(ctx, cfg, stream, driver, payload.Backup)
+	case *shuttlev1.OrchestratorCommand_Restore:
+		return executeRestore(ctx, cfg, stream, driver, payload.Restore)
 	default:
 		slog.Warn("unknown command type", "type", fmt.Sprintf("%T", cmd.Payload))
 	}
@@ -346,6 +350,102 @@ func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 		}
 	}
 	return res
+}
+
+// executeBackup runs a backup against the service's compose workspace on disk
+// and reports the outcome (snapshot id, size, logs) back upstream.
+func executeBackup(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.BackupRequest) error {
+	slog.Info("executing backup", "backup_id", req.BackupId, "service", req.Service, "engine", req.Engine, "store", req.Store)
+	workDir := filepath.Join(cfg.WorkDir, req.Service)
+	logCh, doneCh, err := driver.Backup(ctx, BackupParams{
+		BackupID:  req.BackupId,
+		Service:   req.Service,
+		Engine:    req.Engine,
+		Store:     req.Store,
+		Target:    req.Target,
+		Env:       req.Env,
+		WorkDir:   workDir,
+		Volumes:   req.Volumes,
+		DBService: req.DbService,
+		DBUser:    req.DbUser,
+		DBName:    req.DbName,
+		Retention: retentionFromProto(req.Retention),
+	})
+	return streamBackupResult(stream, req.BackupId, "backup", req.Service, logCh, doneCh, err)
+}
+
+// executeRestore restores a prior backup into the service.
+func executeRestore(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.RestoreRequest) error {
+	slog.Info("executing restore", "operation_id", req.OperationId, "service", req.Service, "snapshot", req.SnapshotId)
+	workDir := filepath.Join(cfg.WorkDir, req.Service)
+	logCh, doneCh, err := driver.Restore(ctx, RestoreParams{
+		OperationID: req.OperationId,
+		Service:     req.Service,
+		Engine:      req.Engine,
+		Store:       req.Store,
+		Target:      req.Target,
+		SnapshotID:  req.SnapshotId,
+		Env:         req.Env,
+		WorkDir:     workDir,
+		DBService:   req.DbService,
+		DBUser:      req.DbUser,
+		DBName:      req.DbName,
+	})
+	return streamBackupResult(stream, req.OperationId, "restore", req.Service, logCh, doneCh, err)
+}
+
+// retentionFromProto maps the proto retention into the driver's form.
+func retentionFromProto(r *shuttlev1.BackupRetention) BackupRetention {
+	if r == nil {
+		return BackupRetention{}
+	}
+	return BackupRetention{
+		KeepLast:    int(r.KeepLast),
+		KeepDaily:   int(r.KeepDaily),
+		KeepWeekly:  int(r.KeepWeekly),
+		KeepMonthly: int(r.KeepMonthly),
+	}
+}
+
+// streamBackupResult drains the backup/restore log stream and outcome, then sends
+// one terminal BackupResult event. A start error (driver failed to launch) is
+// reported as a failed result directly.
+func streamBackupResult(stream shuttlev1.AgentService_RegisterClient, opID, operation, service string, logCh <-chan LogLine, doneCh <-chan BackupOutcome, startErr error) error {
+	if startErr != nil {
+		return stream.Send(&shuttlev1.AgentEvent{
+			Payload: &shuttlev1.AgentEvent_BackupResult{
+				BackupResult: &shuttlev1.BackupResult{
+					OperationId: opID, Operation: operation, Service: service,
+					Status: shuttlev1.BackupStatus_BACKUP_STATUS_FAILED, Error: startErr.Error(),
+				},
+			},
+		})
+	}
+
+	var logs []*shuttlev1.LogLine
+	for line := range logCh {
+		logs = append(logs, &shuttlev1.LogLine{TsUnixMs: line.TsUnixMs, Stream: line.Stream, Text: line.Text})
+	}
+	out := <-doneCh
+
+	status := shuttlev1.BackupStatus_BACKUP_STATUS_SUCCESS
+	if out.Failed {
+		status = shuttlev1.BackupStatus_BACKUP_STATUS_FAILED
+	}
+	return stream.Send(&shuttlev1.AgentEvent{
+		Payload: &shuttlev1.AgentEvent_BackupResult{
+			BackupResult: &shuttlev1.BackupResult{
+				OperationId: opID,
+				Operation:   operation,
+				Service:     service,
+				Status:      status,
+				SnapshotId:  out.SnapshotID,
+				SizeBytes:   out.SizeBytes,
+				Logs:        logs,
+				Error:       out.Err,
+			},
+		},
+	})
 }
 
 // connectToCaddy joins a freshly deployed project to the Caddy network so the

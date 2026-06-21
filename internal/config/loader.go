@@ -56,6 +56,20 @@ func LoadOrchestratorConfig(path string) (*OrchestratorConfig, error) {
 			return nil, fmt.Errorf("%s: notifications[%d]: url is required", path, i)
 		}
 	}
+	switch cfg.Backups.DefaultStore {
+	case "", BackupStoreLocal, BackupStoreRestic:
+	default:
+		return nil, fmt.Errorf("%s: backups.default_store %q invalid (want %q or %q)",
+			path, cfg.Backups.DefaultStore, BackupStoreLocal, BackupStoreRestic)
+	}
+	for i, bc := range cfg.Backups.Env {
+		if bc.Key == "" {
+			return nil, fmt.Errorf("%s: backups.env[%d]: key is required", path, i)
+		}
+		if bc.InfisicalKey == "" {
+			return nil, fmt.Errorf("%s: backups.env[%d]: infisical_key is required", path, i)
+		}
+	}
 	if cfg.OIDC.Issuer != "" {
 		if cfg.OIDC.Audience == "" {
 			return nil, fmt.Errorf("%s: oidc.audience is required when oidc.issuer is set", path)
@@ -162,6 +176,10 @@ func loadService(rootDir, dir string) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
+	backup, err := normalizeBackup(raw.Backup)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
 	svc := &Service{
 		Name:          raw.Name,
 		Host:          raw.Host,
@@ -173,6 +191,7 @@ func loadService(rootDir, dir string) (*Service, error) {
 		DeleteVolumes: deleteVolumes,
 		SecretPath:    raw.SecretPath,
 		UpdatePolicy:  updatePolicy,
+		Backup:        backup,
 	}
 
 	if raw.Remote != nil && hasCompose {

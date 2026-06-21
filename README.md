@@ -29,6 +29,9 @@ Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 - **Secure onboarding.** `shuttle init` sets up TLS + SSH-like token enrollment
   for you — it generates a self-signed cert, so there's no `openssl` step and no
   CA to distribute.
+- **Backups built in.** Schedule (or auto-snapshot before each deploy) a service's
+  data — Docker volumes or postgres — to restic (dedup + encryption, local or S3)
+  or a local dir, and restore it from the control plane.
 - **Batteries included.** Secret injection (Infisical or file), per-user OIDC and
   role-scoped tokens, an audit log, Prometheus metrics, Slack/Discord
   notifications, automatic Caddy ingress, and an embedded web dashboard.

@@ -156,6 +156,7 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		syncer := orchestrator.NewGitSyncer(cfg.RepoURL, cfg.RepoBranch, repoDir, store, registry, secProvider)
 		syncer.SetSecretsPaths(cfg.SecretsBasePath, cfg.SecretsPathTemplate)
 		syncer.SetGitCredentials(cfg.GitCredentials)
+		syncer.SetBackupConfig(cfg.Backups)
 		syncer.SetEventBus(bus)
 		if cfg.CaddyAdminURL != "" {
 			syncer.SetCaddy(orchestrator.NewCaddyClient(cfg.CaddyAdminURL))
@@ -232,6 +233,21 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 			poller := orchestrator.NewSecretPoller(syncer, pollInterval, os.Getenv("INFISICAL_ENV"))
 			go poller.Run(ctx)
 			slog.Info("infisical secret polling started", "interval", pollInterval)
+		}
+
+		if cfg.Backups.Enabled() {
+			bpInterval := 5 * time.Minute
+			if cfg.Backups.PollInterval != "" {
+				d, err := time.ParseDuration(cfg.Backups.PollInterval)
+				if err != nil {
+					return fmt.Errorf("backups.poll_interval: %w", err)
+				}
+				bpInterval = d
+			}
+			scheduler := orchestrator.NewBackupScheduler(syncer, store, bpInterval)
+			go scheduler.Run(ctx)
+			httpHandler.EnableBackups(syncer)
+			slog.Info("service backups enabled", "scheduler_interval", bpInterval)
 		}
 	} else {
 		slog.Info("webhook disabled; set repo_url + webhook_secret to enable git sync")

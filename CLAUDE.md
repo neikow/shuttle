@@ -34,18 +34,18 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot). Wiring only — no business logic. |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). |
-| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation + the `control_tokens` table (`CreateControlToken`, `LookupControlToken`, `ListControlTokens`, `RevokeControlToken`) — named, role-scoped HTTP bearer tokens (hashed at rest) backing RBAC + the `deploy_logs` table (`RecordDeployLogs`, `DeployLogs`) — captured agent output per deploy, keyed by deploy_id, append-only. |
+| `internal/ledger/` | SQLite append-only deploy store (`RecordDeploy`, `MarkStatus`, `RollbackTarget`, `CurrentSHAs`, `SeenNonce`) + the `service_lifecycle` table (`MarkServicePresent`, `MarkServiceRemoved`, `ServicesAwaitingTeardown`) tracking which services are still in the repo + the `repo_webhooks` table (`CreateRepoWebhook`, `LookupRepoWebhook`, `ListRepoWebhooks`, `DeleteRepoWebhook`) for service-specific deploy webhooks + the `join_tokens` table (`CreateJoinToken`, `RedeemJoinToken`, `PurgeExpiredJoinTokens`) for single-use SSH-like agent enrollment + `backup.go` (`BackupTo` via SQLite `VACUUM INTO`, `Verify`, `RestoreInto`) for `shuttle backup`/`restore` + the `audit_log` table (`RecordAudit`, `ListAudit`) — append-only actor+action record of every control-plane mutation + the `control_tokens` table (`CreateControlToken`, `LookupControlToken`, `ListControlTokens`, `RevokeControlToken`) — named, role-scoped HTTP bearer tokens (hashed at rest) backing RBAC + the `deploy_logs` table (`RecordDeployLogs`, `DeployLogs`) — captured agent output per deploy, keyed by deploy_id, append-only (also reused for backup/restore operation logs, keyed by the operation id) + the `service_backups` table (`RecordBackup`, `MarkBackupResult`, `ListBackups`, `BackupByID`, `LatestBackupStart`, `LatestSuccessfulBackup`) — one row per service-data backup attempt (engine/store/target/snapshot/size/status), the restore-point catalog. |
 | `internal/secrets/` | `Provider` interface + `Fake` (tests) + `InfisicalProvider` + `FileProvider` (dotenv files under `SHUTTLE_SECRETS_DIR`, no external dep). `NewProvider(name)` factory (`infisical`/`file`/`none`). |
 | `internal/webhook/` | Webhook payload parse, HMAC `X-Hub-Signature-256` verify, nonce replay guard. |
 | `internal/infisical/` | Infisical secret-change webhook: payload decode + `x-infisical-signature` HMAC verify (`t=<ts>,v1=<hex>` over `<ts>.<body>`). |
 | `internal/mtls/` | gRPC TLS 1.3 creds: `ServerCreds`/`ClientCreds` (mutual) + `ServerTLSCreds`/`ClientTLSCreds` (server-auth only, for token auth). `pin.go`: `SPKIPin` + `PinnedHTTPClient` for trust-on-first-use cert pinning during `agent join`. |
 | `internal/token/` | Agent enrollment + join token mint (256-bit) + SHA-256 hash. |
 | `internal/orchestrator/` | The brain. See below. |
-| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`). |
+| `internal/agent/` | Agent run loop (`client.go`) + the Compose `Driver` (`compose.go`) + zero-downtime rolling strategy (`rolling.go`) + Caddy sidecar manager (`caddy.go`) + the backup/restore engine (`backup.go`: `Driver.Backup`/`Restore` — tar named volumes or `pg_dump`, stored to a local dir or a restic repo; backend creds via `-e KEY` passthrough, never argv). |
 | `web/` | React + Vite + TS read-only dashboard (Tailwind v4 + Radix). `embed.go`/`embed_stub.go` gate embedding the built `dist/` behind the `embedui` build tag. Consumes the existing control-plane endpoints. |
 | `test/integration/` | End-to-end tests (`//go:build integration`) that drive the real `shuttle` binary against a live Docker daemon: build → orchestrator + agent → `POST /deploy` → container serves → ledger records success. Excluded from the default unit gate; run via `make test-integration`. An untagged `doc.go` keeps `go build ./...`/lint happy. |
 
@@ -53,18 +53,20 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | File | Responsibility |
 |------|----------------|
-| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger. Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
+| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger, backup/restore-result → `handleBackupResult` (finalize `service_backups`, persist logs, publish event). Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
 | `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup, else OIDC JWT via `looksLikeJWT`+`SetOIDC`), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name / OIDC subject as actor. |
 | `oidc.go` | `OIDCAuthenticator`: per-user OpenID Connect auth. `NewOIDCAuthenticator` does discovery (`github.com/coreos/go-oidc`) against the issuer at boot; `verify` checks JWT signature/JWKS + issuer + `audience`, maps the `roles_claim` through `role_mapping`→`Role` (highest wins), identity = `username_claim`. The third source in `resolveRole`. Also carries the non-secret `PublicConfig()` (issuer/client_id/scopes) served at `GET /auth/config` so the web UI can run a browser PKCE login. |
 | `control_tokens_http.go` | `POST /tokens` (mint, returns plaintext once), `GET /tokens` (list, no hashes), `DELETE /tokens/{id}` (revoke) — all admin-only; create/revoke audited (`token.create`/`token.revoke`). |
 | `enroll.go` | `GET /hosts` + `POST /enroll` (mint a single-use join token) + `POST /enroll/redeem` (join-token-authed: exchange for a host-scoped agent token, hand back gRPC addr/SAN/CA). |
 | `registry.go` | Connected-agent registry; heartbeat tracking + eviction; per-agent build version; `Send(host, cmd)`; `Snapshot` (host, last-seen, version). |
-| `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. |
+| `git.go` | `GitSyncer`: clone/pull (git shell-out), render compose+env, dispatch deploys. `dispatch` calls `maybeBackupBeforeDeploy` (best-effort pre-deploy snapshot, see `backup.go`). |
+| `backup.go` | Service-data backup orchestration on `GitSyncer`: `BackupService`/`RestoreService` (resolve policy + store/target defaults + backend creds from the secrets provider, record a pending `service_backups` row, dispatch the command), `maybeBackupBeforeDeploy` (pre-deploy snapshot, enqueued before the deploy so the agent's sequential command processing finishes it first; 5m cooldown) + `BackupScheduler` (ticks like the drift reconciler, dispatches a service's backup once its `schedule` interval elapsed). |
+| `backup_http.go` | `EnableBackups`: `POST /backup/{service}` (deploy), `GET /backups` + `GET /backups/{id}/logs` (read), `POST /restore` (admin). Dispatchers held as fields for testability; backup/restore audited. |
 | `diff.go` | `ComputePlan` — desired (repo) vs actual (ledger SHAs) → deploy steps. |
 | `reconcile.go` | `StateTracker` + `DriftReconciler` (periodic SHA + container drift heal). |
 | `caddy.go` | Caddy Admin API client; `RoutesFromRepo` + `caddy_snippet` injection. |
-| `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/healthz`, `/readyz`, `/auth/config`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`, via `cspForUI` which adds the OIDC issuer origin to `connect-src` when OIDC is enabled so the SPA can reach the IdP). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `GET /auth/config` (unauthenticated) advertises the OIDC issuer/client_id/scopes so the UI can run a browser PKCE login. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
+| `http.go` | HTTP control plane (`/whoami`, `/deploy`, `/rollback`, `/deploys`, `/deploys/{id}/logs`, `/audit`, `/tokens`, `/backup`, `/backups`, `/backups/{id}/logs`, `/restore`, `/healthz`, `/readyz`, `/auth/config`, `/overview`, `/webhook`, `/webhook/infisical`, `/webhook/repo/{id}`, `/webhooks/repo`, `/hosts`, `/enroll`, `/enroll/redeem`, `/prune`, `/plan`, `/check`, `/events`, `/metrics`). Each authed route is wrapped in `requireRole` (see `rbac.go`) at its minimum tier; `ServeHTTP` sets baseline security headers (+ CSP on `/ui`, via `cspForUI` which adds the OIDC issuer origin to `connect-src` when OIDC is enabled so the SPA can reach the IdP). `GET /whoami` (read tier) echoes the caller's resolved `{name, role}` so the UI can gate which mutation screens it shows. `GET /auth/config` (unauthenticated) advertises the OIDC issuer/client_id/scopes so the UI can run a browser PKCE login. `EnableMetrics(h, requireAuth)` optionally gates `/metrics` at the read tier. `EnableRepoWebhooks` registers the service-specific webhook CRUD + trigger endpoints. |
 | `audit.go` | Audit-log recording helpers: `recordAudit` (best-effort, nil-safe), `auditActor` (X-Actor header → actor, else `operator`), `clientIP` (RemoteAddr, never trusts XFF), and the action/result constants. Mutation handlers in `http.go`/`enroll.go` call `recordAudit` on success and failure. |
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
@@ -116,6 +118,20 @@ version serving (deploy reported FAILED). Requires the project to run two-up: no
 fixed published host port, no `container_name` — `shuttle check` warns otherwise.
 `update_policy: recreate` opts back into compose's stop-then-start. Rollback
 always uses recreate.
+
+**Service backup / restore:** `POST /backup/{service}` (or the scheduler, or a
+`before_deploy` hook) → `GitSyncer.BackupService` resolves the service's `backup:`
+policy (store/target defaulted from `config.yml` `backups:`), resolves backend
+creds from the secrets provider, records a pending `service_backups` row, and
+sends a `BackupRequest` → the agent's `Driver.Backup` runs against the on-disk
+compose workspace (tar the named volumes, or `pg_dump` in the DB container) and
+stores the artifacts (a local dir, or a restic snapshot) → streams a
+`BackupResult` back → `server.go` `handleBackupResult` finalizes the row + logs +
+event. `POST /restore` → `RestoreService` looks up the chosen backup's
+store/target/snapshot and sends a `RestoreRequest` → the agent stops the service,
+restores the data (extract into the volume / replay via `psql`), starts it again.
+`before_deploy` snapshots are enqueued *before* the deploy command, so the agent
+(which processes stream commands sequentially) completes the backup first.
 
 **Manual deploy / rollback:** `POST /deploy/{service}` and
 `POST /rollback?service=…&steps=N` use `GitSyncer.DeployAtSHA` (checkout the
@@ -192,6 +208,34 @@ These are deliberate. Don't reverse them without updating this file.
   data. Opt into deletion per service: `true`/`immediate`, or a duration
   (`"7 days"`) that defers the purge. The duration parser (`ParseHumanDuration`)
   extends `time.ParseDuration` with day/week and spelled-out units.
+- **Service-data backups: agent captures, orchestrator schedules + catalogs,
+  restic is the blessed store.** Backing up *service data* (Docker volumes, DBs)
+  is split along the same seam as deploys: the **agent** does the work (the data
+  lives on its host; it already shells `docker`), the **orchestrator** renders the
+  job, schedules it, resolves credentials, and records it, and the **ledger**
+  (`service_backups`) is the restore-point catalog. This is distinct from
+  `shuttle backup`, which snapshots the *ledger* itself. Two engines ship: `volume`
+  (tar the project's named volumes, resolved from `compose config --format json`)
+  and `postgres` (`pg_dump`/`pg_dumpall` via `docker exec` in the DB container).
+  Two stores: `local` (a plain file under a dir) and `restic` (the default —
+  dedup, encryption, local-or-remote backends, retention via `restic forget`); the
+  agent runs both engines/stores through throwaway helper containers
+  (`alpine`/`restic/restic`), so the host needs only Docker. **Backend credentials
+  are secrets, never repo state**: per-service *policy* (engine/schedule/retention)
+  lives in the IaC repo, but the restic password + S3 keys are resolved from the
+  secrets provider via `config.yml` `backups.env` and injected into the helper
+  container's env with `-e KEY` passthrough — never written to disk or the argv,
+  mirroring the `git_credentials` model. For volumes targeting restic the staged
+  tars are **uncompressed**, so restic dedups effectively across snapshots. Restore
+  is always **cold** (stop → restore → start) and **decoupled from rollback**:
+  rollback redeploys old *code*, restore overwrites *data* — conflating them is
+  destructive, so restore is a separate admin-tier, explicitly-confirmed action.
+  `before_deploy` gives an integral safety net by *ordering*, not a synchronous
+  barrier: the backup is enqueued before the deploy and the agent processes the
+  stream sequentially, so the snapshot finishes first; a 5-minute cooldown stops a
+  crash-loop drift heal from snapshotting every tick. Synchronous gating
+  (`required`) and direct-volume-mount restic (better dedup than staged tars) are
+  deliberate future work.
 - **git via shell-out, not a Go git library.** Mirrors the agent's
   `docker compose` shell-out and avoids a heavy `go-git` dependency. The git CLI
   is already a hard runtime requirement.

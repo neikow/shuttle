@@ -58,6 +58,7 @@ See `deploy/config.example.yml` for a ready-to-edit template (it documents the
 | `webhook_rate_limit_per_minute` | `120` | Per-IP cap on the unauthenticated endpoints (webhooks + `/enroll/redeem`). A negative value disables limiting. |
 | `metrics_require_auth` | `false` | Gate `GET /metrics` behind the read role. Default keeps the standard unauthenticated scrape model; set true when `/metrics` is reachable from an untrusted network. |
 | `oidc` | — | Per-user OpenID Connect auth. Set `oidc.issuer` to enable. See [OIDC](#oidc-per-user-auth) below. |
+| `backups` | — | Service-data backup wiring: backend credentials + store/target defaults + scheduler tick. See [Backups](#backups) below. |
 
 ### Feature gating
 
@@ -73,6 +74,9 @@ See `deploy/config.example.yml` for a ready-to-edit template (it documents the
 - **Infisical webhook** turns on when `infisical_webhook_secret` is set.
 - **Infisical polling** turns on when `infisical_poll_interval` is set.
 - **OIDC auth** turns on when `oidc.issuer` is set (discovery happens at startup).
+- **Service backups** turn on when `backups:` is non-empty (any credential or a
+  default store/target). Enables the `/backup`, `/backups`, `/restore` endpoints
+  and the backup scheduler.
 
 ### OIDC (per-user auth)
 
@@ -178,6 +182,45 @@ git operation the orchestrator fetches the token from Infisical and passes it vi
 
 `shuttle check` reports the status of every configured credential (whether the
 token resolved successfully) alongside the service validation results.
+
+## Backups
+
+`backups:` is the host-side wiring for service-data backups. Per-service *policy*
+(engine, schedule, retention) lives in the IaC repo (see
+[iac-repo.md](iac-repo.md)); `backups:` holds what policy can't carry — the
+backend **credentials** and the defaults services inherit.
+
+```yaml
+backups:
+  default_store: restic                              # store services inherit
+  default_target: "s3:s3.amazonaws.com/my-bucket"    # target services inherit
+  poll_interval: 5m                                  # scheduler tick (default 5m)
+  env:                                               # injected into the backup process
+    - key: RESTIC_PASSWORD                           # env var name set for the backup
+      infisical_key: RESTIC_PASSWORD                 # secret key to resolve
+      infisical_env: production                      # optional; overrides INFISICAL_ENV
+      infisical_path: /shared                        # optional; secrets folder
+    - key: AWS_ACCESS_KEY_ID
+      infisical_key: AWS_ACCESS_KEY_ID
+    - key: AWS_SECRET_ACCESS_KEY
+      infisical_key: AWS_SECRET_ACCESS_KEY
+```
+
+| Sub-key | Default | Purpose |
+|---------|---------|---------|
+| `default_store` | `local` | `restic` or `local`; the store a service inherits when its `backup.store` is empty. |
+| `default_target` | — | Restic repository or local directory a service inherits when its `backup.target` is empty. |
+| `poll_interval` | `5m` | How often the scheduler checks for due scheduled backups (Go duration). The per-service `schedule` decides whether a service is actually due. |
+| `env` | — | Secret references injected into the backup/restore process env (e.g. `RESTIC_PASSWORD`, `AWS_*`). Resolved fresh per operation, **never** written to disk — same model as `git_credentials`. |
+
+The credentials reach the agent's helper containers via `-e KEY` passthrough, so
+they appear only in the process environment, never the argument vector. For the
+`postgres` engine the database password (`PGPASSWORD`) is pulled automatically
+from the service's own secrets (`POSTGRES_PASSWORD`/`PGPASSWORD`) — no extra
+`backups.env` entry needed. Requires a secrets provider when `env` is set.
+
+See [operations.md](operations.md#backups) for triggering, scheduling, and
+restoring.
 
 ## mTLS certificates
 

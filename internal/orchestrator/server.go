@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -85,6 +86,60 @@ func deployLogsFromProto(in []*shuttlev1.LogLine) []ledger.DeployLog {
 		})
 	}
 	return out
+}
+
+// backupStatus maps a proto BackupStatus to a ledger Status.
+func backupStatus(bs shuttlev1.BackupStatus) ledger.Status {
+	if bs == shuttlev1.BackupStatus_BACKUP_STATUS_SUCCESS {
+		return ledger.StatusSuccess
+	}
+	return ledger.StatusFailed
+}
+
+// handleBackupResult finalizes a backup/restore the agent reports: it updates
+// the service_backups ledger row (backups only — restore has no row), persists
+// the captured logs keyed by the operation id, and publishes a terminal event.
+// All steps are best-effort: a failed ledger/log write is logged, never returned,
+// mirroring the deploy-result path.
+func (s *AgentServiceServer) handleBackupResult(ctx context.Context, host string, res *shuttlev1.BackupResult) {
+	ls := backupStatus(res.Status)
+	slog.Info("backup result",
+		"host", host, "operation", res.Operation, "operation_id", res.OperationId,
+		"service", res.Service, "status", ls, "snapshot", res.SnapshotId, "error", res.Error)
+
+	if s.store != nil {
+		if res.Operation == "backup" {
+			if err := s.store.MarkBackupResult(ctx, res.OperationId, ls, res.SnapshotId, res.SizeBytes, res.Error); err != nil {
+				slog.Error("mark backup result", "operation_id", res.OperationId, "err", err)
+			}
+		}
+		if logs := deployLogsFromProto(res.Logs); len(logs) > 0 {
+			if err := s.store.RecordDeployLogs(ctx, res.OperationId, logs); err != nil {
+				slog.Error("record backup logs", "operation_id", res.OperationId, "err", err)
+			}
+		}
+	}
+
+	et := backupEventType(res.Operation, ls)
+	s.bus.Publish(Event{
+		Type: et, Service: res.Service, Host: host, DeployID: res.OperationId,
+		Status: string(ls), Message: res.Error,
+		Detail: map[string]string{"snapshot": res.SnapshotId},
+	})
+}
+
+// backupEventType picks the event type for a backup/restore terminal result.
+func backupEventType(operation string, ls ledger.Status) EventType {
+	switch {
+	case operation == "restore" && ls == ledger.StatusSuccess:
+		return EventRestoreSucceeded
+	case operation == "restore":
+		return EventRestoreFailed
+	case ls == ledger.StatusSuccess:
+		return EventBackupSucceeded
+	default:
+		return EventBackupFailed
+	}
 }
 
 func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServer) error {
@@ -184,6 +239,8 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 			if s.tracker != nil {
 				s.tracker.Record(host, cs.Service, cs.Status, cs.Sha)
 			}
+		case *shuttlev1.AgentEvent_BackupResult:
+			s.handleBackupResult(stream.Context(), host, payload.BackupResult)
 		}
 	}
 }

@@ -13,6 +13,7 @@ message AgentEvent {
     Heartbeat heartbeat = 2;
     DeployResponse deploy_result = 3;
     ContainerState container_state = 4;
+    BackupResult backup_result = 5;
   }
 }
 
@@ -23,6 +24,8 @@ message OrchestratorCommand {
     RollbackRequest rollback = 2;
     CaddyConfigRequest caddy_config = 3;
     TeardownRequest teardown = 4;
+    BackupRequest backup = 5;
+    RestoreRequest restore = 6;
   }
 }
 

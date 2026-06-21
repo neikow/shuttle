@@ -18,6 +18,10 @@ All responses are JSON.
 | `POST /deploy/{service}` | deploy |
 | `POST /rollback` | deploy |
 | `POST /prune` | deploy |
+| `POST /backup/{service}` | deploy |
+| `GET  /backups` | read |
+| `GET  /backups/{id}/logs` | read |
+| `POST /restore` | admin |
 | `POST /enroll` | admin |
 | `POST /tokens` | admin |
 | `GET  /tokens` | admin |
@@ -115,7 +119,7 @@ prune, enrollment, webhook CRUD), when, from where, and how it turned out.
 
 | Query | Default | Notes |
 |-------|---------|-------|
-| `action` | (all) | Filter to one action: `deploy`, `rollback`, `prune`, `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`. |
+| `action` | (all) | Filter to one action: `deploy`, `rollback`, `prune`, `backup`, `backup.restore`, `enroll`, `enroll.redeem`, `webhook.create`, `webhook.delete`. |
 | `limit` | `50` | Clamped to `1..200`. |
 
 ```sh
@@ -195,6 +199,50 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 The orchestrator resolves the target SHA from the ledger (`409` if there is no
 such target), renders that revision's compose, and dispatches it. `202 Accepted`
 with `{ "deploy_id", "host" }`.
+
+## `POST /backup/{service}`
+
+Trigger a backup of a service's persistent data now (per its `backup:` policy in
+the IaC repo). `202 Accepted` with `{ "backup_id", "host" }`. Audited as `backup`.
+
+```sh
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8080/backup/db"
+```
+
+## `GET /backups`
+
+List recorded backup attempts, newest first.
+
+| Query | Default | Notes |
+|-------|---------|-------|
+| `service` | (all) | Filter to one service. |
+| `limit` | `50` | Clamped to `1..200`. |
+
+Each row carries `backup_id`, `service`, `host`, `engine`, `store`, `target`,
+`snapshot_id`, `size_bytes`, `status` (`pending`/`running`/`success`/`failed`),
+`triggered_by` (`manual`/`schedule`/`pre_deploy`), `error`, and timestamps.
+
+## `GET /backups/{id}/logs`
+
+The captured output of one backup or restore operation (by its id), in emission
+order. An unknown id yields `[]`.
+
+## `POST /restore`
+
+Restore a service's data from a prior backup. **Destructive**: the orchestrator
+stops the service, restores the snapshot into its volumes (or replays the
+postgres dump), and starts it again — overwriting current data. Admin-only.
+Audited as `backup.restore`.
+
+| Query | Default | Notes |
+|-------|---------|-------|
+| `service` | — (required) | Service to restore. |
+| `backup_id` | latest successful | Which backup to restore from. |
+
+The restore inherits the chosen backup's store/target/snapshot, so it always
+reads from where that backup was written. `202 Accepted` with
+`{ "operation_id", "host", "snapshot_id" }`.
 
 ## `GET /hosts`
 
