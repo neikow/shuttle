@@ -287,7 +287,8 @@ type Service struct {
 	Backup *ServiceBackup
 }
 
-// ServiceSource is either a local compose file or a remote pointer.
+// ServiceSource is a local compose file, a remote pointer, or an external
+// (Shuttle-not-managed) upstream that only gets a Caddy route.
 type ServiceSource interface {
 	isServiceSource()
 }
@@ -305,6 +306,26 @@ type RemotePointer struct {
 }
 
 func (RemotePointer) isServiceSource() {}
+
+// ExternalService is a service Shuttle does NOT deploy or manage the lifecycle
+// of — it only routes ingress to it. Upstream is the address the host's Caddy
+// sidecar dials verbatim (e.g. a sibling container on the shared `shuttle`
+// network, or `host.docker.internal:PORT`). Used to put HTTPS + a reverse proxy
+// in front of out-of-band infrastructure (e.g. an Infisical instance running
+// beside the agent).
+type ExternalService struct {
+	Upstream string `yaml:"upstream"`
+}
+
+func (ExternalService) isServiceSource() {}
+
+// IsExternal reports whether the service is an external (proxy-only) service.
+// Shuttle skips it in every lifecycle path (deploy/diff/drift/teardown/backup)
+// and only emits a Caddy route for it.
+func (s Service) IsExternal() bool {
+	_, ok := s.Source.(ExternalService)
+	return ok
+}
 
 // Raw YAML structs for decoding (unexported).
 
@@ -326,4 +347,5 @@ type serviceFile struct {
 	UpdatePolicy   string              `yaml:"update_policy"`
 	Backup         *serviceBackup      `yaml:"backup"`
 	Remote         *RemotePointer      `yaml:"remote"`
+	External       *ExternalService    `yaml:"external"`
 }
