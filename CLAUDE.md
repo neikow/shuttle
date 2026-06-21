@@ -248,6 +248,17 @@ These are deliberate. Don't reverse them without updating this file.
   `[:80, :443]` (plaintext served on :80, no redirect — claiming :80 suppresses
   Caddy's auto-redirect); true → `[:443]` only, so Caddy's automatic HTTPS stands
   up its own :80 server that 308-redirects to HTTPS and answers ACME HTTP-01.
+- **Per-host Caddy ports are repo-managed, agent-reconciled.** A host's
+  `caddy: {http_port, https_port}` in `hosts.yaml` (default 80/443) relocates its
+  sidecar's listen+publish ports (for a box already using :80/:443, or one behind
+  a port-forwarding LB). The repo is the single source of truth: the orchestrator
+  bakes the ports into the generated `listen` block **and** carries them on the
+  `CaddyConfigRequest` (proto `http_port`/`https_port`), and the agent
+  reconciles its sidecar — recreating the container when the ports change
+  (`-p` can't be altered live), detecting the current ports via labels stamped at
+  create time. The central `ApplyRoutes` Caddy (`caddy_admin_url`) is not
+  host-scoped, so it keeps 80/443. Moving off the standard ports breaks ACME
+  HTTP-01 (terminate TLS upstream or use the DNS challenge — see issue #87).
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
   `Fake` backs tests. `Get`/`GetAll` take a `Scope{Env, Path}`: a service's
   `env_from` is the environment (empty → `INFISICAL_ENV`), and the folder comes
