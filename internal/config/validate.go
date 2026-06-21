@@ -85,10 +85,20 @@ func ValidateBytes(kind FileKind, data []byte) []Problem {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	err := dec.Decode(target)
-	if err == nil || errors.Is(err, io.EOF) {
-		return nil
+
+	var structural []Problem
+	if err != nil && !errors.Is(err, io.EOF) {
+		structural = problemsFromYAMLError(err)
 	}
-	return problemsFromYAMLError(err)
+
+	// Semantic checks (enums, required fields, intra-file references) run over the
+	// parsed node tree for positions. Skip them when the document isn't even
+	// parseable YAML — that's a pure syntax error, already in `structural`.
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil {
+		return structural
+	}
+	return append(structural, semanticProblems(kind, &doc)...)
 }
 
 var yamlLineRe = regexp.MustCompile(`line (\d+):\s*`)
@@ -160,6 +170,80 @@ func FieldNamesAt(kind FileKind, path []string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// FieldInfo describes a struct field for editor completion: its YAML key, a
+// human-friendly type ("string", "integer", "boolean", "list", "mapping",
+// "object"), and whether the schema requires it at this nesting.
+type FieldInfo struct {
+	Name     string
+	Type     string
+	Required bool
+}
+
+// FieldsAt is FieldNamesAt with each key's friendly type and required flag, so
+// completion can show a useful detail and mark required fields. Same nesting
+// rules and lockstep-with-the-structs guarantee as FieldNamesAt.
+func FieldsAt(kind FileKind, path []string) []FieldInfo {
+	t := rawStructFor(kind)
+	if t == nil {
+		return nil
+	}
+	for _, seg := range path {
+		t = elemType(t)
+		if t.Kind() != reflect.Struct {
+			return nil
+		}
+		ft, ok := fieldTypeByYAMLName(t, seg)
+		if !ok {
+			return nil
+		}
+		t = ft
+	}
+	t = elemType(t)
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	required := make(map[string]bool)
+	for _, k := range RequiredKeys(kind, path) {
+		required[k] = true
+	}
+	var out []FieldInfo
+	for i := 0; i < t.NumField(); i++ {
+		name := yamlName(t.Field(i))
+		if name == "" {
+			continue
+		}
+		out = append(out, FieldInfo{Name: name, Type: friendlyType(t.Field(i).Type), Required: required[name]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// friendlyType maps a struct field type to a short YAML-ish type name.
+func friendlyType(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "integer"
+	case reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.Slice, reflect.Array:
+		return "list"
+	case reflect.Map:
+		return "mapping"
+	case reflect.Struct:
+		return "object"
+	default:
+		return ""
+	}
 }
 
 // elemType unwraps pointer, slice, array, and map types to their element type so

@@ -83,13 +83,14 @@ func TestCompleteAt_unknownFile(t *testing.T) {
 }
 
 func TestDiagnosticsFor(t *testing.T) {
-	// Unknown key → one diagnostic on its line.
-	diags := diagnosticsFor(svcPath, "name: api\nbogus: x\n")
+	// Unknown key → one diagnostic on its line (host present so no required-field
+	// diagnostic competes).
+	diags := diagnosticsFor(svcPath, "name: api\nhost: web1\nbogus: x\n")
 	if len(diags) != 1 {
 		t.Fatalf("want 1 diagnostic, got %d: %+v", len(diags), diags)
 	}
-	if diags[0].Range.Start.Line != 1 {
-		t.Errorf("diagnostic line = %d, want 1", diags[0].Range.Start.Line)
+	if diags[0].Range.Start.Line != 2 {
+		t.Errorf("diagnostic line = %d, want 2", diags[0].Range.Start.Line)
 	}
 	// Valid file → no diagnostics. Unknown file kind → nil.
 	if d := diagnosticsFor(svcPath, "name: api\nhost: web1\n"); len(d) != 0 {
@@ -125,7 +126,7 @@ func TestServer_roundtrip(t *testing.T) {
 	var in bytes.Buffer
 	frame(t, &in, 1, "initialize", map[string]any{})
 	frame(t, &in, 0, "textDocument/didOpen", didOpenParams{
-		TextDocument: textDocumentItem{URI: "file:///repo/services/api/api.yaml", Text: "name: api\nbogus: x\n"},
+		TextDocument: textDocumentItem{URI: "file:///repo/services/api/api.yaml", Text: "name: api\nhost: web1\nbogus: x\n"},
 	})
 	frame(t, &in, 0, "exit", nil)
 
