@@ -26,6 +26,32 @@ func TestCheckService_allPresent(t *testing.T) {
 	}
 }
 
+func TestCheckDNSCredentials(t *testing.T) {
+	repo := ovhRepo(
+		[]config.Service{{Name: "app", Host: "web1", Domains: []string{"app.example.com"}}},
+		[]config.DNSCertificate{{Name: "star", Domains: []string{"*.example.com"}, Provider: "ovh"}},
+	)
+
+	// All creds present -> OK.
+	g := &GitSyncer{secrets: fakeOVHSecrets()}
+	results := g.CheckDNSCredentials(context.Background(), repo)
+	if len(results) != 1 || results[0].Err != "" {
+		t.Fatalf("want one passing provider, got %+v", results)
+	}
+
+	// Missing a cred -> error reported.
+	g = &GitSyncer{secrets: secrets.NewFake(map[string]string{"OVH_APP_KEY": "ak"})}
+	results = g.CheckDNSCredentials(context.Background(), repo)
+	if len(results) != 1 || results[0].Err == "" {
+		t.Fatalf("want a failing provider, got %+v", results)
+	}
+
+	// No dns.yml -> no results.
+	if r := g.CheckDNSCredentials(context.Background(), &config.Repo{}); r != nil {
+		t.Errorf("no DNS config => nil, got %+v", r)
+	}
+}
+
 func TestCheckService_reportsMissingKeys(t *testing.T) {
 	sec := secrets.NewFake(nil)
 	sec.SetScope(secrets.Scope{Env: "prod", Path: "/shared"}, map[string]string{"API_KEY": "k"})
