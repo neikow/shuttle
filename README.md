@@ -9,9 +9,10 @@ ledger that powers one-command rollback and drift detection.
 
 Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
 
-> **Status: v0.3.0** — secure one-command onboarding, web dashboard, RBAC + OIDC,
-> audit log, secrets, zero-downtime deploys, observability, and a signed supply
-> chain. See the [changelog](CHANGELOG.md).
+> **Status: v0.4.0** — wildcard DNS-01 TLS, external (proxy-only) services,
+> service-data backups, an IaC language server, secure one-command onboarding,
+> web dashboard, RBAC + OIDC, audit log, zero-downtime deploys, observability, and
+> a signed supply chain. See the [changelog](CHANGELOG.md).
 >
 > ⚠️ **Alpha software.** It's tested and usable, but the CLI, config, and HTTP
 > API may change between releases without a deprecation path. Pin a version for
@@ -76,7 +77,7 @@ Configurable via env vars — `SHUTTLE_VERSION`, `SHUTTLE_INSTALL_DIR`,
 `SHUTTLE_OS`/`SHUTTLE_ARCH`:
 
 ```sh
-curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_VERSION=0.3.0 bash
+curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_VERSION=0.4.0 bash
 ```
 
 Releases ship an SBOM and keyless cosign signatures. Other methods — container
