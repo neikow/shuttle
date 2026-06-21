@@ -1,10 +1,15 @@
-.PHONY: build build-ui web web-install web-dev web-test web-check docs docs-install docs-dev docs-build test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
+.PHONY: build build-ui web web-install web-dev web-test web-check docs docs-install docs-dev docs-build install dev-install test test-unit test-integration lint proto clean dev-repo dev-clean dev-gitea dev-gitea-setup dev-gitea-clean dev-gitea-webhook-setup
 
 BINARY := shuttle
 MODULE := github.com/neikow/shuttle
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)
+
+# Where dev-install drops the binary. Default to a dir that's reliably on PATH
+# for GUI apps (e.g. an editor launching `shuttle lsp`), unlike $GOBIN. Override
+# with PREFIX=~/bin etc.
+PREFIX ?= /usr/local/bin
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/shuttle
@@ -50,6 +55,15 @@ docs: docs-build
 
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/shuttle
+
+# Build a version-stamped binary and copy it onto PATH for local dev — so an
+# editor can find `shuttle lsp`, or you can run the latest `shuttle` after a
+# change. Installs to $(PREFIX) (default /usr/local/bin); run with sudo if that
+# dir isn't writable, or set PREFIX to a writable dir on your PATH.
+dev-install: build
+	mkdir -p "$(PREFIX)"
+	install -m 0755 $(BINARY) "$(PREFIX)/$(BINARY)"
+	@echo "installed $(BINARY) $(VERSION) -> $(PREFIX)/$(BINARY)"
 
 test-unit:
 	go test -count=1 -race ./internal/...

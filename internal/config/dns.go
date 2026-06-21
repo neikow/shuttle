@@ -150,6 +150,17 @@ func (d *DNSConfig) CertificateNames() map[string]bool {
 	return names
 }
 
+// DNSProviderCredentialKeys returns the credential keys a provider type requires
+// (the map keys under a provider's `credentials:`), or nil for an unknown type.
+// Backed by dnsProviderSpecs so the editor offers exactly what the type needs.
+func DNSProviderCredentialKeys(providerType string) []string {
+	spec, ok := dnsProviderSpecs[providerType]
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), spec.requiredCreds...)
+}
+
 func supportedDNSTypes() string {
 	types := make([]string, 0, len(dnsProviderSpecs))
 	for t := range dnsProviderSpecs {

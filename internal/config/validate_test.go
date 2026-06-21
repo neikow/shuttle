@@ -86,4 +86,26 @@ func TestFieldNamesAt(t *testing.T) {
 	if got := FieldNamesAt(FileKindService, []string{"nope"}); got != nil {
 		t.Errorf("unknown path should be nil, got %v", got)
 	}
+
+	// A map field (credentials) resolves to no struct fields at its own level —
+	// its keys are provider-specific data, not SecretRef fields.
+	if got := FieldNamesAt(FileKindDNS, []string{"providers", "credentials"}); got != nil {
+		t.Errorf("credentials level should be nil (map keys are data), got %v", got)
+	}
+	// One level deeper (under a credential name) → the SecretRef fields.
+	deep := FieldNamesAt(FileKindDNS, []string{"providers", "credentials", "application_key"})
+	for _, want := range []string{"infisical_key", "infisical_env", "infisical_path"} {
+		if !slices.Contains(deep, want) {
+			t.Errorf("credential value keys missing %q (got %v)", want, deep)
+		}
+	}
+}
+
+func TestDNSProviderCredentialKeys(t *testing.T) {
+	if got := DNSProviderCredentialKeys("ovh"); !slices.Equal(got, []string{"application_key", "application_secret", "consumer_key"}) {
+		t.Errorf("ovh credential keys = %v", got)
+	}
+	if got := DNSProviderCredentialKeys("route53"); got != nil {
+		t.Errorf("unknown provider type should be nil, got %v", got)
+	}
 }

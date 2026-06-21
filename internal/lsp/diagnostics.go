@@ -15,27 +15,30 @@ func diagnosticsFor(path, text string) []diagnostic {
 	if kind == config.FileKindUnknown {
 		return nil
 	}
-	problems := config.ValidateBytes(kind, []byte(text))
-	if len(problems) == 0 {
-		return []diagnostic{}
-	}
 	lines := strings.Split(text, "\n")
-	diags := make([]diagnostic, 0, len(problems))
-	for _, p := range problems {
+	var diags []diagnostic
+	for _, p := range config.ValidateBytes(kind, []byte(text)) {
 		line := max(p.Line-1, 0) // config reports 1-based lines
-		end := 1
+		start := max(p.Column-1, 0)
+		end := start + 1
 		if line < len(lines) {
 			end = len(lines[line])
 		}
 		diags = append(diags, diagnostic{
 			Range: rangeT{
-				Start: position{Line: line, Character: 0},
+				Start: position{Line: line, Character: start},
 				End:   position{Line: line, Character: end},
 			},
 			Severity: sevError,
 			Source:   "shuttle",
 			Message:  p.Message,
 		})
+	}
+	// Cross-file reference checks read sibling files (host/tls_certificate), so
+	// they live outside the disk-free config.ValidateBytes.
+	diags = append(diags, crossFileDiagnostics(path, text)...)
+	if diags == nil {
+		return []diagnostic{}
 	}
 	return diags
 }

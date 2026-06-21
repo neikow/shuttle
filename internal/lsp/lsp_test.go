@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -22,14 +23,50 @@ func labels(items []completionItem) []string {
 const svcPath = "/repo/services/api/api.yaml"
 
 func TestCompleteAt_topLevelKeys(t *testing.T) {
-	// Empty third line at the top level → service field names.
+	// Empty third line at the top level → service field names not already present.
 	text := "name: api\nhost: web1\n"
 	items := completeAt(svcPath, text, position{Line: 2, Character: 0})
 	got := labels(items)
-	for _, want := range []string{"host", "domains", "external", "tls_certificate"} {
+	for _, want := range []string{"domains", "external", "tls_certificate"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("top-level keys missing %q (got %v)", want, got)
 		}
+	}
+}
+
+func TestCompleteAt_skipsPresentKeys(t *testing.T) {
+	// name + host already present → not re-suggested; domains still offered.
+	text := "name: api\nhost: web1\n"
+	got := labels(completeAt(svcPath, text, position{Line: 2, Character: 0}))
+	if slices.Contains(got, "name") || slices.Contains(got, "host") {
+		t.Errorf("present keys should be filtered out, got %v", got)
+	}
+	if !slices.Contains(got, "domains") {
+		t.Errorf("domains should still be offered, got %v", got)
+	}
+}
+
+func TestCompleteAt_detailTypeAndRequired(t *testing.T) {
+	items := completeAt(svcPath, "", position{Line: 0, Character: 0})
+	byLabel := map[string]completionItem{}
+	for _, it := range items {
+		byLabel[it.Label] = it
+	}
+	if d := byLabel["host"].Detail; d != "string (required)" {
+		t.Errorf("host detail = %q, want %q", d, "string (required)")
+	}
+	if d := byLabel["port"].Detail; d != "integer" {
+		t.Errorf("port detail = %q, want %q", d, "integer")
+	}
+}
+
+func TestCompleteAt_genericBoolValue(t *testing.T) {
+	// before_deploy is a bool field inside backup: → true/false offered without
+	// being enumerated explicitly.
+	text := "backup:\n  before_deploy: "
+	got := labels(completeAt(svcPath, text, position{Line: 1, Character: len("  before_deploy: ")}))
+	if !slices.Equal(got, []string{"true", "false"}) {
+		t.Errorf("before_deploy values = %v, want [true false]", got)
 	}
 }
 
@@ -76,20 +113,89 @@ func TestCompleteAt_hostRefFromSibling(t *testing.T) {
 	}
 }
 
+func TestCompleteAt_credentialKeysByProviderType(t *testing.T) {
+	// Under a provider's credentials:, offer the keys the type requires, not the
+	// SecretRef fields.
+	text := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      "
+	got := labels(completeAt("/repo/dns.yml", text, position{Line: 4, Character: 6}))
+	if !slices.Equal(got, []string{"application_key", "application_secret", "consumer_key"}) {
+		t.Errorf("credential keys = %v, want ovh's required creds", got)
+	}
+	if slices.Contains(got, "infisical_key") {
+		t.Errorf("SecretRef fields should not appear at the credentials level: %v", got)
+	}
+
+	// Already-present keys are filtered.
+	text2 := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      application_key:\n        infisical_key: x\n      "
+	got2 := labels(completeAt("/repo/dns.yml", text2, position{Line: 6, Character: 6}))
+	if slices.Contains(got2, "application_key") {
+		t.Errorf("present credential should be filtered: %v", got2)
+	}
+
+	// One level deeper → SecretRef fields.
+	text3 := "providers:\n  - name: ovh\n    type: ovh\n    credentials:\n      application_key:\n        "
+	got3 := labels(completeAt("/repo/dns.yml", text3, position{Line: 5, Character: 8}))
+	if !slices.Contains(got3, "infisical_key") {
+		t.Errorf("credential value should offer SecretRef fields, got %v", got3)
+	}
+}
+
 func TestCompleteAt_unknownFile(t *testing.T) {
 	if items := completeAt("/repo/README.md", "x", position{}); items != nil {
 		t.Errorf("unknown file should yield nil, got %v", items)
 	}
 }
 
+func TestCrossFileDiagnostics_host(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yaml"), []byte("hosts:\n  - name: web1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svcDir := filepath.Join(dir, "services", "api")
+	if err := os.MkdirAll(svcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(svcDir, "api.yaml")
+
+	// Unknown host → a cross-file diagnostic.
+	diags := diagnosticsFor(path, "name: api\nhost: nope\n")
+	found := false
+	for _, d := range diags {
+		if strings.Contains(d.Message, "unknown host") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want an unknown-host diagnostic, got %+v", diags)
+	}
+
+	// Known host → no cross-file diagnostic.
+	for _, d := range diagnosticsFor(path, "name: api\nhost: web1\n") {
+		if strings.Contains(d.Message, "unknown host") {
+			t.Errorf("web1 is declared; should not be flagged: %+v", d)
+		}
+	}
+}
+
+func TestCrossFileDiagnostics_noSiblingNoFalsePositive(t *testing.T) {
+	// No hosts.yaml on disk → the host reference can't be judged, so it isn't
+	// flagged (avoids false positives while editing standalone).
+	for _, d := range diagnosticsFor("/nowhere/services/api/api.yaml", "name: api\nhost: web1\n") {
+		if strings.Contains(d.Message, "unknown host") {
+			t.Errorf("missing hosts.yaml should not produce a host diagnostic: %+v", d)
+		}
+	}
+}
+
 func TestDiagnosticsFor(t *testing.T) {
-	// Unknown key → one diagnostic on its line.
-	diags := diagnosticsFor(svcPath, "name: api\nbogus: x\n")
+	// Unknown key → one diagnostic on its line (host present so no required-field
+	// diagnostic competes).
+	diags := diagnosticsFor(svcPath, "name: api\nhost: web1\nbogus: x\n")
 	if len(diags) != 1 {
 		t.Fatalf("want 1 diagnostic, got %d: %+v", len(diags), diags)
 	}
-	if diags[0].Range.Start.Line != 1 {
-		t.Errorf("diagnostic line = %d, want 1", diags[0].Range.Start.Line)
+	if diags[0].Range.Start.Line != 2 {
+		t.Errorf("diagnostic line = %d, want 2", diags[0].Range.Start.Line)
 	}
 	// Valid file → no diagnostics. Unknown file kind → nil.
 	if d := diagnosticsFor(svcPath, "name: api\nhost: web1\n"); len(d) != 0 {
@@ -125,7 +231,7 @@ func TestServer_roundtrip(t *testing.T) {
 	var in bytes.Buffer
 	frame(t, &in, 1, "initialize", map[string]any{})
 	frame(t, &in, 0, "textDocument/didOpen", didOpenParams{
-		TextDocument: textDocumentItem{URI: "file:///repo/services/api/api.yaml", Text: "name: api\nbogus: x\n"},
+		TextDocument: textDocumentItem{URI: "file:///repo/services/api/api.yaml", Text: "name: api\nhost: web1\nbogus: x\n"},
 	})
 	frame(t, &in, 0, "exit", nil)
 
