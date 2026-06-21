@@ -72,10 +72,11 @@ func main() {
 	backupCmd.GroupID = "tools"
 	restoreCmd.GroupID = "tools"
 	lspCmd.GroupID = "tools"
+	scaffoldCmd.GroupID = "tools"
 	backupServiceCmd.GroupID = "ops"
 	backupsCmd.GroupID = "ops"
 	restoreServiceCmd.GroupID = "ops"
-	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd, planCmd, eventsCmd, initCmd, backupCmd, restoreCmd, auditCmd, tokenCmd, backupServiceCmd, backupsCmd, restoreServiceCmd, lspCmd)
+	rootCmd.AddCommand(versionCmd, orchestratorCmd, agentCmd, enrollCmd, pruneCmd, checkCmd, webhookCmd, planCmd, eventsCmd, initCmd, backupCmd, restoreCmd, auditCmd, tokenCmd, backupServiceCmd, backupsCmd, restoreServiceCmd, lspCmd, scaffoldCmd)
 	silenceUsageOnRun(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
