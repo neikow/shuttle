@@ -45,3 +45,27 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # shuttle-caddy: stock Caddy + the DNS-challenge provider plugins. Built
+      # separately from the binary images (it's an xcaddy build, not a GoReleaser
+      # artifact). Tagged with the release version so the agent's version-aligned
+      # default (defaultCaddyImage) always resolves, plus :latest.
+      - name: Build and push shuttle-caddy image
+        id: caddy_build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/neikow/shuttle-caddy:${{ github.ref_name }}
+            ghcr.io/neikow/shuttle-caddy:latest
+
+      # Keyless cosign signature over the image digest, matching the binary
+      # images' supply-chain posture (Fulcio/Rekor via the job's GitHub OIDC).
+      - name: Sign shuttle-caddy image
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          DIGEST: ${{ steps.caddy_build.outputs.digest }}
+        run: cosign sign --yes "ghcr.io/neikow/shuttle-caddy@${DIGEST}"

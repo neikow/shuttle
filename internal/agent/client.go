@@ -102,6 +102,10 @@ type Config struct {
 	// (see `shuttle enroll`).
 	Token     string
 	DockerBin string // docker executable, shared with the Caddy sidecar
+	// CaddyImage overrides the Caddy sidecar image. Empty keeps the sidecar's own
+	// default. DNS-challenge certificates require an image with the provider
+	// plugin compiled in (the shipped ghcr.io/neikow/shuttle-caddy image).
+	CaddyImage string
 }
 
 // tokenCreds attaches a bearer token to every RPC. RequireTransportSecurity is
@@ -148,7 +152,7 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 		slog.Info("reconciled deployed services from disk", "count", n, "work_dir", cfg.WorkDir)
 	}
 
-	caddy := newCaddySidecar(CaddyOptions{DockerBin: cfg.DockerBin})
+	caddy := newCaddySidecar(CaddyOptions{DockerBin: cfg.DockerBin, Image: cfg.CaddyImage})
 	if err := caddy.ensure(ctx); err != nil {
 		slog.Error("caddy sidecar start failed; continuing without ingress", "err", err)
 	} else {

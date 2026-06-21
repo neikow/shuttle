@@ -80,6 +80,11 @@ from --work-dir.`,
 		}
 		slog.Info("join redeemed; agent credentials persisted", "host", res.Host, "work_dir", workDir)
 
+		caddyImage, _ := cmd.Flags().GetString("caddy-image")
+		if caddyImage == "" {
+			caddyImage = defaultCaddyImage(Version)
+		}
+
 		cfg := agent.Config{
 			Host:         res.Host,
 			Orchestrator: res.GRPCAddr,
@@ -89,6 +94,7 @@ from --work-dir.`,
 			ServerName:   res.ServerName,
 			Token:        res.Token,
 			DockerBin:    dockerBin,
+			CaddyImage:   caddyImage,
 		}
 		return agent.Run(ctx, cfg, driver)
 	},
@@ -151,4 +157,5 @@ func init() {
 	joinCmd.Flags().String("work-dir", "./agent-work", "Base directory for compose workspaces and persisted credentials")
 	joinCmd.Flags().String("driver", "compose", "Deploy driver: 'compose' (Docker Compose) or 'synology' (DSM Container Manager)")
 	joinCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
+	joinCmd.Flags().String("caddy-image", "", "Caddy sidecar image (default ghcr.io/neikow/shuttle-caddy:<version>)")
 }
