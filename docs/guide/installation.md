@@ -25,7 +25,7 @@ It's configurable via environment variables:
 
 ```sh
 # Pin a version (without the leading "v")
-curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_VERSION=0.3.0 bash
+curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_VERSION=0.4.0 bash
 
 # Install somewhere on your PATH without sudo
 curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_INSTALL_DIR="$HOME/.local/bin" bash
@@ -55,7 +55,7 @@ Grab the archive for your OS/arch from the
 
 ```sh
 # Linux amd64 — adjust the version/arch to match the release asset
-VERSION=0.3.0
+VERSION=0.4.0
 curl -sSL -o shuttle.tar.gz \
   https://github.com/neikow/shuttle/releases/download/v${VERSION}/shuttle_${VERSION}_linux_amd64.tar.gz
 tar -xzf shuttle.tar.gz shuttle

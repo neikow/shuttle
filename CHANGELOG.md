@@ -4,6 +4,65 @@ All notable changes to Shuttle are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-21
+
+An ingress, data, and tooling release. v0.4.0 puts wildcard TLS and a reverse
+proxy in front of anything, gives stateful services first-class backups, and adds
+an editor language server so the IaC files write themselves. Backward
+compatible — existing repos and configs are unchanged; every new capability is
+opt-in.
+
+> Shuttle is **alpha**: the CLI, config, and HTTP API may still change between
+> releases without a deprecation path. Pin a version for anything you rely on.
+
+### Ingress & TLS
+
+- **Wildcard certificates via a DNS-01 challenge.** A new optional `dns.yml` in
+  the IaC repo declares DNS **providers** (OVH to start) and **certificates**
+  (incl. `*.example.com`). The orchestrator issues each over an ACME DNS-01
+  challenge — the only challenge that mints wildcards and that needs no inbound
+  `:80`/`:443` — so one cert serves every subdomain (one ACME order, not N). A
+  service's domain is auto-matched to a covering certificate; an optional
+  `tls_certificate:` pins one explicitly. Domains covered by no certificate keep
+  the existing per-domain Let's Encrypt (HTTP-01). Provider credentials are
+  resolved from the secrets provider and never committed. Ships a
+  `ghcr.io/neikow/shuttle-caddy` image (stock Caddy + the OVH DNS plugin); the
+  agent defaults its sidecar to it, overridable with `--caddy-image`.
+- **External (proxy-only) services.** A service may declare an `external:
+  {upstream}` block instead of a compose source: Shuttle **routes to it but never
+  deploys it** — HTTPS + reverse proxy (incl. `dns.yml` wildcards, `caddy_snippet`,
+  `tls_certificate`) in front of infrastructure you run out-of-band. The canonical
+  case is an Infisical instance that Shuttle's own secrets provider depends on.
+- **Choose the Caddy sidecar ports per host.** A host's `caddy: {http_port,
+  https_port}` in `hosts.yaml` relocates its ingress ports (for a box already
+  using `:80`/`:443`, or one behind a port-forwarding load balancer).
+
+### Backups
+
+- **Service-data backups.** Distinct from the ledger snapshot (`shuttle backup`),
+  Shuttle now backs up a service's *persistent data*. Two engines — `volume` (tar
+  the project's named volumes) and `postgres` (`pg_dump`/`pg_dumpall`) — to two
+  stores — `local` or **restic** (dedup, encryption, local-or-remote, retention via
+  `restic forget`). Per-service `backup:` policy (engine/schedule/retention) lives
+  in the repo; backend credentials come from the secrets provider via
+  `config.yml` `backups:`. A scheduler runs due backups, and `before_deploy` takes
+  a snapshot before each deploy. Restore is a separate, admin-tier, explicitly
+  confirmed action (stop → restore → start), decoupled from rollback. Triggered,
+  listed, and restored via `shuttle backup-service` / `backups` / `restore-service`
+  and the `POST /backup/{service}` / `GET /backups` / `POST /restore` endpoints.
+
+### Editor tooling
+
+- **A language server for the IaC files.** `shuttle lsp` is an LSP server (a
+  subcommand of the one binary) providing completion and live validation for
+  `hosts.yaml`, services, `dns.yml`, and `orchestrator.yaml`. It reuses Shuttle's
+  own config loader, so the editor never drifts from what the orchestrator
+  accepts: diagnostics flag unknown keys / type / syntax errors as you type, and
+  completion offers schema field names, enum values, and cross-file references
+  (`host:` → `hosts.yaml`, `tls_certificate:` → `dns.yml`, …). A thin **VS Code
+  extension** (`editors/vscode/`) launches it; any LSP-capable editor can use it
+  too.
+
 ## [0.3.0] - 2026-06-20
 
 An onboarding release. v0.3.0 makes the first five minutes secure *and* easy:
@@ -157,6 +216,7 @@ back to an append-only SQLite ledger that powers rollback and drift detection.
 Includes mTLS, token enrollment, Caddy ingress, the Synology driver, and
 GoReleaser-published archives + images.
 
+[0.4.0]: https://github.com/neikow/shuttle/releases/tag/v0.4.0
 [0.3.0]: https://github.com/neikow/shuttle/releases/tag/v0.3.0
 [0.2.0]: https://github.com/neikow/shuttle/releases/tag/v0.2.0
 [0.1.0]: https://github.com/neikow/shuttle/releases/tag/v0.1.0
