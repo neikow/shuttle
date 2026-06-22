@@ -282,11 +282,13 @@ These are deliberate. Don't reverse them without updating this file.
   it) so unrelated hosts don't order wildcards they never serve. The DNS-01
   challenge needs the provider plugin compiled into Caddy, which stock
   `caddy:2-alpine` lacks — so a `ghcr.io/neikow/shuttle-caddy` image (xcaddy +
-  `caddy-dns/ovh`, built/cosign-signed by `release.yml`) is shipped and the agent
-  defaults its sidecar to it (version-aligned, `--caddy-image` overrides for
-  other providers). **OVH is the only provider type for now** — add a type to
-  `dnsProviderSpecs` *and* its plugin to `Dockerfile.caddy` together. `shuttle
-  check` verifies the provider credentials resolve.
+  `caddy-dns/{ovh,cloudflare,route53}`, built/cosign-signed by `release.yml`) is
+  shipped and the agent defaults its sidecar to it (version-aligned,
+  `--caddy-image` overrides for other providers). **Supported types: `cloudflare`,
+  `ovh`, `route53`** (each provider's `credentials:` keys are the Caddy DNS
+  module's own JSON field names) — add a type to `dnsProviderSpecs` *and* its
+  plugin to `Dockerfile.caddy` together. `shuttle check` verifies the provider
+  credentials resolve.
 - **External (proxy-only) services: route, don't manage.** A service may declare
   an `external: {upstream}` block instead of a compose/remote source. Shuttle then
   **only emits a Caddy route** for it and skips it in *every* lifecycle path

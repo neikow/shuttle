@@ -6,6 +6,14 @@ All notable changes to Shuttle are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Cloudflare and Route53 DNS-challenge providers.** `dns.yml` providers now
+  accept `type: cloudflare` (`api_token`) and `type: route53` (`access_key_id`,
+  `secret_access_key`, `region`) alongside `ovh`. The shipped
+  `ghcr.io/neikow/shuttle-caddy` image bundles all three plugins; the editor and
+  `shuttle scaffold dns-provider` prefill each type's credential keys.
+
 ### Changed
 
 - **Service env is now an explicit `env:` map, replacing `env_schema:`.**

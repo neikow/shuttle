@@ -107,8 +107,8 @@ without the host being reachable on `:80`/`:443`.
 ```yaml
 providers:
   - name: ovh                 # referenced by certificates below
-    type: ovh                 # supported: ovh
-    endpoint: ovh-eu          # OVH API region (ovh-eu, ovh-ca, ...)
+    type: ovh                 # supported: cloudflare, ovh, route53
+    endpoint: ovh-eu          # OVH API region (ovh-eu, ovh-ca, ...) — OVH only
     credentials:              # each value resolved from the secrets provider
       application_key:    { infisical_key: OVH_APPLICATION_KEY }
       application_secret: { infisical_key: OVH_APPLICATION_SECRET }
@@ -119,6 +119,15 @@ certificates:
     domains: ["*.example.com", "example.com"]
     provider: ovh
 ```
+
+Each provider `type` dictates its `credentials:` keys (the editor and
+`shuttle scaffold dns-provider` prefill them):
+
+| `type` | `endpoint` | `credentials:` keys |
+|--------|-----------|---------------------|
+| `cloudflare` | — | `api_token` |
+| `ovh` | required (`ovh-eu`, `ovh-ca`, …) | `application_key`, `application_secret`, `consumer_key` |
+| `route53` | — | `access_key_id`, `secret_access_key`, `region` |
 
 - A service whose domain falls under a certificate's `domains` (exact or
   wildcard, e.g. `app.example.com` under `*.example.com`) is **automatically**
@@ -135,9 +144,9 @@ certificates:
   uses.
 - **Requires a DNS-capable Caddy image.** The DNS challenge needs the provider
   plugin compiled into Caddy. Agents default their sidecar to
-  `ghcr.io/neikow/shuttle-caddy` (stock Caddy + the OVH plugin); for another
-  provider, build your own with `xcaddy` and point the agent at it with
-  `--caddy-image`.
+  `ghcr.io/neikow/shuttle-caddy` (stock Caddy + the Cloudflare, OVH, and Route53
+  plugins); for a provider it doesn't bundle, build your own with `xcaddy` and
+  point the agent at it with `--caddy-image`.
 - `shuttle check` validates that every provider's credentials resolve.
 
 ## `services/<name>/<name>.yaml`
