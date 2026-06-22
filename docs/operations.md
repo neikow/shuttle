@@ -93,6 +93,23 @@ A systemd unit template is at `deploy/systemd/shuttle-orchestrator.service`.
 Provide a `config.yml` (see [configuration.md](configuration.md)). The data dir
 holds the SQLite ledger — back it up to preserve deploy history.
 
+#### Preflight with `shuttle doctor`
+
+Before (or as part of) starting the orchestrator, run a host-level preflight:
+
+```sh
+shuttle doctor --config /etc/shuttle/config.yml
+```
+
+It checks that `config.yml` parses, the `git` binary is present and the IaC repo
+is reachable, Docker is reachable (only needed on agent hosts — use
+`--skip-docker` on an orchestrator-only box), the data dir is writable, the gRPC
+TLS cert parses and isn't expired (or expiring within `--cert-warn-days`, default
+30), and the configured secrets provider can be constructed. It dispatches
+nothing and writes no state, so it is safe as a systemd `ExecStartPre=` or a CI
+smoke test — a failed check exits non-zero (warnings alone exit 0). For deep
+IaC-repo and per-service secret validation, run `shuttle check`.
+
 ### Agent
 
 ```sh
