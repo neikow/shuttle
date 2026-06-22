@@ -11,7 +11,7 @@ repo_url: "file:///iac"
 repo_branch: "main"
 webhook_secret: "dev-webhook-secret"
 
-# The demo services declare no env_schema, so no external secrets provider.
+# The demo services declare no env, so no external secrets provider.
 secrets_provider: "none"
 
 # No Caddy in this loop.

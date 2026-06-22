@@ -149,8 +149,11 @@ domains:                  # optional; drive Caddy ingress
   - whoami.example.com
 env_from: production      # optional; Infisical environment to read secrets from
 secret_path: /services/whoami  # optional; Infisical folder for this service (absolute)
-env_schema:               # optional; the only secret keys passed to this service
-  - WHOAMI_NAME
+env:                      # optional; the environment variables shipped to the service
+  WHOAMI_NAME: ""           # "" -> read this key from the configured secrets provider
+  DATABASE_URL: ${infisical:DB_URL}   # provider key under a different name
+  LOG_LEVEL: ${env:LOG_LEVEL}         # the orchestrator's own process environment
+  STATIC: info                        # a literal value
 port: 80                  # optional; the Caddy upstream port for this service's domains
 update_policy: rolling    # optional; "rolling" (default) or "recreate"
 delete_volumes: manual    # optional; volume deletion policy on removal (default: manual)
@@ -179,9 +182,26 @@ backup:                   # optional; service data backup policy
   orchestrator always also reads the shared `secrets_base_path` and merges it
   under the service folder (service keys win). See
   [configuration.md](configuration.md#secrets-providers).
-- **`env_schema`** scopes secrets: the orchestrator passes the service only these
-  keys (filtered from the configured secrets provider). Without it, no secrets
-  flow to the service.
+- **`env`** declares the environment variables shipped to the service. It is a
+  map of variable name → **source spec**, resolved by the orchestrator at deploy
+  time:
+  - `""` (empty) — read this variable from the configured secrets provider,
+    keyed by the variable name. (`WHOAMI_NAME: ""` reads `WHOAMI_NAME`.)
+  - `${infisical:KEY}` / `${secret:KEY}` / `${KEY}` — read `KEY` from the
+    configured provider (so you can ship a provider secret under a different
+    variable name). `secret` and `infisical` are aliases; a bare `${KEY}` means
+    the same.
+  - `${env:KEY}` — read `KEY` from the **orchestrator's** own process
+    environment.
+  - anything else — a **literal** value. Tokens may be embedded in surrounding
+    text (e.g. `https://${env:REGION}.example.com/${secret:PATH}`).
+
+  A service with **no `env:`** reads nothing, performs **no provider lookup**,
+  and therefore needs **no secrets folder to exist** — declaring a service that
+  uses no secrets never forces you to create an (empty) Infisical entry for it.
+  Any reference that doesn't resolve (a missing provider key, an unset
+  `${env:KEY}`) is a **hard error** so a deploy fails loudly rather than shipping
+  a blank value; `shuttle check` reports the same.
 - **`update_policy`** controls how the agent applies a new deploy:
   - `rolling` (default) — zero-downtime: brings up new containers alongside the
     old, waits until they are healthy, then removes the old. Requires the service
@@ -273,7 +293,7 @@ external:
 Shuttle skips it in every lifecycle path — no deploy, diff, drift heal, teardown,
 or backup — and only emits a **Caddy route** for it: HTTPS (HTTP-01, or a
 [`dns.yml`](#dnsyml-optional) wildcard) + reverse proxy to `upstream`.
-`caddy_snippet` and `tls_certificate` apply as normal; `port`, `env_schema`,
+`caddy_snippet` and `tls_certificate` apply as normal; `port`, `env`,
 `backup`, and `update_policy` are not used.
 
 **You** make `upstream` reachable from the Caddy sidecar (a container on the

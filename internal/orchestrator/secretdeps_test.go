@@ -8,12 +8,15 @@ import (
 )
 
 func TestServicesMatching(t *testing.T) {
+	providerEnv := map[string]string{"K": ""} // empty value -> provider lookup
 	svcs := []config.Service{
-		{Name: "api", EnvFrom: "prod"},                         // base "/shared" + template "/services/api"
-		{Name: "web", EnvFrom: "prod"},                         // base "/shared" + template "/services/web"
-		{Name: "worker", EnvFrom: "staging"},                   // wrong env
-		{Name: "billing", EnvFrom: "prod", SecretPath: "/pay"}, // explicit folder
-		{Name: "noenv"},                                        // env_from empty -> defaultEnv
+		{Name: "api", EnvFrom: "prod", Env: providerEnv},                         // base "/shared" + template "/services/api"
+		{Name: "web", EnvFrom: "prod", Env: providerEnv},                         // base "/shared" + template "/services/web"
+		{Name: "worker", EnvFrom: "staging", Env: providerEnv},                   // wrong env
+		{Name: "billing", EnvFrom: "prod", SecretPath: "/pay", Env: providerEnv}, // explicit folder
+		{Name: "noenv", Env: providerEnv},                                        // env_from empty -> defaultEnv
+		{Name: "nosecret", EnvFrom: "prod"},                                      // no provider env -> never matched
+		{Name: "literal", EnvFrom: "prod", Env: map[string]string{"L": "x"}},     // literal only -> never matched
 	}
 	g := &GitSyncer{secretsBasePath: "/shared", secretsPathTemplate: "/services/{service}"}
 
@@ -30,6 +33,8 @@ func TestServicesMatching(t *testing.T) {
 		{"unrelated path none", "prod", "/nowhere", "prod", nil},
 		{"trailing slash normalized", "prod", "/services/api/", "prod", []string{"api"}},
 		{"empty env_from uses default", "prod", "/services/noenv", "prod", []string{"noenv"}},
+		{"no-provider service not matched", "prod", "/services/nosecret", "prod", nil},
+		{"literal-only service not matched", "prod", "/services/literal", "prod", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

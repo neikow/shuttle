@@ -196,7 +196,7 @@ func dockerRemoveE2EContainers(t *testing.T) {
 // writeIaCRepo scaffolds a minimal shuttle IaC repo as a git repo and returns
 // its path. The single service "web" runs traefik/whoami, publishing it on
 // webPort so the test can curl it. update_policy is recreate (rolling forbids a
-// fixed published host port); no env_schema/domains, so no secrets provider or
+// fixed published host port); no env/domains, so no secrets provider or
 // Caddy is needed.
 func writeIaCRepo(t *testing.T, host string, webPort int) string {
 	t.Helper()

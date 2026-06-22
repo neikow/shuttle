@@ -264,9 +264,17 @@ type Service struct {
 	Source       ServiceSource
 	Domains      []string `yaml:"domains"`
 	EnvFrom      string   `yaml:"env_from"`
-	EnvSchema    []string `yaml:"env_schema"`
-	Port         int      `yaml:"port"` // traffic port Caddy dials for this service's domains
-	CaddySnippet string   `yaml:"caddy_snippet"`
+	// Env declares the environment variables shipped to the service. Each value
+	// is a source spec resolved at deploy time:
+	//   ""                                        -> the configured secrets
+	//                                                provider, keyed by the var name
+	//   ${secret:KEY} / ${infisical:KEY} / ${KEY} -> the provider, keyed by KEY
+	//   ${env:KEY}                                -> the orchestrator's process env
+	//   any other text                            -> a literal (tokens may be embedded)
+	// A service with no Env reads no secrets, so its provider folder need not exist.
+	Env          map[string]string `yaml:"env"`
+	Port         int               `yaml:"port"` // traffic port Caddy dials for this service's domains
+	CaddySnippet string            `yaml:"caddy_snippet"`
 	// TLSCertificate optionally pins this service's domains to a named
 	// certificate declared in dns.yml (forcing its DNS challenge). Empty lets
 	// Caddy auto-match the domain to a covering certificate, else fall back to
@@ -338,7 +346,7 @@ type serviceFile struct {
 	Host           string              `yaml:"host"`
 	Domains        []string            `yaml:"domains"`
 	EnvFrom        string              `yaml:"env_from"`
-	EnvSchema      []string            `yaml:"env_schema"`
+	Env            map[string]string   `yaml:"env"`
 	Port           int                 `yaml:"port"`
 	CaddySnippet   string              `yaml:"caddy_snippet"`
 	TLSCertificate string              `yaml:"tls_certificate"`

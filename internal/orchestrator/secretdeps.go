@@ -27,6 +27,11 @@ func (g *GitSyncer) ServicesUsingSecret(ctx context.Context, env, changedPath, d
 func (g *GitSyncer) servicesMatching(services []config.Service, env, changedPath, defaultEnv string) []string {
 	var affected []string
 	for _, svc := range services {
+		// A service that reads no provider secrets isn't affected by a secret
+		// change — it fetches no folder, so a change there can't reach it.
+		if !envUsesProvider(svc.Env) {
+			continue
+		}
 		effEnv := svc.EnvFrom
 		if effEnv == "" {
 			effEnv = defaultEnv

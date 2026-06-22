@@ -190,7 +190,7 @@ func loadService(rootDir, dir string) (*Service, error) {
 		Host:           raw.Host,
 		Domains:        raw.Domains,
 		EnvFrom:        raw.EnvFrom,
-		EnvSchema:      raw.EnvSchema,
+		Env:            raw.Env,
 		Port:           raw.Port,
 		CaddySnippet:   raw.CaddySnippet,
 		TLSCertificate: raw.TLSCertificate,

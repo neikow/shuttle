@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
+	"sort"
 
 	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/secrets"
@@ -20,9 +22,10 @@ type CheckReport struct {
 	Services       []ServiceCheck             `json:"services,omitempty"`
 }
 
-// ServiceCheck is the per-service outcome of a Check. MissingKeys lists the
-// env_schema keys absent from the resolved secrets; Err records a provider
-// failure (e.g. an Infisical fetch error) that prevented the check.
+// ServiceCheck is the per-service outcome of a Check. Schema lists the declared
+// `env:` variable names; MissingKeys lists the env references that don't resolve
+// (a provider key absent from the secrets, or an unset ${env:KEY}); Err records
+// a provider failure (e.g. an Infisical fetch error) that prevented the check.
 type ServiceCheck struct {
 	Service     string   `json:"service"`
 	Env         string   `json:"env,omitempty"`
@@ -120,8 +123,8 @@ func (g *GitSyncer) CheckGitCredentials(ctx context.Context) []GitCredentialChec
 }
 
 // Check syncs the IaC repo, loads + validates its config (config.Load enforces
-// referential integrity), and verifies that every key declared in each
-// service's env_schema is present in the secrets provider. It mirrors
+// referential integrity), and verifies that every reference in each service's
+// env: map resolves (provider secret or ${env:KEY}). It mirrors
 // renderEnv's resolution (shared base folder + service folder, service wins)
 // but collects problems instead of failing fast, and never dispatches a deploy
 // — so it is safe to run against a live system. With no secrets provider
@@ -156,7 +159,7 @@ func (g *GitSyncer) CheckRef(ctx context.Context, ref string) (*CheckReport, err
 }
 
 // checkRepo validates an already-loaded repo+SHA: git-credential availability,
-// per-service env_schema resolution, and rolling-update warnings.
+// per-service env resolution, and rolling-update warnings.
 func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string) *CheckReport {
 	report := &CheckReport{
 		SHA:            sha,
@@ -166,7 +169,7 @@ func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string
 	}
 	for _, svc := range repo.Services {
 		if svc.IsExternal() {
-			continue // proxy-only: no compose/env_schema to validate
+			continue // proxy-only: no compose/env to validate
 		}
 		sc := g.checkService(ctx, svc)
 		sc.Warnings = g.rollingCheck(ctx, svc)
@@ -190,35 +193,58 @@ func (g *GitSyncer) rollingCheck(ctx context.Context, svc config.Service) []stri
 	return rollingWarnings(composeYAML)
 }
 
-// checkService resolves a service's secrets and records which env_schema keys
-// are missing. With no provider or no env_schema there is nothing to verify.
+// checkService resolves a service's `env:` map and records which references
+// don't resolve. With no env, nothing to verify. The provider folders are only
+// fetched when a value references the provider — so a service that reads no
+// provider secrets never requires its folder to exist.
 func (g *GitSyncer) checkService(ctx context.Context, svc config.Service) ServiceCheck {
-	sc := ServiceCheck{Service: svc.Name, Env: svc.EnvFrom, Schema: svc.EnvSchema}
-	if g.secrets == nil || len(svc.EnvSchema) == 0 {
+	sc := ServiceCheck{Service: svc.Name, Env: svc.EnvFrom, Schema: sortedKeys(svc.Env)}
+	if len(svc.Env) == 0 {
 		return sc
 	}
 
-	basePath, svcPath := config.ResolveSecretsPaths(g.secretsBasePath, g.secretsPathTemplate, svc.SecretPath, svc.Name)
-	sc.BasePath, sc.ServicePath = basePath, svcPath
-
-	all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
-	if err != nil {
-		sc.Err = fmt.Sprintf("secrets (base %q): %v", basePath, err)
-		return sc
-	}
-	if svcPath != basePath {
-		specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
-		if err != nil {
-			sc.Err = fmt.Sprintf("secrets (service %q): %v", svcPath, err)
+	var provider map[string]string
+	if envUsesProvider(svc.Env) {
+		if g.secrets == nil {
+			sc.Err = "env references provider secrets but no secrets_provider is configured"
 			return sc
 		}
-		maps.Copy(all, specific) // service-specific keys override the shared base
+		basePath, svcPath := config.ResolveSecretsPaths(g.secretsBasePath, g.secretsPathTemplate, svc.SecretPath, svc.Name)
+		sc.BasePath, sc.ServicePath = basePath, svcPath
+
+		all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
+		if err != nil {
+			sc.Err = fmt.Sprintf("secrets (base %q): %v", basePath, err)
+			return sc
+		}
+		if svcPath != basePath {
+			specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
+			if err != nil {
+				sc.Err = fmt.Sprintf("secrets (service %q): %v", svcPath, err)
+				return sc
+			}
+			maps.Copy(all, specific) // service-specific keys override the shared base
+		}
+		provider = all
 	}
 
-	for _, key := range svc.EnvSchema {
-		if _, ok := all[key]; !ok {
-			sc.MissingKeys = append(sc.MissingKeys, key)
+	if _, missing := resolveEnv(svc.Env, provider, os.LookupEnv); len(missing) > 0 {
+		for _, r := range missing {
+			sc.MissingKeys = append(sc.MissingKeys, r.String())
 		}
 	}
 	return sc
+}
+
+// sortedKeys returns the map's keys in sorted order (deterministic output).
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

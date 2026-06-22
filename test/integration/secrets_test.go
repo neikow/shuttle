@@ -14,7 +14,7 @@ import (
 
 // TestDeployResolvesFileSecrets proves end-to-end secret resolution: the file
 // secrets provider reads a dotenv file on the orchestrator, renderEnv ships the
-// declared env_schema key with the deploy, compose interpolates it, and the
+// declared env: key with the deploy, compose interpolates it, and the
 // container reflects it.
 //
 // traefik/whoami prints "Name: <WHOAMI_NAME>" when that env var is set, so the
@@ -110,7 +110,7 @@ secrets_provider: file
 }
 
 // writeIaCRepoWithSecret scaffolds an IaC repo whose "web" service declares
-// env_schema: [schemaKey] and reads it from env_from: <envFrom>. The compose
+// env: {schemaKey: ""} and reads it from env_from: <envFrom>. The compose
 // interpolates the key into WHOAMI_NAME so the container reflects the value.
 func writeIaCRepoWithSecret(t *testing.T, host string, webPort int, schemaKey, envFrom string) string {
 	t.Helper()
@@ -120,7 +120,7 @@ func writeIaCRepoWithSecret(t *testing.T, host string, webPort int, schemaKey, e
 
 	svcDir := filepath.Join(dir, "services", "web")
 	mustWrite(t, filepath.Join(svcDir, "web.yaml"),
-		fmt.Sprintf("name: web\nhost: %s\nupdate_policy: recreate\nenv_from: %s\nenv_schema:\n  - %s\n",
+		fmt.Sprintf("name: web\nhost: %s\nupdate_policy: recreate\nenv_from: %s\nenv:\n  %s: \"\"\n",
 			host, envFrom, schemaKey))
 	mustWrite(t, filepath.Join(svcDir, "docker-compose.yml"),
 		fmt.Sprintf(`services:

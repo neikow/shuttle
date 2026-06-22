@@ -22,8 +22,8 @@ var checkCmd = &cobra.Command{
 	Long: `Validates a deployment without touching any agent or ledger:
 
   1. Syncs the IaC repo and validates its hosts/services (referential integrity).
-  2. For every service with an env_schema, checks that each declared key is
-     present in the configured secrets provider.
+  2. For every service, resolves its env: map and checks that each reference
+     (a provider secret, or a ${env:KEY} process var) is present.
 
 It dispatches no deploys and writes no state, so it is safe to run against a
 live system (e.g. in CI before merging an IaC change). Exits non-zero if any
@@ -155,22 +155,25 @@ func renderCheck(out io.Writer, report *orchestrator.CheckReport) {
 	}
 	_, _ = fmt.Fprintf(out, "checking %d service(s):\n", len(report.Services))
 	for _, sc := range report.Services {
-		printServiceCheck(out, sc, report.HasProvider)
+		printServiceCheck(out, sc)
 	}
 }
 
-func printServiceCheck(out io.Writer, sc orchestrator.ServiceCheck, hasProvider bool) {
+func printServiceCheck(out io.Writer, sc orchestrator.ServiceCheck) {
 	switch {
 	case sc.Err != "":
 		_, _ = fmt.Fprintf(out, "  ✗ %s: %s\n", sc.Service, sc.Err)
 	case len(sc.MissingKeys) > 0:
-		_, _ = fmt.Fprintf(out, "  ✗ %s (env=%s, %s + %s): missing %d key(s): %s\n",
-			sc.Service, sc.Env, sc.BasePath, sc.ServicePath,
-			len(sc.MissingKeys), strings.Join(sc.MissingKeys, ", "))
-	case !hasProvider || len(sc.Schema) == 0:
-		_, _ = fmt.Fprintf(out, "  ✓ %s: no secret checks (no env_schema or provider)\n", sc.Service)
+		_, _ = fmt.Fprintf(out, "  ✗ %s (env=%s): unresolved %d ref(s): %s\n",
+			sc.Service, sc.Env, len(sc.MissingKeys), strings.Join(sc.MissingKeys, ", "))
+	case len(sc.Schema) == 0:
+		_, _ = fmt.Fprintf(out, "  ✓ %s: no env declared\n", sc.Service)
+	case sc.BasePath == "":
+		// env declared, but no value reads the provider (literals / ${env:}).
+		_, _ = fmt.Fprintf(out, "  ✓ %s: all %d env var(s) resolve (no provider lookups)\n",
+			sc.Service, len(sc.Schema))
 	default:
-		_, _ = fmt.Fprintf(out, "  ✓ %s (env=%s, %s + %s): all %d env_schema key(s) present\n",
+		_, _ = fmt.Fprintf(out, "  ✓ %s (env=%s, %s + %s): all %d env var(s) resolve\n",
 			sc.Service, sc.Env, sc.BasePath, sc.ServicePath, len(sc.Schema))
 	}
 	for _, w := range sc.Warnings {

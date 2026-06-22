@@ -4,6 +4,33 @@ All notable changes to Shuttle are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Service env is now an explicit `env:` map, replacing `env_schema:`.**
+  ⚠️ **Breaking.** A service declares each variable it wants and *where it comes
+  from*, instead of a flat list of provider keys:
+  - `env: { FOO: "" }` — read `FOO` from the configured secrets provider (the old
+    `env_schema: [FOO]` behaviour).
+  - `env: { FOO: "${infisical:BAR}" }` / `${secret:BAR}` / `${BAR}` — read
+    provider key `BAR` (so a provider secret can ship under a different name).
+  - `env: { FOO: "${env:BAR}" }` — read `BAR` from the **orchestrator's** own
+    process environment.
+  - `env: { FOO: "literal" }` — a literal value; tokens may be embedded
+    (`https://${env:REGION}.example.com/${secret:PATH}`).
+
+  Migrate `env_schema: [A, B]` to `env: { A: "", B: "" }`.
+
+### Fixed
+
+- **A service that uses no secrets no longer requires an (empty) provider entry.**
+  Env values are resolved only when referenced, so a service with no `env:` — or
+  one using only literals / `${env:}` — performs **no provider lookup** and needs
+  no Infisical folder to exist. Previously an empty `env_schema` fetched and
+  passed through the whole folder, forcing every service to have one. An
+  unresolved reference is still a hard error (and is reported by `shuttle check`).
+
 ## [0.4.0] - 2026-06-21
 
 An ingress, data, and tooling release. v0.4.0 puts wildcard TLS and a reverse

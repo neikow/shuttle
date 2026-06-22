@@ -153,9 +153,12 @@ the service's `.env`:
   set, else `secrets_path_template` with `{service}` substituted, else the base.
 
 Both folders are read from the same environment and merged, with the
-service-specific folder winning on key conflicts; **`env_schema`** then filters
-which keys reach the service (see [iac-repo.md](iac-repo.md)). All folder paths
-must be absolute. `none` (the default provider) means no secret injection.
+service-specific folder winning on key conflicts. The service's
+**[`env:`](iac-repo.md) map** then decides which variables are shipped and where
+each one comes from (a provider key, the orchestrator's `${env:KEY}`, or a
+literal). The folders are only fetched when a value actually references the
+provider, so a service that uses no provider secrets needs no folder. All folder
+paths must be absolute. `none` (the default provider) means no secret injection.
 
 Example: `secrets_base_path: /shared`, `secrets_path_template: /services/{service}`,
 and a service `api` with `env_from: production` reads `production` secrets from
