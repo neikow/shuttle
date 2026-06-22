@@ -13,6 +13,14 @@ All notable changes to Shuttle are documented here. The format is based on
   `secret_access_key`, `region`) alongside `ovh`. The shipped
   `ghcr.io/neikow/shuttle-caddy` image bundles all three plugins; the editor and
   `shuttle scaffold dns-provider` prefill each type's credential keys.
+- **`shuttle doctor` host preflight.** A new command that validates the
+  environment before the orchestrator starts: `config.yml` parses, the `git`
+  binary is present and the IaC repo is reachable, Docker answers (warn-only;
+  agent hosts only — `--skip-docker`), the data dir is writable, the gRPC TLS
+  cert parses and isn't expired or expiring within `--cert-warn-days` (30), and
+  the secrets provider constructs. Dispatches nothing and writes no state; a
+  failed check exits non-zero so it fits a systemd `ExecStartPre=` or a CI smoke
+  test. Complements `shuttle check` (which validates the IaC repo's contents).
 
 ### Changed
 

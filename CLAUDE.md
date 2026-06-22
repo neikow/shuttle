@@ -34,7 +34,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot) + `lsp.go` (`shuttle lsp`: run the IaC language server over stdio) + `scaffold.go` (`shuttle scaffold service`/`host`/`dns-provider`/`certificate`: generate IaC files from the loader's schema — validated before write; `hosts.yaml`/`dns.yml` edits go through a yaml.Node round-trip preserving comments). Wiring only — no business logic (scaffold's render/merge is pure and unit-tested in-package). |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `doctor.go` (`shuttle doctor`: local host preflight — config parse, git binary + repo reachability, docker daemon, data-dir writability, gRPC TLS cert parse/expiry, secrets-provider construction; pure `buildDoctorReport`/`inspectCertFile` with injectable probes, unit-tested), `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot) + `lsp.go` (`shuttle lsp`: run the IaC language server over stdio) + `scaffold.go` (`shuttle scaffold service`/`host`/`dns-provider`/`certificate`: generate IaC files from the loader's schema — validated before write; `hosts.yaml`/`dns.yml` edits go through a yaml.Node round-trip preserving comments). Wiring only — no business logic (scaffold's render/merge is pure and unit-tested in-package). |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo — hosts/services + the optional `dns.yml` via `dns.go`: DNS-challenge providers + certificates, `DomainCoveredBy` wildcard matching), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). `validate.go` adds the editor-facing surface used by `internal/lsp`: `DetectFileKind`, single-file `ValidateBytes` (strict decode → positioned `Problem`s, disk-free), and `FieldNamesAt` (reflection over the raw structs → completion keys per nesting). |
@@ -564,6 +564,21 @@ These are deliberate. Don't reverse them without updating this file.
   (repo + current SHAs → report), so it reuses the same `ledger.CurrentSHAs`
   the reconcile path uses, keeping plan and apply consistent. `--exit-code`
   exits 2 on a non-empty plan for CI gating.
+- **`doctor` is a host preflight, distinct from `check`.** `shuttle doctor`
+  validates the *environment* the orchestrator runs in — config parses, `git` is
+  present and the repo is reachable (`git ls-remote`), Docker answers, the data
+  dir is writable, the gRPC TLS cert parses and isn't expired/expiring, the
+  secrets provider constructs — where `shuttle check` validates the *IaC repo's
+  content* (per-service env resolution). The split is deliberate: doctor catches
+  the boring infra failures (missing binary, expired cert, unwritable dir) that
+  make an orchestrator fail to boot, so it fits a systemd `ExecStartPre=` or CI
+  smoke test; it dispatches nothing and writes no state. Repo reachability and a
+  missing-Docker are **warnings, not failures** (a private repo needs the
+  runtime-injected `git_credentials` doctor doesn't have; Docker is only needed
+  on agent hosts) — only definitely-broken conditions exit non-zero. The report
+  builder (`buildDoctorReport`) and cert inspector (`inspectCertFile`) are pure
+  over injected probes (`lookPath`/`gitLsRemote`/`dockerInfo`/`newProvider` +
+  clock), so the whole matrix is unit-tested without touching the host.
 - **Prometheus metrics off the event bus, unauthed `/metrics`.** `Metrics`
   (`metrics.go`) subscribes to the `EventBus` and turns events into Prometheus
   metrics. `prometheus/client_golang` (despite the usual minimal-dep bias)
