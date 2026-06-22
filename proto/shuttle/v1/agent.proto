@@ -14,6 +14,7 @@ message AgentEvent {
     DeployResponse deploy_result = 3;
     ContainerState container_state = 4;
     BackupResult backup_result = 5;
+    DeployLog deploy_log = 6;
   }
 }
 

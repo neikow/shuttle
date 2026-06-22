@@ -46,6 +46,17 @@ message DeployResponse {
   string error = 4;
 }
 
+// DeployLog is an incremental, best-effort batch of log lines streamed from an
+// agent while a deploy/rollback/teardown is still running, so the control plane
+// can tail output live (published on the event bus, surfaced over SSE/UI). It is
+// purely additive: the terminal DeployResponse still carries the full captured
+// logs, which remain the persisted, point-in-time record.
+message DeployLog {
+  string deploy_id = 1;
+  string service = 2;
+  repeated LogLine lines = 3;
+}
+
 // TeardownRequest tells an agent to bring a service down. The agent runs
 // `docker compose down` against the service's persisted compose workspace.
 // remove_volumes adds `--volumes` (used by the volume-purge path); when false,

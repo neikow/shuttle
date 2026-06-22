@@ -31,6 +31,7 @@ type AgentEvent struct {
 	//	*AgentEvent_DeployResult
 	//	*AgentEvent_ContainerState
 	//	*AgentEvent_BackupResult
+	//	*AgentEvent_DeployLog
 	Payload       isAgentEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -118,6 +119,15 @@ func (x *AgentEvent) GetBackupResult() *BackupResult {
 	return nil
 }
 
+func (x *AgentEvent) GetDeployLog() *DeployLog {
+	if x != nil {
+		if x, ok := x.Payload.(*AgentEvent_DeployLog); ok {
+			return x.DeployLog
+		}
+	}
+	return nil
+}
+
 type isAgentEvent_Payload interface {
 	isAgentEvent_Payload()
 }
@@ -142,6 +152,10 @@ type AgentEvent_BackupResult struct {
 	BackupResult *BackupResult `protobuf:"bytes,5,opt,name=backup_result,json=backupResult,proto3,oneof"`
 }
 
+type AgentEvent_DeployLog struct {
+	DeployLog *DeployLog `protobuf:"bytes,6,opt,name=deploy_log,json=deployLog,proto3,oneof"`
+}
+
 func (*AgentEvent_Register) isAgentEvent_Payload() {}
 
 func (*AgentEvent_Heartbeat) isAgentEvent_Payload() {}
@@ -151,6 +165,8 @@ func (*AgentEvent_DeployResult) isAgentEvent_Payload() {}
 func (*AgentEvent_ContainerState) isAgentEvent_Payload() {}
 
 func (*AgentEvent_BackupResult) isAgentEvent_Payload() {}
+
+func (*AgentEvent_DeployLog) isAgentEvent_Payload() {}
 
 // OrchestratorCommand is sent from orchestrator → agent (downward direction).
 type OrchestratorCommand struct {
@@ -476,14 +492,16 @@ var File_shuttle_v1_agent_proto protoreflect.FileDescriptor
 const file_shuttle_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"\x16shuttle/v1/agent.proto\x12\n" +
-	"shuttle.v1\x1a\x17shuttle/v1/deploy.proto\"\xd4\x02\n" +
+	"shuttle.v1\x1a\x17shuttle/v1/deploy.proto\"\x8c\x03\n" +
 	"\n" +
 	"AgentEvent\x129\n" +
 	"\bregister\x18\x01 \x01(\v2\x1b.shuttle.v1.RegisterRequestH\x00R\bregister\x125\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x15.shuttle.v1.HeartbeatH\x00R\theartbeat\x12A\n" +
 	"\rdeploy_result\x18\x03 \x01(\v2\x1a.shuttle.v1.DeployResponseH\x00R\fdeployResult\x12E\n" +
 	"\x0fcontainer_state\x18\x04 \x01(\v2\x1a.shuttle.v1.ContainerStateH\x00R\x0econtainerState\x12?\n" +
-	"\rbackup_result\x18\x05 \x01(\v2\x18.shuttle.v1.BackupResultH\x00R\fbackupResultB\t\n" +
+	"\rbackup_result\x18\x05 \x01(\v2\x18.shuttle.v1.BackupResultH\x00R\fbackupResult\x126\n" +
+	"\n" +
+	"deploy_log\x18\x06 \x01(\v2\x15.shuttle.v1.DeployLogH\x00R\tdeployLogB\t\n" +
 	"\apayload\"\xfd\x02\n" +
 	"\x13OrchestratorCommand\x123\n" +
 	"\x06deploy\x18\x01 \x01(\v2\x19.shuttle.v1.DeployRequestH\x00R\x06deploy\x129\n" +
@@ -529,12 +547,13 @@ var file_shuttle_v1_agent_proto_goTypes = []any{
 	(*ContainerState)(nil),      // 4: shuttle.v1.ContainerState
 	(*DeployResponse)(nil),      // 5: shuttle.v1.DeployResponse
 	(*BackupResult)(nil),        // 6: shuttle.v1.BackupResult
-	(*DeployRequest)(nil),       // 7: shuttle.v1.DeployRequest
-	(*RollbackRequest)(nil),     // 8: shuttle.v1.RollbackRequest
-	(*CaddyConfigRequest)(nil),  // 9: shuttle.v1.CaddyConfigRequest
-	(*TeardownRequest)(nil),     // 10: shuttle.v1.TeardownRequest
-	(*BackupRequest)(nil),       // 11: shuttle.v1.BackupRequest
-	(*RestoreRequest)(nil),      // 12: shuttle.v1.RestoreRequest
+	(*DeployLog)(nil),           // 7: shuttle.v1.DeployLog
+	(*DeployRequest)(nil),       // 8: shuttle.v1.DeployRequest
+	(*RollbackRequest)(nil),     // 9: shuttle.v1.RollbackRequest
+	(*CaddyConfigRequest)(nil),  // 10: shuttle.v1.CaddyConfigRequest
+	(*TeardownRequest)(nil),     // 11: shuttle.v1.TeardownRequest
+	(*BackupRequest)(nil),       // 12: shuttle.v1.BackupRequest
+	(*RestoreRequest)(nil),      // 13: shuttle.v1.RestoreRequest
 }
 var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: shuttle.v1.AgentEvent.register:type_name -> shuttle.v1.RegisterRequest
@@ -542,19 +561,20 @@ var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	5,  // 2: shuttle.v1.AgentEvent.deploy_result:type_name -> shuttle.v1.DeployResponse
 	4,  // 3: shuttle.v1.AgentEvent.container_state:type_name -> shuttle.v1.ContainerState
 	6,  // 4: shuttle.v1.AgentEvent.backup_result:type_name -> shuttle.v1.BackupResult
-	7,  // 5: shuttle.v1.OrchestratorCommand.deploy:type_name -> shuttle.v1.DeployRequest
-	8,  // 6: shuttle.v1.OrchestratorCommand.rollback:type_name -> shuttle.v1.RollbackRequest
-	9,  // 7: shuttle.v1.OrchestratorCommand.caddy_config:type_name -> shuttle.v1.CaddyConfigRequest
-	10, // 8: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
-	11, // 9: shuttle.v1.OrchestratorCommand.backup:type_name -> shuttle.v1.BackupRequest
-	12, // 10: shuttle.v1.OrchestratorCommand.restore:type_name -> shuttle.v1.RestoreRequest
-	0,  // 11: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
-	1,  // 12: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
-	12, // [12:13] is the sub-list for method output_type
-	11, // [11:12] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	7,  // 5: shuttle.v1.AgentEvent.deploy_log:type_name -> shuttle.v1.DeployLog
+	8,  // 6: shuttle.v1.OrchestratorCommand.deploy:type_name -> shuttle.v1.DeployRequest
+	9,  // 7: shuttle.v1.OrchestratorCommand.rollback:type_name -> shuttle.v1.RollbackRequest
+	10, // 8: shuttle.v1.OrchestratorCommand.caddy_config:type_name -> shuttle.v1.CaddyConfigRequest
+	11, // 9: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
+	12, // 10: shuttle.v1.OrchestratorCommand.backup:type_name -> shuttle.v1.BackupRequest
+	13, // 11: shuttle.v1.OrchestratorCommand.restore:type_name -> shuttle.v1.RestoreRequest
+	0,  // 12: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
+	1,  // 13: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
+	13, // [13:14] is the sub-list for method output_type
+	12, // [12:13] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_agent_proto_init() }
@@ -569,6 +589,7 @@ func file_shuttle_v1_agent_proto_init() {
 		(*AgentEvent_DeployResult)(nil),
 		(*AgentEvent_ContainerState)(nil),
 		(*AgentEvent_BackupResult)(nil),
+		(*AgentEvent_DeployLog)(nil),
 	}
 	file_shuttle_v1_agent_proto_msgTypes[1].OneofWrappers = []any{
 		(*OrchestratorCommand_Deploy)(nil),
