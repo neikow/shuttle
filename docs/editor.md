@@ -43,6 +43,26 @@ type.
 Syntax highlighting is your editor's built-in YAML highlighting — the language
 server adds the Shuttle-specific intelligence on top.
 
+## Commands
+
+The VS Code extension adds Shuttle commands to the palette (Cmd/Ctrl-Shift-P),
+all under the **Shuttle:** category. The scaffolding ones gather input then run
+`shuttle scaffold …` and open the result; check/plan run in a terminal:
+
+| Command | What it does |
+|---------|--------------|
+| **Shuttle: Scaffold Service…** | Create `services/<name>/` for a docker, compose, or external service. |
+| **Shuttle: Add Host…** | Append a host to `hosts.yaml`. |
+| **Shuttle: Add DNS Provider…** | Append a DNS-challenge provider to `dns.yml` (prefills the type's credential keys). |
+| **Shuttle: Add Certificate…** | Append a certificate to `dns.yml`. |
+| **Shuttle: Check (validate repo)** | Run `shuttle check`. |
+| **Shuttle: Plan (preview changes)** | Run `shuttle plan`. |
+
+These shell out to the `shuttle` binary, so the generated files can never drift
+from what the orchestrator accepts. See
+[`shuttle scaffold`](iac-repo#scaffolding-shuttle-scaffold) for the underlying
+CLI.
+
 ## VS Code
 
 A thin client lives in [`editors/vscode/`](https://github.com/neikow/shuttle/tree/main/editors/vscode).
@@ -63,8 +83,9 @@ writable) — a reliable PATH location for a GUI-launched editor.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `shuttle.path` | `shuttle` | Path to the `shuttle` binary for the CLI commands (scaffold, check, plan). |
 | `shuttle.lsp.enable` | `true` | Run the language server. |
-| `shuttle.lsp.path` | `shuttle` | Path to the `shuttle` binary. |
+| `shuttle.lsp.path` | `shuttle` | Path to the `shuttle` binary used to run `shuttle lsp`. |
 
 ## Other editors
 

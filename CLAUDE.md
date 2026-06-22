@@ -34,7 +34,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | Path | Responsibility |
 |------|----------------|
-| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot) + `lsp.go` (`shuttle lsp`: run the IaC language server over stdio). Wiring only — no business logic. |
+| `cmd/shuttle/` | Cobra CLI: `main.go` (root), `orchestrator.go`, `agent.go`, `enroll.go`, `prune.go`, `check.go`, `version.go`, `webhook.go`, `events.go` (SSE event stream client), `init.go` (interactive, secure-by-default bootstrap wizard) + `certgen.go` (self-signed orchestrator TLS cert generation for the token-enrollment path), `join.go` (`shuttle agent join`: redeem a join token over a pinned HTTPS client, persist creds, start the agent), `backup.go` (`shuttle backup`/`restore`: snapshot + restore the ledger from local files), `audit.go` (`shuttle audit`: read the control-plane audit log from a running orchestrator), `token.go` (`shuttle token create`/`list`/`revoke`: manage named, role-scoped control-plane tokens) + `backup_service.go` (`shuttle backup-service`/`backups`/`restore-service`: trigger, list, and restore *service-data* backups via a running orchestrator — distinct from `backup.go`'s ledger snapshot) + `lsp.go` (`shuttle lsp`: run the IaC language server over stdio) + `scaffold.go` (`shuttle scaffold service`/`host`/`dns-provider`/`certificate`: generate IaC files from the loader's schema — validated before write; `hosts.yaml`/`dns.yml` edits go through a yaml.Node round-trip preserving comments). Wiring only — no business logic (scaffold's render/merge is pure and unit-tested in-package). |
 | `proto/shuttle/v1/` | gRPC contracts (`deploy.proto`, `agent.proto`). Source of truth for the transport. |
 | `gen/shuttle/v1/` | Generated Go (committed). Regenerate with `make proto`; never hand-edit. |
 | `internal/config/` | Strict YAML loaders. `LoadOrchestratorConfig` (the orchestrator's `config.yml`), `Load` (the IaC repo — hosts/services + the optional `dns.yml` via `dns.go`: DNS-challenge providers + certificates, `DomainCoveredBy` wildcard matching), and `LoadRepoOrchestratorConfig` (`orchestrator.yaml` in the IaC repo — optional repo-managed overrides). `validate.go` adds the editor-facing surface used by `internal/lsp`: `DetectFileKind`, single-file `ValidateBytes` (strict decode → positioned `Problem`s, disk-free), and `FieldNamesAt` (reflection over the raw structs → completion keys per nesting). |
@@ -645,6 +645,27 @@ These are deliberate. Don't reverse them without updating this file.
   (`editors/vscode/`) is a thin `vscode-languageclient` wrapper that just launches
   `shuttle lsp`; highlighting stays VS Code's built-in YAML. `config.yml` is excluded
   from the client's default selector (name too generic) though the server handles it.
+- **Repo authoring = `shuttle scaffold`, CLI-backed; the editor commands are thin
+  wrappers.** Generating IaC files (services, hosts, DNS providers, certificates)
+  lives in the **CLI** (`cmd/shuttle/scaffold.go`), not duplicated in the editor —
+  same rationale as the language server reusing the loader: the binary is the
+  single source of truth, so a scaffolded file is generated from (and validated
+  against) the exact schema the orchestrator consumes, and the same command works
+  from a terminal. New service files are rendered as clean text (and `ValidateBytes`-
+  checked before write, refusing to overwrite); `hosts.yaml`/`dns.yml` are **edited
+  in place via a `yaml.Node` round-trip** so existing content and **comments are
+  preserved**, the new entry lands in the right sequence, and a duplicate name is
+  refused — re-marshalling the whole struct would reflow the file and drop
+  comments. `dns-provider` prefills the credential keys the provider *type* requires
+  (the `dnsProviderSpecs` registry, via `DNSProviderCredentialKeys`). Render/merge
+  is split from the cobra wiring so it's unit-tested without a binary. The **VS Code
+  extension** adds six palette commands (`shuttle.scaffold*` + `check`/`plan`) that
+  gather input via QuickPick/InputBox and **shell out to the CLI** (binary from a
+  new `shuttle.path` setting, distinct from `shuttle.lsp.path`); scaffolders open
+  the created/updated file, check/plan run in a reused terminal. Commands register
+  unconditionally (independent of the language server). Keeping generation in Go
+  means the editor can never drift from the loader and the logic stays testable in
+  one place.
 - **`buf` for proto tooling**, with `buf lint` and `buf breaking` gating `main`.
 
 ### Explicitly dropped / not done

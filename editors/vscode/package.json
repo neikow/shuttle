@@ -1,8 +1,8 @@
 {
   "name": "shuttle-iac",
   "displayName": "Shuttle IaC",
-  "description": "Schema-aware completion and validation for Shuttle IaC YAML files (hosts.yaml, services/*, dns.yml, orchestrator.yaml), backed by `shuttle lsp`.",
-  "version": "0.1.0",
+  "description": "Schema-aware completion and validation for Shuttle IaC YAML files (hosts.yaml, services/*, dns.yml, orchestrator.yaml), plus scaffolding and check/plan commands — backed by the `shuttle` CLI.",
+  "version": "0.2.0",
   "publisher": "neikow",
   "license": "SEE LICENSE IN ../../LICENSE",
   "repository": {
@@ -22,9 +22,46 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "commands": [
+      {
+        "command": "shuttle.scaffoldService",
+        "title": "Scaffold Service…",
+        "category": "Shuttle"
+      },
+      {
+        "command": "shuttle.addHost",
+        "title": "Add Host…",
+        "category": "Shuttle"
+      },
+      {
+        "command": "shuttle.addDnsProvider",
+        "title": "Add DNS Provider…",
+        "category": "Shuttle"
+      },
+      {
+        "command": "shuttle.addCertificate",
+        "title": "Add Certificate…",
+        "category": "Shuttle"
+      },
+      {
+        "command": "shuttle.check",
+        "title": "Check (validate repo)",
+        "category": "Shuttle"
+      },
+      {
+        "command": "shuttle.plan",
+        "title": "Plan (preview changes)",
+        "category": "Shuttle"
+      }
+    ],
     "configuration": {
       "title": "Shuttle",
       "properties": {
+        "shuttle.path": {
+          "type": "string",
+          "default": "shuttle",
+          "description": "Path to the `shuttle` binary used for CLI commands (scaffold, check, plan). Must be on PATH, or an absolute path."
+        },
         "shuttle.lsp.enable": {
           "type": "boolean",
           "default": true,
