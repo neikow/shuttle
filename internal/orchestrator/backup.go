@@ -61,8 +61,9 @@ func (g *GitSyncer) backupEnv(ctx context.Context, svc config.Service, engine st
 	if engine == config.BackupEnginePostgres && g.secrets != nil {
 		all, err := g.renderEnv(ctx, svc)
 		if err != nil {
-			// Don't fail the backup on env_schema resolution; the DB may use
-			// peer/trust auth. Log and proceed without a password.
+			// Don't fail the backup on env resolution; the DB may use peer/trust
+			// auth. Log and proceed without a password. PGPASSWORD only flows when
+			// the service declares it in its `env:` map.
 			slog.Warn("backup: could not resolve service secrets for PGPASSWORD", "service", svc.Name, "err", err)
 		} else if pw := firstNonEmpty(all["PGPASSWORD"], all["POSTGRES_PASSWORD"]); pw != "" {
 			env["PGPASSWORD"] = pw

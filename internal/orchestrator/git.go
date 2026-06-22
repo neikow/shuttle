@@ -737,54 +737,55 @@ func sanitizeRepoKey(repo string) string {
 	return b.String()
 }
 
-// renderEnv resolves the service's secrets. The service's env_from selects the
-// Infisical environment; the secrets are merged from a shared base folder and
-// the service's own folder (secret_path / secrets_path_template), with the
-// service folder winning on conflicts. When EnvSchema is set only those keys are
-// included, otherwise the whole merged set is passed through.
+// renderEnv resolves the service's `env:` map into the concrete environment
+// shipped with the deploy. Each value is a source spec (see config.Service.Env):
+// "" reads the configured provider keyed by the var name, ${secret:KEY} /
+// ${infisical:KEY} / ${KEY} read the provider keyed by KEY, ${env:KEY} reads the
+// orchestrator's process env, and anything else is a literal. A service with no
+// `env:` reads nothing — and crucially performs no provider fetch, so its
+// provider folder need not exist. The provider's secrets are only fetched when a
+// value actually references them (merged from the shared base folder and the
+// service folder, service keys winning). Any unresolved reference is a hard
+// error so a deploy fails loudly rather than shipping a blank value.
 func (g *GitSyncer) renderEnv(ctx context.Context, svc config.Service) (map[string]string, error) {
-	if g.secrets == nil {
+	if len(svc.Env) == 0 {
 		return nil, nil
 	}
-	secretsBase := g.secretsBasePath
-	secretsTemplate := g.secretsPathTemplate
-	if rc := g.liveRepoCfg.Load(); rc != nil {
-		if rc.SecretsBasePath != "" {
-			secretsBase = rc.SecretsBasePath
-		}
-		if rc.SecretsPathTemplate != "" {
-			secretsTemplate = rc.SecretsPathTemplate
-		}
-	}
-	basePath, svcPath := config.ResolveSecretsPaths(secretsBase, secretsTemplate, svc.SecretPath, svc.Name)
 
-	all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
-	if err != nil {
-		return nil, fmt.Errorf("secrets (base %q): %w", basePath, err)
-	}
-	if svcPath != basePath {
-		specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
+	var provider map[string]string
+	if envUsesProvider(svc.Env) {
+		if g.secrets == nil {
+			return nil, fmt.Errorf("service %q: env references provider secrets but no secrets_provider is configured", svc.Name)
+		}
+		secretsBase := g.secretsBasePath
+		secretsTemplate := g.secretsPathTemplate
+		if rc := g.liveRepoCfg.Load(); rc != nil {
+			if rc.SecretsBasePath != "" {
+				secretsBase = rc.SecretsBasePath
+			}
+			if rc.SecretsPathTemplate != "" {
+				secretsTemplate = rc.SecretsPathTemplate
+			}
+		}
+		basePath, svcPath := config.ResolveSecretsPaths(secretsBase, secretsTemplate, svc.SecretPath, svc.Name)
+
+		all, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: basePath})
 		if err != nil {
-			return nil, fmt.Errorf("secrets (service %q): %w", svcPath, err)
+			return nil, fmt.Errorf("secrets (base %q): %w", basePath, err)
 		}
-		maps.Copy(all, specific) // service-specific keys override the shared base
+		if svcPath != basePath {
+			specific, err := g.secrets.GetAll(ctx, secrets.Scope{Env: svc.EnvFrom, Path: svcPath})
+			if err != nil {
+				return nil, fmt.Errorf("secrets (service %q): %w", svcPath, err)
+			}
+			maps.Copy(all, specific) // service-specific keys override the shared base
+		}
+		provider = all
 	}
 
-	if len(svc.EnvSchema) == 0 {
-		return all, nil
-	}
-	env := make(map[string]string, len(svc.EnvSchema))
-	var missing []string
-	for _, key := range svc.EnvSchema {
-		if v, ok := all[key]; ok {
-			env[key] = v
-		} else {
-			missing = append(missing, key)
-		}
-	}
+	env, missing := resolveEnv(svc.Env, provider, os.LookupEnv)
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("service %q: env keys declared in env_schema but missing from secrets (base %q, service %q): %s",
-			svc.Name, basePath, svcPath, strings.Join(missing, ", "))
+		return nil, fmt.Errorf("service %q: unresolved env references: %s", svc.Name, missingRefsString(missing))
 	}
 	return env, nil
 }

@@ -16,7 +16,7 @@ func TestCheckService_allPresent(t *testing.T) {
 
 	syncer := newSecretsSyncer(t, sec, "/shared", "/services/{service}")
 	sc := syncer.checkService(context.Background(), config.Service{
-		Name: "api", EnvFrom: "prod", EnvSchema: []string{"COMMON", "API_KEY"},
+		Name: "api", EnvFrom: "prod", Env: map[string]string{"COMMON": "", "API_KEY": ""},
 	})
 	if !sc.OK() {
 		t.Fatalf("want OK, got missing=%v err=%v", sc.MissingKeys, sc.Err)
@@ -58,32 +58,50 @@ func TestCheckService_reportsMissingKeys(t *testing.T) {
 
 	syncer := newSecretsSyncer(t, sec, "/shared", "")
 	sc := syncer.checkService(context.Background(), config.Service{
-		Name: "api", EnvFrom: "prod", EnvSchema: []string{"API_KEY", "DB_URL", "MISSING"},
+		Name: "api", EnvFrom: "prod", Env: map[string]string{"API_KEY": "", "DB_URL": "", "MISSING": ""},
 	})
 	if sc.OK() {
 		t.Fatal("want failure for missing keys")
 	}
-	if len(sc.MissingKeys) != 2 || sc.MissingKeys[0] != "DB_URL" || sc.MissingKeys[1] != "MISSING" {
-		t.Fatalf("missing = %v, want [DB_URL MISSING]", sc.MissingKeys)
+	if len(sc.MissingKeys) != 2 || sc.MissingKeys[0] != "secret:DB_URL" || sc.MissingKeys[1] != "secret:MISSING" {
+		t.Fatalf("missing = %v, want [secret:DB_URL secret:MISSING]", sc.MissingKeys)
 	}
 }
 
-func TestCheckService_noProviderSkips(t *testing.T) {
+// A provider-sourced env value with no provider configured is a real
+// misconfiguration — the deploy would fail — so check reports it.
+func TestCheckService_providerRefNoProviderErrors(t *testing.T) {
 	syncer := newSecretsSyncer(t, nil, "/shared", "")
 	sc := syncer.checkService(context.Background(), config.Service{
-		Name: "api", EnvFrom: "prod", EnvSchema: []string{"WHATEVER"},
+		Name: "api", EnvFrom: "prod", Env: map[string]string{"WHATEVER": ""},
 	})
-	if !sc.OK() || len(sc.MissingKeys) != 0 {
-		t.Fatalf("no provider should pass with no checks, got %+v", sc)
+	if sc.OK() || sc.Err == "" {
+		t.Fatalf("want error when env references a provider that isn't configured, got %+v", sc)
 	}
 }
 
-func TestCheckService_noSchemaSkips(t *testing.T) {
+// Literal / ${env:} values need no provider, so a service using only those
+// passes even with no provider configured.
+func TestCheckService_literalEnvNoProvider(t *testing.T) {
+	t.Setenv("REGION", "eu")
+	syncer := newSecretsSyncer(t, nil, "/shared", "")
+	sc := syncer.checkService(context.Background(), config.Service{
+		Name: "api", Env: map[string]string{"LOG": "info", "R": "${env:REGION}"},
+	})
+	if !sc.OK() {
+		t.Fatalf("literal/process-env values should pass with no provider, got %+v", sc)
+	}
+	if sc.BasePath != "" {
+		t.Errorf("no provider fetch expected, got base path %q", sc.BasePath)
+	}
+}
+
+func TestCheckService_noEnvSkips(t *testing.T) {
 	sec := secrets.NewFake(nil)
 	syncer := newSecretsSyncer(t, sec, "/shared", "")
 	sc := syncer.checkService(context.Background(), config.Service{Name: "api", EnvFrom: "prod"})
 	if !sc.OK() {
-		t.Fatalf("no env_schema should pass, got %+v", sc)
+		t.Fatalf("no env should pass, got %+v", sc)
 	}
 }
 

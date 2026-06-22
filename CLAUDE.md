@@ -78,7 +78,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
-| `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every service's `env_schema` keys resolve in the provider. Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
+| `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every reference in each service's `env:` map resolves (provider secret or `${env:KEY}`). Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
 | `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with a bearer token — either pasted (static/control token) or obtained via the OIDC **Sign in with SSO** browser PKCE login (see the OIDC web-UI decision) — so control-plane endpoints stay `requireRole`-protected. SPA fallback to `index.html` for client routes. |
 | `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Consumed by the SSE stream (`/events`), metrics (`metrics.go`), and outbound notifications (`notify.go`). |
 
@@ -302,7 +302,7 @@ These are deliberate. Don't reverse them without updating this file.
   provider depends on (a service it can't deploy without a bootstrap cycle).
   `external` is a third XOR source kind (`ExternalService`), mutually exclusive
   with `docker-compose.yml`/`remote:`; it needs `domains` + `upstream` and ignores
-  `port`/`env_schema`/`backup`/`update_policy`. Upstream is plain HTTP (TLS
+  `port`/`env`/`backup`/`update_policy`. Upstream is plain HTTP (TLS
   terminated at Caddy); HTTPS-to-backend is future work.
 - **Secrets via a `Provider` interface.** Infisical is the first real provider;
   `Fake` backs tests. `Get`/`GetAll` take a `Scope{Env, Path}`: a service's
@@ -310,22 +310,36 @@ These are deliberate. Don't reverse them without updating this file.
   from `config.ResolveSecretsPaths` — a shared `secrets_base_path` (default
   `/shared`) merged with the service's own folder (`secret_path`, else
   `secrets_path_template` with `{service}`, which itself defaults to
-  `/services/{service}` when unset). `renderEnv` reads
-  both folders in that environment and merges them (service folder wins), then
-  filters by `env_schema`, producing the `.env` shipped with the compose file.
-  Folder paths must be absolute. The provider stays generic `(env, path) →
-  secrets`; all path *policy* lives in the orchestrator. A key declared in
-  `env_schema` but absent from the resolved secrets is a **hard error** (not a
-  warning) — the deploy fails loudly rather than shipping a silently-empty `.env`.
-  A second provider, **`file`** (`FileProvider`), needs no external service:
-  `secrets_provider: file` maps the same `Scope{Env, Path}` to a dotenv file at
-  `<SHUTTLE_SECRETS_DIR>/<env>/<path>.env` (default env `SHUTTLE_SECRETS_ENV`,
-  else `production`). Because path policy lives in the orchestrator, the file
-  layout mirrors the Infisical folders exactly, so switching providers needs no
-  repo changes. A missing file is an empty set (env_schema is still the one place
-  a missing key fails); the `Path` is cleaned absolute before joining so a `..`
-  can't escape the root. Secrets can thus live as a tmpfs mount, projected k8s
-  secrets, or sops-decrypted files instead of in Infisical.
+  `/services/{service}` when unset). Folder paths must be absolute. The provider
+  stays generic `(env, path) → secrets`; all path *policy* lives in the
+  orchestrator. A second provider, **`file`** (`FileProvider`), needs no external
+  service: `secrets_provider: file` maps the same `Scope{Env, Path}` to a dotenv
+  file at `<SHUTTLE_SECRETS_DIR>/<env>/<path>.env` (default env
+  `SHUTTLE_SECRETS_ENV`, else `production`). Because path policy lives in the
+  orchestrator, the file layout mirrors the Infisical folders exactly, so
+  switching providers needs no repo changes. A missing file is an empty set; the
+  `Path` is cleaned absolute before joining so a `..` can't escape the root.
+  Secrets can thus live as a tmpfs mount, projected k8s secrets, or
+  sops-decrypted files instead of in Infisical.
+- **Service env is an explicit `env:` map of `name → source spec`, not a key
+  list.** A service declares each variable it wants shipped and *where it comes
+  from* (`renderEnv` + `internal/orchestrator/envspec.go`): `""` → the configured
+  provider keyed by the variable name; `${infisical:KEY}`/`${secret:KEY}`/`${KEY}`
+  → the provider keyed by `KEY` (rename a provider secret); `${env:KEY}` → the
+  orchestrator's *own* process environment; anything else → a **literal** (tokens
+  may be embedded in surrounding text). This replaced the old `env_schema []string`
+  (a passthrough-filter whose empty case shipped *all* folder secrets and whose
+  code contradicted the docs). The provider folders (shared base + service folder,
+  service wins) are fetched **only when a value actually references the provider**
+  (`envUsesProvider`), so a service that declares **no `env:`** — or only literals
+  / `${env:}` — performs **no provider lookup and needs no secrets folder to
+  exist** (you're never forced to create an empty Infisical entry for an
+  env-less service). Any unresolved reference (missing provider key, unset
+  `${env:KEY}`, unknown scheme) is a **hard error** — the deploy fails loudly
+  rather than shipping a silently-blank value — and `shuttle check`
+  (`checkService`) reports the same. The Infisical selective-redeploy mapping
+  (`servicesMatching`) skips services that read no provider secret, since a secret
+  change can't reach them.
 - **CLI loads `CWD/.env` at startup.** `main` calls `config.LoadDotEnv(".env")`
   before any subcommand, so the `INFISICAL_*` provider vars (and others) can come
   from a local `.env`. The real environment always wins; a missing file is not an

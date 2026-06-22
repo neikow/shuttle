@@ -350,8 +350,9 @@ current + desired SHAs.
 ## `GET /check`
 
 Read-only validation: syncs the repo (or a specific `?ref=`) and verifies that
-every service's `env_schema` keys resolve in the secrets provider. Collects all
-problems (no fail-fast), dispatches nothing.
+every reference in each service's `env:` map resolves (a provider secret, or a
+`${env:KEY}` process var). Collects all problems (no fail-fast), dispatches
+nothing.
 
 | Query | Default | Notes |
 |-------|---------|-------|

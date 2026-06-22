@@ -16,8 +16,8 @@ import (
 // e.g. root=/etc/shuttle/secrets, env=prod, path=/services/web resolves to
 // /etc/shuttle/secrets/prod/services/web.env. Each file is plain KEY=VALUE
 // dotenv. A missing file resolves to an empty set (not an error), matching a
-// folder that simply has no secrets — the orchestrator's env_schema check is
-// what turns a genuinely-missing key into a hard error.
+// folder that simply has no secrets — the orchestrator's env resolution is
+// what turns a genuinely-missing referenced key into a hard error.
 //
 // This is the no-external-dependency provider: secrets live on the orchestrator
 // host (e.g. a tmpfs mount, a Kubernetes secret projected as files, or sops

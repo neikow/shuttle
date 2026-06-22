@@ -34,9 +34,9 @@ Owns all decision-making and durable state:
    actual state (the SHA last successfully deployed per service, from the
    ledger) and produces deploy steps.
 3. **Render & dispatch** — for each step, renders the service's compose file
-   (local or fetched from a remote pointer) and its env (secrets filtered by the
-   service `env_schema`), records a pending ledger row, and sends a
-   `DeployRequest` to the host's agent.
+   (local or fetched from a remote pointer) and its env (resolved from the
+   service's `env:` map — provider secrets, `${env:KEY}`, or literals), records a
+   pending ledger row, and sends a `DeployRequest` to the host's agent.
 4. **Ledger** (`internal/ledger`) — append-only SQLite store of every deploy;
    the source of truth for "what is running" and "what to roll back to."
 5. **Ingress** (`caddy.go`) — derives routes from service `domains` + `port`
@@ -161,7 +161,7 @@ for the SSE events view (since `EventSource` cannot set headers). Mutations
   replay guard (10-minute TTL) so a captured request can't be replayed.
 - **HTTP bearer token** — static token from config guards the control-plane
   endpoints. OIDC is planned.
-- **Secret scoping** — agents receive only the env keys a service declares in its
-  `env_schema`.
+- **Secret scoping** — agents receive only the variables a service declares in
+  its `env:` map, each resolved to a single value.
 
 For the rationale behind each of these choices, see [CLAUDE.md](https://github.com/neikow/shuttle/blob/main/CLAUDE.md).

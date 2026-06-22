@@ -32,7 +32,7 @@ func makeSourceRepo(t *testing.T) string {
 		}
 	}
 	write("hosts.yaml", "hosts:\n  - name: web1\n")
-	write("services/app/app.yaml", "name: app\nhost: web1\nenv_schema:\n  - API_KEY\n")
+	write("services/app/app.yaml", "name: app\nhost: web1\nenv:\n  API_KEY: \"\"\n")
 	write("services/app/docker-compose.yml", "services:\n  app:\n    image: nginx\n")
 
 	run := func(args ...string) {
@@ -85,7 +85,9 @@ func TestGitSyncer_DeployAtSHA(t *testing.T) {
 	defer store.Close()
 	registry := NewRegistry()
 	conn := registry.register("web1", "")
-	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, nil)
+	sec := secrets.NewFake(nil)
+	sec.SetScope(secrets.Scope{Path: "/shared"}, map[string]string{"API_KEY": "s3cret"})
+	g := NewGitSyncer(src, "main", filepath.Join(t.TempDir(), "clone"), store, registry, sec)
 
 	id, host, err := g.DeployAtSHA(context.Background(), "app", sha, ledger.TriggeredByManual)
 	if err != nil {
@@ -149,7 +151,9 @@ func TestGitSyncer_PlanAndCheckRef(t *testing.T) {
 	}
 	defer store.Close()
 	clone := filepath.Join(t.TempDir(), "clone")
-	g := NewGitSyncer(src, "main", clone, store, NewRegistry(), nil)
+	sec := secrets.NewFake(nil)
+	sec.SetScope(secrets.Scope{Path: "/shared"}, map[string]string{"API_KEY": "s3cret"})
+	g := NewGitSyncer(src, "main", clone, store, NewRegistry(), sec)
 
 	// PlanRef against the branch sees both services (empty ledger → all create).
 	rep, err := g.PlanRef(context.Background(), "feature")
