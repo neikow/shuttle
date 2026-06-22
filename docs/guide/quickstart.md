@@ -31,9 +31,10 @@ Accepting the defaults gets you:
   there's no `openssl`, no CA to copy, and no per-agent certificates.
 - **Auto-generated secrets** — the control-plane bearer token and webhook secret
   are random and written to `config.yml` at mode `0600`.
-- **A starter IaC repo** at `./iac-repo` with one host (`local`) and one
-  runnable service (`whoami`). With no remote, the orchestrator drives this
-  local repo directly (`repo_url: file://…`), so nothing to push.
+- **A starter IaC repo** in the current directory with one host (`local`) and
+  one runnable service (`whoami`) — `hosts.yaml` and `services/` sit right
+  alongside `config.yml` (which is gitignored). With no remote, the orchestrator
+  drives this local repo directly (`repo_url: file://…`), so nothing to push.
 
 When it finishes it prints the exact next commands. They're reproduced below.
 
@@ -95,7 +96,6 @@ from git. 🎉
 It's just git — edit, commit, and the reconciler rolls it out:
 
 ```sh
-cd iac-repo
 sed -i'' -e 's#traefik/whoami:latest#traefik/whoami:v1.10#' services/whoami/docker-compose.yml
 git commit -am "pin whoami version"
 ```
