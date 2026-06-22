@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
@@ -142,6 +143,38 @@ func backupEventType(operation string, ls ledger.Status) EventType {
 	}
 }
 
+// handleDeployLog republishes an agent's incremental log chunk onto the event
+// bus as a deploy.log event so SSE/UI clients can tail a deploy live. It is
+// transient: nothing is persisted here — the terminal DeployResponse still
+// carries the full captured logs, which RecordDeployLogs stores as the
+// point-in-time record. A nil bus (the common case) makes this a no-op.
+func (s *AgentServiceServer) handleDeployLog(host string, dl *shuttlev1.DeployLog) {
+	if dl == nil || len(dl.Lines) == 0 {
+		return
+	}
+	text := joinLogLines(dl.Lines)
+	if text == "" {
+		return
+	}
+	s.bus.Publish(Event{
+		Type: EventDeployLog, Host: host, DeployID: dl.DeployId, Service: dl.Service,
+		Message: text,
+	})
+}
+
+// joinLogLines concatenates the text of a log batch into a single newline-joined
+// string for the event Message (per-line stream/timestamp granularity is kept in
+// the persisted logs, not the live tail).
+func joinLogLines(lines []*shuttlev1.LogLine) string {
+	parts := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if l != nil {
+			parts = append(parts, l.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServer) error {
 	// First message must be a RegisterRequest.
 	first, err := stream.Recv()
@@ -229,6 +262,8 @@ func (s *AgentServiceServer) Register(stream shuttlev1.AgentService_RegisterServ
 					})
 				}
 			}
+		case *shuttlev1.AgentEvent_DeployLog:
+			s.handleDeployLog(host, payload.DeployLog)
 		case *shuttlev1.AgentEvent_ContainerState:
 			cs := payload.ContainerState
 			slog.Debug("container state",

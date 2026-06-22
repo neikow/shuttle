@@ -21,6 +21,13 @@ All notable changes to Shuttle are documented here. The format is based on
   the secrets provider constructs. Dispatches nothing and writes no state; a
   failed check exits non-zero so it fits a systemd `ExecStartPre=` or a CI smoke
   test. Complements `shuttle check` (which validates the IaC repo's contents).
+- **Live deploy-log tailing.** Agents now stream incremental log chunks while a
+  deploy/rollback/teardown runs (not just one batch at the end), republished as a
+  new `deploy.log` event on the `/events` SSE stream. The UI's per-deploy **Logs**
+  view tails a running deploy live and falls back to the persisted logs once it
+  finishes. Best-effort and additive: the terminal result still carries the full
+  logs that `GET /deploys/{id}/logs` serves. `deploy.log` is opt-in for outbound
+  notifications, so chat sinks aren't flooded.
 
 ### Changed
 

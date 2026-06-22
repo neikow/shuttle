@@ -7,6 +7,7 @@ import { Empty, Panel, Sha } from "../components/ui";
 const TYPE_COLOR: Record<string, string> = {
   "deploy.succeeded": "var(--color-ok)",
   "deploy.failed": "var(--color-err)",
+  "deploy.log": "var(--color-muted)",
   "deploy.queued": "var(--color-warn)",
   "deploy.rolled_back": "var(--color-accent)",
   "rollback.queued": "var(--color-warn)",

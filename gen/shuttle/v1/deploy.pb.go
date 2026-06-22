@@ -422,6 +422,71 @@ func (x *DeployResponse) GetError() string {
 	return ""
 }
 
+// DeployLog is an incremental, best-effort batch of log lines streamed from an
+// agent while a deploy/rollback/teardown is still running, so the control plane
+// can tail output live (published on the event bus, surfaced over SSE/UI). It is
+// purely additive: the terminal DeployResponse still carries the full captured
+// logs, which remain the persisted, point-in-time record.
+type DeployLog struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeployId      string                 `protobuf:"bytes,1,opt,name=deploy_id,json=deployId,proto3" json:"deploy_id,omitempty"`
+	Service       string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	Lines         []*LogLine             `protobuf:"bytes,3,rep,name=lines,proto3" json:"lines,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeployLog) Reset() {
+	*x = DeployLog{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeployLog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeployLog) ProtoMessage() {}
+
+func (x *DeployLog) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeployLog.ProtoReflect.Descriptor instead.
+func (*DeployLog) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeployLog) GetDeployId() string {
+	if x != nil {
+		return x.DeployId
+	}
+	return ""
+}
+
+func (x *DeployLog) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *DeployLog) GetLines() []*LogLine {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
 // TeardownRequest tells an agent to bring a service down. The agent runs
 // `docker compose down` against the service's persisted compose workspace.
 // remove_volumes adds `--volumes` (used by the volume-purge path); when false,
@@ -437,7 +502,7 @@ type TeardownRequest struct {
 
 func (x *TeardownRequest) Reset() {
 	*x = TeardownRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -449,7 +514,7 @@ func (x *TeardownRequest) String() string {
 func (*TeardownRequest) ProtoMessage() {}
 
 func (x *TeardownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[4]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -462,7 +527,7 @@ func (x *TeardownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TeardownRequest.ProtoReflect.Descriptor instead.
 func (*TeardownRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{4}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TeardownRequest) GetDeployId() string {
@@ -502,7 +567,7 @@ type CaddyConfigRequest struct {
 
 func (x *CaddyConfigRequest) Reset() {
 	*x = CaddyConfigRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -514,7 +579,7 @@ func (x *CaddyConfigRequest) String() string {
 func (*CaddyConfigRequest) ProtoMessage() {}
 
 func (x *CaddyConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[5]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -527,7 +592,7 @@ func (x *CaddyConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaddyConfigRequest.ProtoReflect.Descriptor instead.
 func (*CaddyConfigRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{5}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CaddyConfigRequest) GetConfigJson() string {
@@ -561,7 +626,7 @@ type CaddyConfigResponse struct {
 
 func (x *CaddyConfigResponse) Reset() {
 	*x = CaddyConfigResponse{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +638,7 @@ func (x *CaddyConfigResponse) String() string {
 func (*CaddyConfigResponse) ProtoMessage() {}
 
 func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[6]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +651,7 @@ func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaddyConfigResponse.ProtoReflect.Descriptor instead.
 func (*CaddyConfigResponse) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{6}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CaddyConfigResponse) GetOk() bool {
@@ -618,7 +683,7 @@ type BackupRetention struct {
 
 func (x *BackupRetention) Reset() {
 	*x = BackupRetention{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -630,7 +695,7 @@ func (x *BackupRetention) String() string {
 func (*BackupRetention) ProtoMessage() {}
 
 func (x *BackupRetention) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -643,7 +708,7 @@ func (x *BackupRetention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupRetention.ProtoReflect.Descriptor instead.
 func (*BackupRetention) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{7}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BackupRetention) GetKeepLast() int32 {
@@ -704,7 +769,7 @@ type BackupRequest struct {
 
 func (x *BackupRequest) Reset() {
 	*x = BackupRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -716,7 +781,7 @@ func (x *BackupRequest) String() string {
 func (*BackupRequest) ProtoMessage() {}
 
 func (x *BackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -729,7 +794,7 @@ func (x *BackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupRequest.ProtoReflect.Descriptor instead.
 func (*BackupRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{8}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *BackupRequest) GetBackupId() string {
@@ -831,7 +896,7 @@ type RestoreRequest struct {
 
 func (x *RestoreRequest) Reset() {
 	*x = RestoreRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -843,7 +908,7 @@ func (x *RestoreRequest) String() string {
 func (*RestoreRequest) ProtoMessage() {}
 
 func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -856,7 +921,7 @@ func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
 func (*RestoreRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{9}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RestoreRequest) GetOperationId() string {
@@ -948,7 +1013,7 @@ type BackupResult struct {
 
 func (x *BackupResult) Reset() {
 	*x = BackupResult{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -960,7 +1025,7 @@ func (x *BackupResult) String() string {
 func (*BackupResult) ProtoMessage() {}
 
 func (x *BackupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -973,7 +1038,7 @@ func (x *BackupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
 func (*BackupResult) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{10}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BackupResult) GetOperationId() string {
@@ -1067,7 +1132,11 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x120\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x18.shuttle.v1.DeployStatusR\x06status\x12'\n" +
 	"\x04logs\x18\x03 \x03(\v2\x13.shuttle.v1.LogLineR\x04logs\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"o\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"m\n" +
+	"\tDeployLog\x12\x1b\n" +
+	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12)\n" +
+	"\x05lines\x18\x03 \x03(\v2\x13.shuttle.v1.LogLineR\x05lines\"o\n" +
 	"\x0fTeardownRequest\x12\x1b\n" +
 	"\tdeploy_id\x18\x01 \x01(\tR\bdeployId\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12%\n" +
@@ -1159,7 +1228,7 @@ func file_shuttle_v1_deploy_proto_rawDescGZIP() []byte {
 }
 
 var file_shuttle_v1_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(DeployStatus)(0),           // 0: shuttle.v1.DeployStatus
 	(BackupStatus)(0),           // 1: shuttle.v1.BackupStatus
@@ -1167,33 +1236,35 @@ var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(*RollbackRequest)(nil),     // 3: shuttle.v1.RollbackRequest
 	(*LogLine)(nil),             // 4: shuttle.v1.LogLine
 	(*DeployResponse)(nil),      // 5: shuttle.v1.DeployResponse
-	(*TeardownRequest)(nil),     // 6: shuttle.v1.TeardownRequest
-	(*CaddyConfigRequest)(nil),  // 7: shuttle.v1.CaddyConfigRequest
-	(*CaddyConfigResponse)(nil), // 8: shuttle.v1.CaddyConfigResponse
-	(*BackupRetention)(nil),     // 9: shuttle.v1.BackupRetention
-	(*BackupRequest)(nil),       // 10: shuttle.v1.BackupRequest
-	(*RestoreRequest)(nil),      // 11: shuttle.v1.RestoreRequest
-	(*BackupResult)(nil),        // 12: shuttle.v1.BackupResult
-	nil,                         // 13: shuttle.v1.DeployRequest.EnvEntry
-	nil,                         // 14: shuttle.v1.RollbackRequest.EnvEntry
-	nil,                         // 15: shuttle.v1.BackupRequest.EnvEntry
-	nil,                         // 16: shuttle.v1.RestoreRequest.EnvEntry
+	(*DeployLog)(nil),           // 6: shuttle.v1.DeployLog
+	(*TeardownRequest)(nil),     // 7: shuttle.v1.TeardownRequest
+	(*CaddyConfigRequest)(nil),  // 8: shuttle.v1.CaddyConfigRequest
+	(*CaddyConfigResponse)(nil), // 9: shuttle.v1.CaddyConfigResponse
+	(*BackupRetention)(nil),     // 10: shuttle.v1.BackupRetention
+	(*BackupRequest)(nil),       // 11: shuttle.v1.BackupRequest
+	(*RestoreRequest)(nil),      // 12: shuttle.v1.RestoreRequest
+	(*BackupResult)(nil),        // 13: shuttle.v1.BackupResult
+	nil,                         // 14: shuttle.v1.DeployRequest.EnvEntry
+	nil,                         // 15: shuttle.v1.RollbackRequest.EnvEntry
+	nil,                         // 16: shuttle.v1.BackupRequest.EnvEntry
+	nil,                         // 17: shuttle.v1.RestoreRequest.EnvEntry
 }
 var file_shuttle_v1_deploy_proto_depIdxs = []int32{
-	13, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
-	14, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
+	14, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
+	15, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
 	0,  // 2: shuttle.v1.DeployResponse.status:type_name -> shuttle.v1.DeployStatus
 	4,  // 3: shuttle.v1.DeployResponse.logs:type_name -> shuttle.v1.LogLine
-	15, // 4: shuttle.v1.BackupRequest.env:type_name -> shuttle.v1.BackupRequest.EnvEntry
-	9,  // 5: shuttle.v1.BackupRequest.retention:type_name -> shuttle.v1.BackupRetention
-	16, // 6: shuttle.v1.RestoreRequest.env:type_name -> shuttle.v1.RestoreRequest.EnvEntry
-	1,  // 7: shuttle.v1.BackupResult.status:type_name -> shuttle.v1.BackupStatus
-	4,  // 8: shuttle.v1.BackupResult.logs:type_name -> shuttle.v1.LogLine
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	4,  // 4: shuttle.v1.DeployLog.lines:type_name -> shuttle.v1.LogLine
+	16, // 5: shuttle.v1.BackupRequest.env:type_name -> shuttle.v1.BackupRequest.EnvEntry
+	10, // 6: shuttle.v1.BackupRequest.retention:type_name -> shuttle.v1.BackupRetention
+	17, // 7: shuttle.v1.RestoreRequest.env:type_name -> shuttle.v1.RestoreRequest.EnvEntry
+	1,  // 8: shuttle.v1.BackupResult.status:type_name -> shuttle.v1.BackupStatus
+	4,  // 9: shuttle.v1.BackupResult.logs:type_name -> shuttle.v1.LogLine
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_deploy_proto_init() }
@@ -1207,7 +1278,7 @@ func file_shuttle_v1_deploy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shuttle_v1_deploy_proto_rawDesc), len(file_shuttle_v1_deploy_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

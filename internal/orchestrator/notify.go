@@ -23,6 +23,12 @@ type notifyTarget struct {
 
 // wants reports whether this target should receive the given event type.
 func (t notifyTarget) wants(et EventType) bool {
+	// deploy.log is a high-volume live-tail stream meant for SSE/UI/metrics, not
+	// chat sinks. It is opt-in only: never matched by the "empty = all" default,
+	// so a target without an explicit events filter is not flooded with log lines.
+	if et == EventDeployLog {
+		return t.events[et]
+	}
 	if len(t.events) == 0 {
 		return true
 	}

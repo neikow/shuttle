@@ -54,7 +54,7 @@ Always run `make test` before committing. The repo is kept race-clean.
 
 | File | Responsibility |
 |------|----------------|
-| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger, backup/restore-result → `handleBackupResult` (finalize `service_backups`, persist logs, publish event). Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
+| `server.go` | gRPC `AgentServiceServer`: the bidi `Register` stream, deploy-result → ledger, incremental deploy-log chunk → `handleDeployLog` (republish as a `deploy.log` event for live tailing; transient, never persisted), backup/restore-result → `handleBackupResult` (finalize `service_backups`, persist logs, publish event). Records the agent's reported build version on register and logs a warning on agent/orchestrator version skew (`SetVersion`). |
 | `auth.go` | `TokenStreamInterceptor` — validates the agent's bearer token, pins the stream to its host. |
 | `rbac.go` | HTTP RBAC: `Role` (read<deploy<admin) + `ParseRole`/`roleRank`, `resolveRole` (static bearer→admin, else ledger `control_tokens` lookup, else OIDC JWT via `looksLikeJWT`+`SetOIDC`), and the `requireRole(min, handler)` middleware (401 unauth / 403 insufficient) that replaces the old flat `bearerAuth`. Stashes the resolved `identity{Name,Role}` in the request context so the audit log records the token name / OIDC subject as actor. |
 | `oidc.go` | `OIDCAuthenticator`: per-user OpenID Connect auth. `NewOIDCAuthenticator` does discovery (`github.com/coreos/go-oidc`) against the issuer at boot; `verify` checks JWT signature/JWKS + issuer + `audience`, maps the `roles_claim` through `role_mapping`→`Role` (highest wins), identity = `username_claim`. The third source in `resolveRole`. Also carries the non-secret `PublicConfig()` (issuer/client_id/scopes) served at `GET /auth/config` so the web UI can run a browser PKCE login. |
@@ -73,14 +73,14 @@ Always run `make test` before committing. The repo is kept race-clean.
 | `overview.go` | `GET /overview` — single-screen snapshot merging connected-agent liveness (`Registry.Snapshot`, incl. each agent's reported `agent_version`) with the latest reported container state per service (`StateTracker.Snapshot`). A host shows if connected *or* it has any reported service, so an offline host with known services still appears (`Connected=false`). Backs the UI Overview tab. |
 | `plan.go` | `GitSyncer.Plan` — read-only desired-vs-actual diff: sync repo, diff every service against `ledger.CurrentSHAs` → per-service `create`/`update`/`unchanged`/`remove`. Dispatches nothing. Backs `GET /plan` and `shuttle plan`. `PlanRef(ref)` diffs an arbitrary ref (branch/tag/`refs/pull/N/head`/SHA) via an isolated temp checkout (`checkoutRef`), so CI can preview a PR branch without touching the live working tree (`?ref=` / `--ref`). |
 | `metrics.go` | `Metrics` — subscribes to the `EventBus` and exposes Prometheus metrics at `GET /metrics` (`shuttle_events_total{type}`, `shuttle_deploy_duration_seconds`, `shuttle_connected_agents`, `shuttle_event_bus_dropped_total`). |
-| `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
+| `notify.go` | `Notifier` — subscribes to the `EventBus` and POSTs matching events to outbound webhooks (Slack `{"text"}`, Discord `{"content"}`, or generic `webhook` = raw event JSON). Per-target `events` filter (empty = all, **except `deploy.log`** which is opt-in only so the high-volume live-tail stream never floods chat sinks). Best-effort: bounded-concurrent, time-limited sends; failures logged not retried; never blocks the deploy path. Configured by `notifications:` in `config.yml`. |
 | `ratelimit.go` | `ipRateLimiter` — per-client-IP token bucket (`golang.org/x/time/rate`) wrapping the unauthenticated endpoints (webhooks + `/enroll/redeem`); 429 + `Retry-After` over the limit. Buckets idle out; keyed on `RemoteAddr` (not spoofable `X-Forwarded-For`). Tunable via `webhook_rate_limit_per_minute`. |
 | `secretdeps.go` | `ServicesUsingSecret` — maps a changed Infisical (env, folder) to the services that read it (used by the Infisical webhook for selective redeploy). |
 | `debounce.go` | `changeDebouncer` — coalesces a burst of Infisical changes into one reconcile pass. |
 | `secretpoll.go` | `SecretPoller` — periodic fingerprint poll of the Infisical folders services read; redeploys on change. Fallback for undelivered webhooks. Stores only SHA-256 fingerprints, never secret values. |
 | `check.go` | `GitSyncer.Check` — read-only validation pass: sync+load the repo and verify every reference in each service's `env:` map resolves (provider secret or `${env:KEY}`). Collects all problems (no fail-fast), dispatches nothing. Backs `GET /check` and `shuttle check` (remote mode hits the running orchestrator so CI needs no local config). `CheckRef(ref)` validates an arbitrary ref via the same isolated `checkoutRef` as plan (`?ref=` / `--ref`). |
 | `ui.go` | `EnableUI` — serves the embedded `web/dist` SPA under `/ui/` (no-op unless built `-tags embedui`). Static bundle is unauthenticated; the browser app authenticates its own API calls with a bearer token — either pasted (static/control token) or obtained via the OIDC **Sign in with SSO** browser PKCE login (see the OIDC web-UI decision) — so control-plane endpoints stay `requireRole`-protected. SPA fallback to `index.html` for client routes. |
-| `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result handler, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Consumed by the SSE stream (`/events`), metrics (`metrics.go`), and outbound notifications (`notify.go`). |
+| `events.go` | `EventBus` — in-process pub/sub for orchestrator events (`deploy.queued/log/succeeded/failed/rolled_back`, `rollback.queued`, `drift.detected`, `service.removed`, `volumes.purged`). Publishers: `dispatch`, the deploy-result + deploy-log handlers, the drift reconciler, teardown/purge. Bounded per-subscriber buffers (drop on overflow) + a replay ring. Consumed by the SSE stream (`/events`), metrics (`metrics.go`), and outbound notifications (`notify.go`). |
 
 ## Request flows
 
@@ -475,11 +475,27 @@ These are deliberate. Don't reverse them without updating this file.
   tier). This lets an operator answer *why* a deploy failed from the control
   plane / UI instead of SSHing to the host to grep agent logs. Writing logs is
   **best-effort** — a failed log write is logged but never changes the deploy
-  result (the ledger status is the source of truth). Logs aren't streamed live
-  (the agent batches them into one final message), so the endpoint is a
-  point-in-time read, surfaced in the UI's Deploys tab behind a per-row **Logs**
-  button. Deploys recorded before this feature (or that failed before the agent
-  ran) simply have none.
+  result (the ledger status is the source of truth). The persisted set is the
+  point-in-time record, served at `GET /deploys/{id}/logs` and surfaced in the
+  UI's Deploys tab behind a per-row **Logs** button. Deploys recorded before this
+  feature (or that failed before the agent ran) simply have none.
+- **Live deploy-log tailing layers on the same path, best-effort and additive.**
+  Beyond the terminal batch, the agent *also* streams incremental log chunks
+  while a deploy/rollback/teardown runs (proto `DeployLog` on the `AgentEvent`
+  oneof; `streamDeployResult` batches lines, flushing every 32 lines or 500ms).
+  The orchestrator republishes each chunk as a transient `deploy.log` **event**
+  on the `EventBus` (`handleDeployLog`) — never persisted, since the terminal
+  `DeployResponse` still carries the full logs that `RecordDeployLogs` stores.
+  So the wire carries the lines twice (live chunks + final batch); that's a
+  deliberate trade for a zero-new-state design (no per-deploy accumulation buffer
+  on the orchestrator). The UI's **Logs** modal tails `deploy.log` events for an
+  in-progress deploy over the existing `/events` SSE stream and falls back to the
+  persisted logs once terminal. Two correctness points the feature forced: (1) the
+  agent now serializes every `stream.Send` through an `eventSender` mutex —
+  gRPC forbids concurrent `SendMsg`, and live chunks sharply raise the send rate
+  racing the heartbeat/state goroutines; (2) `deploy.log` is **opt-in** for
+  outbound notifications (`notify.go` `wants`) so the high-volume stream never
+  floods Slack/Discord targets that use the "empty = all" default.
 - **Liveness vs readiness: `/healthz` always-200, `/readyz` gated.** `/healthz`
   answers 200 for the life of the process (liveness). `/readyz` is backed by an
   `atomic.Bool` the orchestrator flips true once its listeners are up and **false

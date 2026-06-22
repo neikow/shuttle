@@ -19,6 +19,29 @@ import (
 
 const stateReportInterval = 30 * time.Second
 
+// eventSink is the subset of the gRPC stream the agent uses to push events up.
+// The concrete shuttlev1.AgentService_RegisterClient satisfies it directly; the
+// session wraps it in an eventSender so concurrent senders are serialized.
+type eventSink interface {
+	Send(*shuttlev1.AgentEvent) error
+}
+
+// eventSender serializes AgentEvent sends. A gRPC stream does not support
+// concurrent SendMsg, yet the agent sends from several goroutines at once — the
+// heartbeat ticker, the container-state reporter, and command execution (which
+// now also streams live deploy-log chunks). Every send goes through this mutex
+// so they never interleave on the wire.
+type eventSender struct {
+	mu     sync.Mutex
+	stream shuttlev1.AgentService_RegisterClient
+}
+
+func (s *eventSender) Send(ev *shuttlev1.AgentEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stream.Send(ev)
+}
+
 // deployedSet tracks the services this agent has deployed, so it can report
 // their container state for orchestrator drift detection. It survives
 // reconnects across sessions, and is reseeded from on-disk compose workspaces
@@ -179,9 +202,11 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
 	}
+	// All sends funnel through sender (serialized); Recv stays on the raw stream.
+	sender := &eventSender{stream: stream}
 
 	// Send registration.
-	if err := stream.Send(&shuttlev1.AgentEvent{
+	if err := sender.Send(&shuttlev1.AgentEvent{
 		Payload: &shuttlev1.AgentEvent_Register{
 			Register: &shuttlev1.RegisterRequest{
 				Host:         cfg.Host,
@@ -203,7 +228,7 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := stream.Send(&shuttlev1.AgentEvent{
+				if err := sender.Send(&shuttlev1.AgentEvent{
 					Payload: &shuttlev1.AgentEvent_Heartbeat{
 						Heartbeat: &shuttlev1.Heartbeat{TsUnixMs: time.Now().UnixMilli()},
 					},
@@ -216,20 +241,20 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 	defer func() { <-hbDone }()
 
 	// Container-state report goroutine: drives orchestrator drift detection.
-	go reportStateLoop(ctx, stream, driver, deployed)
+	go reportStateLoop(ctx, sender, driver, deployed)
 
 	for {
 		cmd, err := stream.Recv()
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
 		}
-		if err := handleCommand(ctx, cfg, stream, driver, deployed, caddy, cmd); err != nil {
+		if err := handleCommand(ctx, cfg, sender, driver, deployed, caddy, cmd); err != nil {
 			slog.Error("command error", "err", err)
 		}
 	}
 }
 
-func reportStateLoop(ctx context.Context, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet) {
+func reportStateLoop(ctx context.Context, stream eventSink, driver Driver, deployed *deployedSet) {
 	ticker := time.NewTicker(stateReportInterval)
 	defer ticker.Stop()
 	for {
@@ -262,7 +287,7 @@ func reportStateLoop(ctx context.Context, stream shuttlev1.AgentService_Register
 func handleCommand(
 	ctx context.Context,
 	cfg Config,
-	stream shuttlev1.AgentService_RegisterClient,
+	stream eventSink,
 	driver Driver,
 	deployed *deployedSet,
 	caddy *caddySidecar,
@@ -297,7 +322,7 @@ func handleCommand(
 	return nil
 }
 
-func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.DeployRequest) error {
+func executeDeploy(ctx context.Context, cfg Config, stream eventSink, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.DeployRequest) error {
 	slog.Info("executing deploy", "deploy_id", req.DeployId, "service", req.Service)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -316,14 +341,14 @@ func executeDeploy(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 	if err == nil {
 		deployed.put(req.Service, workDir, req.Sha)
 	}
-	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	res := streamDeployResult(stream, req.DeployId, req.Service, logCh, err)
 	// Belt-and-suspenders for the recreate path (and any container the rolling
 	// hook missed): ensure the live project is attached to the ingress network.
 	connectToCaddy(ctx, caddy, workDir, req.Service, res)
 	return res
 }
 
-func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.RollbackRequest) error {
+func executeRollback(ctx context.Context, cfg Config, stream eventSink, driver Driver, deployed *deployedSet, caddy *caddySidecar, req *shuttlev1.RollbackRequest) error {
 	slog.Info("executing rollback", "deploy_id", req.DeployId, "service", req.Service, "target_sha", req.TargetSha)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -336,7 +361,7 @@ func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 	if err == nil {
 		deployed.put(req.Service, workDir, req.TargetSha)
 	}
-	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	res := streamDeployResult(stream, req.DeployId, req.Service, logCh, err)
 	connectToCaddy(ctx, caddy, workDir, req.Service, res)
 	return res
 }
@@ -345,7 +370,7 @@ func executeRollback(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 // disk and stops tracking it. With remove_volumes set, named volumes are deleted
 // and the workspace directory is removed; otherwise the workspace is kept so a
 // later volume purge can still run `down --volumes` against it.
-func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, deployed *deployedSet, req *shuttlev1.TeardownRequest) error {
+func executeTeardown(ctx context.Context, cfg Config, stream eventSink, driver Driver, deployed *deployedSet, req *shuttlev1.TeardownRequest) error {
 	slog.Info("executing teardown", "deploy_id", req.DeployId, "service", req.Service, "remove_volumes", req.RemoveVolumes)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 
@@ -353,7 +378,7 @@ func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 	if err == nil {
 		deployed.remove(req.Service)
 	}
-	res := streamDeployResult(stream, req.DeployId, logCh, err)
+	res := streamDeployResult(stream, req.DeployId, req.Service, logCh, err)
 	if res == nil && req.RemoveVolumes {
 		if rmErr := os.RemoveAll(workDir); rmErr != nil {
 			slog.Warn("remove workspace after teardown failed", "service", req.Service, "err", rmErr)
@@ -364,7 +389,7 @@ func executeTeardown(ctx context.Context, cfg Config, stream shuttlev1.AgentServ
 
 // executeBackup runs a backup against the service's compose workspace on disk
 // and reports the outcome (snapshot id, size, logs) back upstream.
-func executeBackup(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.BackupRequest) error {
+func executeBackup(ctx context.Context, cfg Config, stream eventSink, driver Driver, req *shuttlev1.BackupRequest) error {
 	slog.Info("executing backup", "backup_id", req.BackupId, "service", req.Service, "engine", req.Engine, "store", req.Store)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 	logCh, doneCh, err := driver.Backup(ctx, BackupParams{
@@ -385,7 +410,7 @@ func executeBackup(ctx context.Context, cfg Config, stream shuttlev1.AgentServic
 }
 
 // executeRestore restores a prior backup into the service.
-func executeRestore(ctx context.Context, cfg Config, stream shuttlev1.AgentService_RegisterClient, driver Driver, req *shuttlev1.RestoreRequest) error {
+func executeRestore(ctx context.Context, cfg Config, stream eventSink, driver Driver, req *shuttlev1.RestoreRequest) error {
 	slog.Info("executing restore", "operation_id", req.OperationId, "service", req.Service, "snapshot", req.SnapshotId)
 	workDir := filepath.Join(cfg.WorkDir, req.Service)
 	logCh, doneCh, err := driver.Restore(ctx, RestoreParams{
@@ -420,7 +445,7 @@ func retentionFromProto(r *shuttlev1.BackupRetention) BackupRetention {
 // streamBackupResult drains the backup/restore log stream and outcome, then sends
 // one terminal BackupResult event. A start error (driver failed to launch) is
 // reported as a failed result directly.
-func streamBackupResult(stream shuttlev1.AgentService_RegisterClient, opID, operation, service string, logCh <-chan LogLine, doneCh <-chan BackupOutcome, startErr error) error {
+func streamBackupResult(stream eventSink, opID, operation, service string, logCh <-chan LogLine, doneCh <-chan BackupOutcome, startErr error) error {
 	if startErr != nil {
 		return stream.Send(&shuttlev1.AgentEvent{
 			Payload: &shuttlev1.AgentEvent_BackupResult{
@@ -470,7 +495,15 @@ func connectToCaddy(ctx context.Context, caddy *caddySidecar, workDir, service s
 	}
 }
 
-func streamDeployResult(stream shuttlev1.AgentService_RegisterClient, deployID string, logCh <-chan LogLine, startErr error) error {
+// deployLogFlushInterval bounds how often partial log batches are flushed
+// upstream, and deployLogBatchSize caps a single chunk. Together they keep the
+// live tail responsive without sending one event per line.
+const (
+	deployLogFlushInterval = 500 * time.Millisecond
+	deployLogBatchSize     = 32
+)
+
+func streamDeployResult(stream eventSink, deployID, service string, logCh <-chan LogLine, startErr error) error {
 	if startErr != nil {
 		return stream.Send(&shuttlev1.AgentEvent{
 			Payload: &shuttlev1.AgentEvent_DeployResult{
@@ -485,16 +518,48 @@ func streamDeployResult(stream shuttlev1.AgentService_RegisterClient, deployID s
 
 	var logs []*shuttlev1.LogLine
 	success := true
-	for line := range logCh {
-		logs = append(logs, &shuttlev1.LogLine{
-			TsUnixMs: line.TsUnixMs,
-			Stream:   line.Stream,
-			Text:     line.Text,
+
+	// pending accumulates lines not yet streamed; flush sends them as one live
+	// DeployLog chunk. Live streaming is best-effort — a send error is ignored
+	// here because the terminal DeployResponse below (carrying the full logs) is
+	// the authoritative, persisted record.
+	var pending []*shuttlev1.LogLine
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		_ = stream.Send(&shuttlev1.AgentEvent{
+			Payload: &shuttlev1.AgentEvent_DeployLog{
+				DeployLog: &shuttlev1.DeployLog{DeployId: deployID, Service: service, Lines: pending},
+			},
 		})
-		if line.Stream == "stderr" && containsError(line.Text) {
-			success = false
+		pending = nil
+	}
+
+	ticker := time.NewTicker(deployLogFlushInterval)
+	defer ticker.Stop()
+	open := true
+	for open {
+		select {
+		case line, ok := <-logCh:
+			if !ok {
+				open = false
+				break
+			}
+			ll := &shuttlev1.LogLine{TsUnixMs: line.TsUnixMs, Stream: line.Stream, Text: line.Text}
+			logs = append(logs, ll)
+			pending = append(pending, ll)
+			if line.Stream == "stderr" && containsError(line.Text) {
+				success = false
+			}
+			if len(pending) >= deployLogBatchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
 		}
 	}
+	flush()
 
 	finalStatus := shuttlev1.DeployStatus_DEPLOY_STATUS_SUCCESS
 	if !success {
