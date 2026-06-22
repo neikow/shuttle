@@ -102,10 +102,17 @@ func TestFieldNamesAt(t *testing.T) {
 }
 
 func TestDNSProviderCredentialKeys(t *testing.T) {
-	if got := DNSProviderCredentialKeys("ovh"); !slices.Equal(got, []string{"application_key", "application_secret", "consumer_key"}) {
-		t.Errorf("ovh credential keys = %v", got)
+	tests := map[string][]string{
+		"ovh":        {"application_key", "application_secret", "consumer_key"},
+		"cloudflare": {"api_token"},
+		"route53":    {"access_key_id", "secret_access_key", "region"},
 	}
-	if got := DNSProviderCredentialKeys("route53"); got != nil {
+	for typ, want := range tests {
+		if got := DNSProviderCredentialKeys(typ); !slices.Equal(got, want) {
+			t.Errorf("%s credential keys = %v, want %v", typ, got, want)
+		}
+	}
+	if got := DNSProviderCredentialKeys("bogus"); got != nil {
 		t.Errorf("unknown provider type should be nil, got %v", got)
 	}
 }

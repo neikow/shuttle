@@ -67,7 +67,7 @@ func TestSemantic_serviceBackupAndExternal(t *testing.T) {
 
 func TestSemantic_dnsProviderAndCertRef(t *testing.T) {
 	// Unsupported provider type.
-	probs := ValidateBytes(FileKindDNS, []byte("providers:\n  - name: x\n    type: route53\n"))
+	probs := ValidateBytes(FileKindDNS, []byte("providers:\n  - name: x\n    type: bogus\n"))
 	if ok, _ := hasProblemContaining(probs, "provider type"); !ok {
 		t.Errorf("want provider type problem, got %+v", probs)
 	}

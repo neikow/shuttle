@@ -61,9 +61,13 @@ type dnsProviderSpec struct {
 
 // dnsProviderSpecs is the registry of supported DNS provider types. A type is
 // supported only when the shipped Caddy image (shuttle-caddy) bundles its plugin
-// — add the plugin and the spec together.
+// — add the plugin and the spec together. The credential keys are the Caddy DNS
+// provider's own JSON field names, so the resolved values map straight onto its
+// config object (see caddyDNSProvider).
 var dnsProviderSpecs = map[string]dnsProviderSpec{
-	"ovh": {requiredCreds: []string{"application_key", "application_secret", "consumer_key"}, endpointRequired: true},
+	"ovh":        {requiredCreds: []string{"application_key", "application_secret", "consumer_key"}, endpointRequired: true},
+	"cloudflare": {requiredCreds: []string{"api_token"}},
+	"route53":    {requiredCreds: []string{"access_key_id", "secret_access_key", "region"}},
 }
 
 // loadDNS reads the optional dns.yml at the repo root. A missing file yields
@@ -162,11 +166,7 @@ func DNSProviderCredentialKeys(providerType string) []string {
 }
 
 func supportedDNSTypes() string {
-	types := make([]string, 0, len(dnsProviderSpecs))
-	for t := range dnsProviderSpecs {
-		types = append(types, t)
-	}
-	return strings.Join(types, ", ")
+	return strings.Join(DNSProviderTypeNames(), ", ")
 }
 
 // DomainCoveredBy reports whether a domain falls under a certificate subject:
