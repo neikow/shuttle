@@ -22,17 +22,18 @@ var initCmd = &cobra.Command{
 	Short: "Scaffold a new orchestrator config and IaC repository",
 	Long: `Interactive wizard that sets up a new Shuttle orchestrator environment.
 
-It writes config.yml (bootstrap settings) and, if using Infisical, a .env
-file (provider credentials). It also scaffolds the IaC git repository with
-hosts.yaml, a services/ directory, and orchestrator.yaml — the repo-managed
-settings that take effect on each reconcile without restarting the orchestrator.
+Everything lands in one project directory (the current dir, or --dir): the
+bootstrap config.yml, an optional .env (provider credentials), and the IaC git
+repo itself (hosts.yaml, services/, orchestrator.yaml) — no nested sub-folder.
+Only the generated TLS material is nested, under certs/. The scaffolded
+.gitignore keeps the sensitive files (config.yml, .env, certs/) out of git.
 
 Optionally adds GitHub Actions workflows for automated deploy-on-push and
 PR plan-comment CI.`,
 	Example: `  # Interactive setup in the current directory
   shuttle init
 
-  # Write output to a specific directory
+  # Set up the project in a specific directory
   shuttle init --dir /etc/shuttle`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		outputDir, _ := cmd.Flags().GetString("dir")
@@ -45,14 +46,14 @@ PR plan-comment CI.`,
 }
 
 func init() {
-	initCmd.Flags().String("dir", ".", "Directory to write config.yml and .env into")
+	initCmd.Flags().String("dir", ".", "Project directory for config.yml, .env, and the IaC repo (certs/ nested under it)")
 }
 
 // InitOptions holds every setting gathered during the init wizard.
 // Separating prompt (I/O) from apply (logic) keeps applyInit fully testable.
 type InitOptions struct {
-	OutputDir string // where config.yml and .env are written
-	RepoDir   string // where the IaC git repo is scaffolded
+	OutputDir string // project directory: config.yml, .env, and (by default) the IaC repo
+	RepoDir   string // where the IaC git repo is scaffolded (defaults to OutputDir)
 
 	// Bootstrap — written to config.yml (stay on the server, never in git).
 	DataDir  string
@@ -208,7 +209,12 @@ func promptInitOptions(r io.Reader, w io.Writer, outputDir string) (InitOptions,
 	}
 
 	// ── IaC repository ────────────────────────────────────────────────────
+	// The IaC repo is scaffolded directly into the project directory (no nested
+	// sub-folder) so editors that open the project root find hosts.yaml/services/
+	// without extra config; config.yml/.env/certs are gitignored.
+	opts.RepoDir = opts.OutputDir
 	_, _ = fmt.Fprintln(w, "\n=== IaC repository ===")
+	_, _ = fmt.Fprintln(w, "Scaffolded into the project directory; sensitive files are gitignored.")
 	_, _ = fmt.Fprintln(w, "  1) Starter repo with an example service (whoami) to deploy first")
 	_, _ = fmt.Fprintln(w, "  2) Empty repo scaffold (bring your own services)")
 	_, _ = fmt.Fprintln(w, "  3) Use an existing remote (enter URL, no local scaffold)")
@@ -218,13 +224,11 @@ func promptInitOptions(r io.Reader, w io.Writer, outputDir string) (InitOptions,
 		opts.RemoteURL = ask("Remote URL", "")
 	case "2":
 		opts.RepoMode = "empty"
-		opts.RepoDir = ask("Local repo directory to scaffold", "./iac-repo")
 		if askBool("Add an existing git remote (origin) now?", false) {
 			opts.RemoteURL = ask("Remote URL", "")
 		}
 	default:
 		opts.RepoMode = "starter"
-		opts.RepoDir = ask("Local repo directory to scaffold", "./iac-repo")
 		if askBool("Push the starter repo to an existing git remote (origin) now?", false) {
 			opts.RemoteURL = ask("Remote URL", "")
 		}
@@ -290,14 +294,18 @@ func applyInit(ctx context.Context, opts InitOptions, w io.Writer) error {
 	// no openssl/make and no CA to distribute. Skipped if the files already
 	// exist so re-running init never clobbers a real cert.
 	if opts.GenerateCert && opts.TLSCertPath != "" && opts.TLSKeyPath != "" {
-		created, err := ensureSelfSignedCert(opts.TLSCertPath, opts.TLSKeyPath, certSANs(opts))
+		// Relative cert paths are stored verbatim in config.yml (resolved from the
+		// orchestrator's CWD at runtime) but written to disk under the project dir.
+		certPath := resolveUnderOutput(opts.OutputDir, opts.TLSCertPath)
+		keyPath := resolveUnderOutput(opts.OutputDir, opts.TLSKeyPath)
+		created, err := ensureSelfSignedCert(certPath, keyPath, certSANs(opts))
 		if err != nil {
 			return fmt.Errorf("generate TLS cert: %w", err)
 		}
 		if created {
-			_, _ = fmt.Fprintf(w, "Generated self-signed TLS cert %s (key %s, mode 0600)\n", opts.TLSCertPath, opts.TLSKeyPath)
+			_, _ = fmt.Fprintf(w, "Generated self-signed TLS cert %s (key %s, mode 0600)\n", certPath, keyPath)
 		} else {
-			_, _ = fmt.Fprintf(w, "TLS cert %s already exists — left unchanged\n", opts.TLSCertPath)
+			_, _ = fmt.Fprintf(w, "TLS cert %s already exists — left unchanged\n", certPath)
 		}
 	}
 
@@ -351,11 +359,15 @@ func printNextSteps(w io.Writer, opts InitOptions, configPath string) {
 		step("Generate the cert/key/CA you pointed at (e.g. `make certs`).")
 	}
 	if opts.RepoMode == "empty" {
-		step("Declare hosts in %s/hosts.yaml and services under %s/services/.", opts.RepoDir, opts.RepoDir)
+		step("Declare hosts in %s and services under %s.", joinRepo(opts.RepoDir, "hosts.yaml"), joinRepo(opts.RepoDir, "services/"))
 	}
 	if opts.RepoMode != "existing" && opts.RemoteURL != "" && !strings.HasPrefix(opts.RemoteURL, "file://") {
 		step("Push the IaC repo to its remote:")
-		_, _ = fmt.Fprintf(w, "       cd %s && git push -u origin main\n", opts.RepoDir)
+		if opts.RepoDir == "" || opts.RepoDir == "." {
+			_, _ = fmt.Fprintln(w, "       git push -u origin main")
+		} else {
+			_, _ = fmt.Fprintf(w, "       cd %s && git push -u origin main\n", opts.RepoDir)
+		}
 	}
 
 	step("Start the orchestrator:")
@@ -389,7 +401,7 @@ func printNextSteps(w io.Writer, opts InitOptions, configPath string) {
 		step("Watch the whoami example deploy (~60s), then verify it:")
 		_, _ = fmt.Fprintln(w, "       curl localhost:8088")
 		_, _ = fmt.Fprintf(w, "       curl -s -H \"Authorization: Bearer %s\" localhost%s/deploys | jq\n", opts.BearerToken, opts.HTTPAddr)
-		_, _ = fmt.Fprintf(w, "\nEdit %s/services/whoami/ and commit to roll out a change.\n", opts.RepoDir)
+		_, _ = fmt.Fprintf(w, "\nEdit %s and commit to roll out a change.\n", joinRepo(opts.RepoDir, "services/whoami/"))
 	}
 }
 
@@ -609,6 +621,31 @@ secrets_path_template: "{{ .SecretsPathTemplate }}"
 	return b.String(), nil
 }
 
+// joinRepo formats a repo-relative path for display in the next-steps output,
+// collapsing the "current directory" case so messages read "hosts.yaml" rather
+// than "./hosts.yaml". A trailing slash in rel is preserved.
+func joinRepo(repoDir, rel string) string {
+	if repoDir == "" || repoDir == "." {
+		return rel
+	}
+	out := filepath.Join(repoDir, rel)
+	if strings.HasSuffix(rel, "/") {
+		out += "/"
+	}
+	return out
+}
+
+// resolveUnderOutput resolves a config-relative path against the project dir for
+// on-disk writes. Absolute paths pass through unchanged. The value written into
+// config.yml stays relative (resolved from the orchestrator's CWD at runtime),
+// so the file lands under --dir while the config stays portable.
+func resolveUnderOutput(outputDir, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(outputDir, p)
+}
+
 func writeFileIfAbsent(path, content string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil // already exists
@@ -626,7 +663,18 @@ func generateHexToken() string {
 
 // ── Static file content ────────────────────────────────────────────────────
 
-const gitignoreContent = `# Shuttle runtime state (not repo config)
+// gitignoreContent keeps the bootstrap config, provider creds, generated TLS
+// material, and runtime state out of git — they live alongside the IaC files in
+// the project directory but must never be committed.
+const gitignoreContent = `# Shuttle bootstrap config & secrets — keep on the server, never in git.
+config.yml
+.env
+
+# Self-signed TLS material generated by shuttle init.
+certs/
+
+# Orchestrator runtime state (ledger + data dir).
+data/
 *.db
 *.db-wal
 *.db-shm

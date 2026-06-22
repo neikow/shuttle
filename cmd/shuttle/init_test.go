@@ -144,6 +144,58 @@ func TestApplyInit_ScaffoldsRepo(t *testing.T) {
 	assertFileExists(t, filepath.Join(opts.RepoDir, ".git"))
 }
 
+func TestApplyInit_GitignoreProtectsSecrets(t *testing.T) {
+	opts := makeOpts(t)
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(opts.RepoDir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(data)
+	for _, want := range []string{"config.yml", ".env", "certs/", "data/"} {
+		assertContains(t, body, want)
+	}
+}
+
+// TestApplyInit_SingleFolder asserts that with RepoDir == OutputDir (the wizard
+// default) the IaC scaffold and the bootstrap files share one directory and the
+// generated cert nests under certs/ within it.
+func TestApplyInit_SingleFolder(t *testing.T) {
+	dir := t.TempDir()
+	opts := makeOpts(t)
+	opts.OutputDir = dir
+	opts.RepoDir = dir
+	opts.TLSMode = "token"
+	opts.GenerateCert = true
+	opts.AdvertiseServerName = "orchestrator"
+	opts.TLSCertPath = "./certs/orchestrator.crt"
+	opts.TLSKeyPath = "./certs/orchestrator.key"
+	if err := applyInit(context.Background(), opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	// Bootstrap + IaC files live side by side in the one project directory.
+	assertFileExists(t, filepath.Join(dir, "config.yml"))
+	assertFileExists(t, filepath.Join(dir, "hosts.yaml"))
+	assertFileExists(t, filepath.Join(dir, "orchestrator.yaml"))
+	assertFileExists(t, filepath.Join(dir, ".gitignore"))
+	// Certs are the only thing nested, resolved under the project directory.
+	assertFileExists(t, filepath.Join(dir, "certs", "orchestrator.crt"))
+	assertFileExists(t, filepath.Join(dir, "certs", "orchestrator.key"))
+}
+
+func TestPromptInitOptions_RepoDirDefaultsToOutputDir(t *testing.T) {
+	dir := t.TempDir()
+	opts, err := promptInitOptions(strings.NewReader(""), io.Discard, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.RepoDir != dir {
+		t.Errorf("RepoDir = %q, want OutputDir %q (single-folder scaffold)", opts.RepoDir, dir)
+	}
+}
+
 func TestApplyInit_OrchestratorYAML_NoSecrets(t *testing.T) {
 	opts := makeOpts(t)
 	if err := applyInit(context.Background(), opts, io.Discard); err != nil {

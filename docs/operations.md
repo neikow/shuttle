@@ -60,19 +60,26 @@ the advanced paths. It prompts for:
 - Secrets provider (none or Infisical, with credentials written to `.env`)
 - Whether to write GitHub Actions workflows (deploy-on-push + PR plan-comment)
 
-Outputs:
+Everything lands in **one project directory** (`--dir`, default `.`) — the
+bootstrap files and the IaC repo share it, with no nested sub-folder. Only the
+TLS material is nested, under `certs/`. The scaffolded `.gitignore` keeps the
+sensitive files out of git.
 
 | File | Location | Notes |
 |------|----------|-------|
-| `config.yml` | `--dir` (default `.`) | Mode 0600; bootstrap secrets never go in git |
-| `certs/` | `--dir` | Self-signed orchestrator cert/key (token path, if generated); key 0600 |
-| `.env` | `--dir` | Mode 0600; Infisical creds; loaded at startup |
-| IaC git repo | prompted path | `hosts.yaml`, `services/`, `orchestrator.yaml`, optional `.github/workflows/` |
+| `config.yml` | `--dir` (default `.`) | Mode 0600; bootstrap secrets; gitignored |
+| `.env` | `--dir` | Mode 0600; Infisical creds; loaded at startup; gitignored |
+| `certs/` | `--dir/certs/` | Self-signed orchestrator cert/key (token path, if generated); key 0600; gitignored |
+| IaC repo | `--dir` | `hosts.yaml`, `services/`, `orchestrator.yaml`, `.gitignore`, optional `.github/workflows/` — committed here |
 
-A **starter** repo with no remote points `repo_url` at the local repo via
-`file://`, so the orchestrator drives it directly — a real first deploy with
-nothing to push. Running `shuttle init` a second time in the same directory is
-safe: existing files (including a real cert) are never overwritten.
+Bootstrapping into one directory matches how editors (and the
+[VS Code extension](editor.md)) open a project root: `hosts.yaml` and
+`services/` sit at the top level, while `config.yml`, `.env`, and `certs/` are
+present but gitignored. A **starter** repo with no remote points `repo_url` at
+the local repo via `file://`, so the orchestrator drives it directly — a real
+first deploy with nothing to push. Running `shuttle init` a second time in the
+same directory is safe: existing files (including a real cert) are never
+overwritten.
 
 ## Running on real hosts
 
