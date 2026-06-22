@@ -8,6 +8,13 @@ All notable changes to Shuttle are documented here. The format is based on
 
 ### Changed
 
+- **`shuttle init` scaffolds into one project directory.** The bootstrap files
+  and the IaC repo now share a single directory (`--dir`, default `.`) — no more
+  nested `iac-repo/` sub-folder, so an editor (or the VS Code extension) opening
+  the project root finds `hosts.yaml`/`services/` at the top level. Only the TLS
+  material is nested, under `certs/`. The scaffolded `.gitignore` keeps the
+  sensitive files (`config.yml`, `.env`, `certs/`, `data/`, `*.db`) out of git,
+  committed alongside the IaC files.
 - **Service env is now an explicit `env:` map, replacing `env_schema:`.**
   ⚠️ **Breaking.** A service declares each variable it wants and *where it comes
   from*, instead of a flat list of provider keys:
