@@ -54,6 +54,40 @@ func TestLoad_dns_valid(t *testing.T) {
 	}
 }
 
+func TestLoad_dns_cloudflareRoute53(t *testing.T) {
+	dns := `providers:
+  - name: cf
+    type: cloudflare
+    credentials:
+      api_token: { infisical_key: CF_TOKEN }
+  - name: aws
+    type: route53
+    credentials:
+      access_key_id:     { infisical_key: AWS_KEY }
+      secret_access_key: { infisical_key: AWS_SECRET }
+      region:            { infisical_key: AWS_REGION }
+certificates:
+  - name: star
+    domains: ["*.example.com"]
+    provider: cf
+`
+	dir := writeRepoWithDNS(t, dns, "name: app\nhost: web1\ndomains: [app.example.com]\n")
+	repo, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(repo.DNS.Providers) != 2 {
+		t.Fatalf("want 2 providers, got %d", len(repo.DNS.Providers))
+	}
+	// cloudflare/route53 need no endpoint.
+	if repo.DNS.Providers[0].Endpoint != "" {
+		t.Errorf("cloudflare endpoint = %q, want empty", repo.DNS.Providers[0].Endpoint)
+	}
+	if got := repo.DNS.Providers[1].Credentials["region"].InfisicalKey; got != "AWS_REGION" {
+		t.Errorf("route53 region ref = %q, want AWS_REGION", got)
+	}
+}
+
 func TestLoad_dns_absent(t *testing.T) {
 	dir := writeRepoWithDNS(t, "", "name: app\nhost: web1\ndomains: [app.example.com]\n")
 	repo, err := Load(dir)

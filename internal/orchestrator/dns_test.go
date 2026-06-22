@@ -148,6 +148,31 @@ func TestResolveTLSPolicies_noDNS(t *testing.T) {
 	}
 }
 
+func TestResolveTLSPolicies_cloudflareNoEndpoint(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{{Name: "app", Host: "web1", Domains: []string{"app.example.com"}, Port: 80}},
+		DNS: &config.DNSConfig{
+			Providers: []config.DNSProvider{{
+				Name: "cf", Type: "cloudflare",
+				Credentials: map[string]config.SecretRef{"api_token": {InfisicalKey: "CF_TOKEN"}},
+			}},
+			Certificates: []config.DNSCertificate{{Name: "star", Domains: []string{"*.example.com"}, Provider: "cf"}},
+		},
+	}
+	g := &GitSyncer{secrets: secrets.NewFake(map[string]string{"CF_TOKEN": "tok"})}
+	policies, err := g.resolveTLSPolicies(context.Background(), repo, "web1")
+	if err != nil {
+		t.Fatalf("resolveTLSPolicies: %v", err)
+	}
+	prov := policyProvider(t, policies[0])
+	if prov["name"] != "cloudflare" || prov["api_token"] != "tok" {
+		t.Errorf("provider = %v, want cloudflare/tok", prov)
+	}
+	if _, ok := prov["endpoint"]; ok {
+		t.Errorf("cloudflare must not emit an endpoint field: %v", prov)
+	}
+}
+
 func TestBuildCaddyConfig_tlsPolicies(t *testing.T) {
 	routes := []CaddyRoute{{Domain: "app.example.com", Upstream: "app:80"}}
 	policy := caddyTLSPolicy([]string{"*.example.com"}, map[string]any{"name": "ovh"})

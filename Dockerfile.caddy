@@ -10,7 +10,9 @@
 # agent defaults its sidecar to this image (see cmd/shuttle/agent.go).
 FROM caddy:2-builder-alpine AS build
 RUN xcaddy build \
-	--with github.com/caddy-dns/ovh
+	--with github.com/caddy-dns/ovh \
+	--with github.com/caddy-dns/cloudflare \
+	--with github.com/caddy-dns/route53
 
 FROM caddy:2-alpine
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
