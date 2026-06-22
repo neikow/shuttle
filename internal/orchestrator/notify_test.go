@@ -88,6 +88,16 @@ func TestNotifyTargetWants(t *testing.T) {
 	if filtered.wants(EventDeploySucceeded) {
 		t.Error("filter should reject unlisted type")
 	}
+
+	// deploy.log is opt-in: the empty "all" filter must NOT match it (it would
+	// flood chat sinks), but an explicit subscription does.
+	if all.wants(EventDeployLog) {
+		t.Error("empty filter should not match deploy.log")
+	}
+	optedIn := notifyTarget{events: map[EventType]bool{EventDeployLog: true}}
+	if !optedIn.wants(EventDeployLog) {
+		t.Error("explicit deploy.log subscription should match")
+	}
 }
 
 func TestNewNotifierNilWhenEmpty(t *testing.T) {

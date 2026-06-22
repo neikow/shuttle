@@ -223,3 +223,50 @@ func TestTwoAgents_killOne(t *testing.T) {
 
 	s2.CloseSend()
 }
+
+func TestHandleDeployLog_publishesEvent(t *testing.T) {
+	bus := NewEventBus()
+	sub, _ := bus.Subscribe()
+	defer sub.Close()
+	s := &AgentServiceServer{bus: bus}
+
+	s.handleDeployLog("web1", &shuttlev1.DeployLog{
+		DeployId: "dep-1",
+		Service:  "api",
+		Lines: []*shuttlev1.LogLine{
+			{Stream: "stdout", Text: "pulling"},
+			{Stream: "stdout", Text: "starting"},
+		},
+	})
+
+	select {
+	case ev := <-sub.C:
+		if ev.Type != EventDeployLog {
+			t.Errorf("type = %q, want deploy.log", ev.Type)
+		}
+		if ev.DeployID != "dep-1" || ev.Service != "api" || ev.Host != "web1" {
+			t.Errorf("event = %+v, want dep-1/api/web1", ev)
+		}
+		if ev.Message != "pulling\nstarting" {
+			t.Errorf("message = %q, want joined lines", ev.Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no deploy.log event published")
+	}
+}
+
+func TestHandleDeployLog_emptyIsNoop(t *testing.T) {
+	bus := NewEventBus()
+	sub, _ := bus.Subscribe()
+	defer sub.Close()
+	s := &AgentServiceServer{bus: bus}
+
+	s.handleDeployLog("web1", &shuttlev1.DeployLog{DeployId: "dep-1"}) // no lines
+	s.handleDeployLog("web1", nil)
+
+	select {
+	case ev := <-sub.C:
+		t.Fatalf("expected no event for an empty/nil log, got %+v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}

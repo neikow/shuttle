@@ -13,6 +13,7 @@ type EventType string
 
 const (
 	EventDeployQueued     EventType = "deploy.queued"
+	EventDeployLog        EventType = "deploy.log"
 	EventDeploySucceeded  EventType = "deploy.succeeded"
 	EventDeployFailed     EventType = "deploy.failed"
 	EventDeployRolledBack EventType = "deploy.rolled_back"
