@@ -19,6 +19,7 @@ type CheckReport struct {
 	HasProvider    bool                       `json:"has_provider"`
 	GitCredentials []GitCredentialCheckResult `json:"git_credentials,omitempty"`
 	DNSProviders   []DNSCredentialCheckResult `json:"dns_providers,omitempty"`
+	DNSRecords     []DNSRecordCheck           `json:"dns_records,omitempty"`
 	Services       []ServiceCheck             `json:"services,omitempty"`
 }
 
@@ -56,12 +57,55 @@ func (r *CheckReport) OK() bool {
 			return false
 		}
 	}
+	for _, dr := range r.DNSRecords {
+		if dr.Err != "" {
+			return false
+		}
+	}
 	for _, s := range r.Services {
 		if !s.OK() {
 			return false
 		}
 	}
 	return true
+}
+
+// DNSRecordCheck is the per-record outcome of CheckDNSRecords: the A/AAAA record
+// Shuttle would manage for a service domain, the provider that governs it, and —
+// for a "manual" provider — that the operator must create it. Err records a
+// misconfiguration that prevents the record (a host missing the zone's address
+// label, or a non-IP address).
+type DNSRecordCheck struct {
+	FQDN     string `json:"fqdn"`
+	Type     string `json:"type,omitempty"`
+	Value    string `json:"value,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Manual   bool   `json:"manual,omitempty"`
+	Err      string `json:"error,omitempty"`
+}
+
+// CheckDNSRecords reports the records Shuttle would manage for the repo's
+// dns.yml zones: one entry per service-domain that a zone governs (with the
+// resolved target IP and provider), plus an entry per problem (a host missing
+// the zone's address label, or a non-IP address). Records in a "manual" zone are
+// flagged Manual so the operator knows to create them. Returns nil when the repo
+// declares no zones.
+func (g *GitSyncer) CheckDNSRecords(repo *config.Repo) []DNSRecordCheck {
+	if repo.DNS == nil || len(repo.DNS.Zones) == 0 {
+		return nil
+	}
+	records, problems := buildDesiredRecords(repo)
+	var out []DNSRecordCheck
+	for _, p := range problems {
+		out = append(out, DNSRecordCheck{Err: p})
+	}
+	for _, dr := range records {
+		out = append(out, DNSRecordCheck{
+			FQDN: dr.rec.Name, Type: dr.rec.Type, Value: dr.rec.Value,
+			Provider: dr.provider.Name, Manual: dr.provider.Type == "manual",
+		})
+	}
+	return out
 }
 
 // DNSCredentialCheckResult is the per-provider outcome of CheckDNSCredentials:
@@ -166,6 +210,7 @@ func (g *GitSyncer) checkRepo(ctx context.Context, repo *config.Repo, sha string
 		HasProvider:    g.secrets != nil,
 		GitCredentials: g.CheckGitCredentials(ctx),
 		DNSProviders:   g.CheckDNSCredentials(ctx, repo),
+		DNSRecords:     g.CheckDNSRecords(repo),
 	}
 	for _, svc := range repo.Services {
 		if svc.IsExternal() {

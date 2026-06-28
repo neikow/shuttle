@@ -150,6 +150,20 @@ func renderCheck(out io.Writer, report *orchestrator.CheckReport) {
 		}
 	}
 
+	if len(report.DNSRecords) > 0 {
+		_, _ = fmt.Fprintf(out, "checking %d managed DNS record(s):\n", len(report.DNSRecords))
+		for _, dr := range report.DNSRecords {
+			switch {
+			case dr.Err != "":
+				_, _ = fmt.Fprintf(out, "  ✗ %s\n", dr.Err)
+			case dr.Manual:
+				_, _ = fmt.Fprintf(out, "  ! %s %s -> %s (provider %s: create it manually)\n", dr.Type, dr.FQDN, dr.Value, dr.Provider)
+			default:
+				_, _ = fmt.Fprintf(out, "  ✓ %s %s -> %s (provider %s)\n", dr.Type, dr.FQDN, dr.Value, dr.Provider)
+			}
+		}
+	}
+
 	if !report.HasProvider {
 		_, _ = fmt.Fprintf(out, "! secrets provider not configured; skipping secret checks\n")
 	}

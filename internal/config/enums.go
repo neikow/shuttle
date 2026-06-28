@@ -67,6 +67,8 @@ func RequiredKeys(kind FileKind, path []string) []string {
 			return []string{"name", "type"}
 		case "certificates":
 			return []string{"name", "domains", "provider"}
+		case "zones":
+			return []string{"domain", "provider"}
 		}
 	case FileKindOrchestrator:
 		switch joinPath(path) {

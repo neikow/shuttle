@@ -21,17 +21,33 @@ import (
 type DNSConfig struct {
 	Providers    []DNSProvider    `yaml:"providers"`
 	Certificates []DNSCertificate `yaml:"certificates"`
+	// Zones map a domain suffix to the provider that manages its A/AAAA records
+	// (record management, distinct from the ACME challenge that Certificates use).
+	Zones []DNSZone `yaml:"zones"`
 }
 
-// DNSProvider is a named DNS-challenge provider. Type selects the Caddy DNS
-// module (and thus the credential keys); Credentials map each provider field to
-// a secret reference resolved from the secrets provider at config-build time and
-// injected inline into the pushed Caddy config (never written to disk).
+// DNSProvider is a named DNS provider. Type selects the capability and (for ACME)
+// the Caddy DNS module and thus the credential keys; Credentials map each
+// provider field to a secret reference resolved from the secrets provider at
+// config-build time (injected inline into the pushed Caddy config, or used by the
+// record-management client — never written to disk). Some types are ACME-only
+// (cloudflare/route53), some manage records (ovh/manual), per dnsProviderSpecs.
 type DNSProvider struct {
 	Name        string               `yaml:"name"`
-	Type        string               `yaml:"type"`     // e.g. "ovh"
+	Type        string               `yaml:"type"`     // e.g. "ovh", "manual"
 	Endpoint    string               `yaml:"endpoint"` // provider-specific (OVH: ovh-eu, ovh-ca, ...)
 	Credentials map[string]SecretRef `yaml:"credentials"`
+}
+
+// DNSZone binds a domain suffix to a record-management provider. A service's
+// domain is matched to the longest zone whose Domain is a suffix of it; the
+// matched zone's Provider then creates/updates the A/AAAA record pointing at the
+// service's host Address(Label). This is how a single project drives split DNS —
+// e.g. a public zone via OVH and a private (Tailscale) zone via the sidecar.
+type DNSZone struct {
+	Domain   string `yaml:"domain"`   // suffix, e.g. "home.example.com" (no scheme)
+	Provider string `yaml:"provider"` // a DNSProvider name whose type can manage records
+	Address  string `yaml:"address"`  // host-address label to point records at (default "public")
 }
 
 // DNSCertificate is one certificate (a Caddy TLS automation policy): the
@@ -51,23 +67,30 @@ type SecretRef struct {
 	InfisicalPath string `yaml:"infisical_path"`
 }
 
-// dnsProviderSpec describes what a supported provider type requires. The
-// required credential keys are also the Caddy DNS provider JSON field names, so
-// the resolved credentials map straight onto the provider config.
+// dnsProviderSpec describes what a supported provider type requires and what it
+// can do. The required credential keys are also the Caddy DNS provider JSON field
+// names, so the resolved credentials map straight onto the provider config. The
+// acme/records flags gate which sections may reference the provider: certificates
+// need an ACME-capable type, zones need a record-capable type.
 type dnsProviderSpec struct {
 	requiredCreds    []string
 	endpointRequired bool
+	acme             bool // usable by certificates[] (a Caddy DNS-01 module exists)
+	records          bool // usable by zones[] (A/AAAA record management)
 }
 
-// dnsProviderSpecs is the registry of supported DNS provider types. A type is
-// supported only when the shipped Caddy image (shuttle-caddy) bundles its plugin
-// — add the plugin and the spec together. The credential keys are the Caddy DNS
-// provider's own JSON field names, so the resolved values map straight onto its
-// config object (see caddyDNSProvider).
+// dnsProviderSpecs is the registry of supported DNS provider types. An ACME type
+// is supported only when the shipped Caddy image (shuttle-caddy) bundles its
+// plugin — add the plugin and the spec together. The credential keys are the
+// Caddy DNS provider's own JSON field names, so the resolved values map straight
+// onto its config object (see caddyDNSProvider). Record-management support is
+// independent: "manual" is a no-op provider (the user creates records); "ovh"
+// does both (the "sidecar" private-DNS type is added in a later change).
 var dnsProviderSpecs = map[string]dnsProviderSpec{
-	"ovh":        {requiredCreds: []string{"application_key", "application_secret", "consumer_key"}, endpointRequired: true},
-	"cloudflare": {requiredCreds: []string{"api_token"}},
-	"route53":    {requiredCreds: []string{"access_key_id", "secret_access_key", "region"}},
+	"ovh":        {requiredCreds: []string{"application_key", "application_secret", "consumer_key"}, endpointRequired: true, acme: true, records: true},
+	"cloudflare": {requiredCreds: []string{"api_token"}, acme: true},
+	"route53":    {requiredCreds: []string{"access_key_id", "secret_access_key", "region"}, acme: true},
+	"manual":     {records: true},
 }
 
 // loadDNS reads the optional dns.yml at the repo root. A missing file yields
@@ -97,15 +120,15 @@ func loadDNS(rootDir string) (*DNSConfig, error) {
 // validate checks the DNS config in isolation (provider/cert integrity). Service
 // pins are validated against it in Repo.Validate, which has the services.
 func (d *DNSConfig) validate() error {
-	providers := make(map[string]bool, len(d.Providers))
+	provTypes := make(map[string]string, len(d.Providers)) // name -> type
 	for i, p := range d.Providers {
 		if p.Name == "" {
 			return fmt.Errorf("dns provider[%d]: name is required", i)
 		}
-		if providers[p.Name] {
+		if _, dup := provTypes[p.Name]; dup {
 			return fmt.Errorf("dns provider %q: duplicate name", p.Name)
 		}
-		providers[p.Name] = true
+		provTypes[p.Name] = p.Type
 
 		spec, ok := dnsProviderSpecs[p.Type]
 		if !ok {
@@ -137,11 +160,66 @@ func (d *DNSConfig) validate() error {
 		if len(c.Domains) == 0 {
 			return fmt.Errorf("dns certificate %q: at least one domain is required", c.Name)
 		}
-		if !providers[c.Provider] {
+		typ, known := provTypes[c.Provider]
+		if !known {
 			return fmt.Errorf("dns certificate %q: references unknown provider %q", c.Name, c.Provider)
+		}
+		if !dnsProviderSpecs[typ].acme {
+			return fmt.Errorf("dns certificate %q: provider %q (type %q) cannot issue certificates", c.Name, c.Provider, typ)
+		}
+	}
+
+	zones := make(map[string]bool, len(d.Zones))
+	for i, z := range d.Zones {
+		if z.Domain == "" {
+			return fmt.Errorf("dns zone[%d]: domain is required", i)
+		}
+		if zones[z.Domain] {
+			return fmt.Errorf("dns zone %q: duplicate domain", z.Domain)
+		}
+		zones[z.Domain] = true
+		typ, known := provTypes[z.Provider]
+		if !known {
+			return fmt.Errorf("dns zone %q: references unknown provider %q", z.Domain, z.Provider)
+		}
+		if !dnsProviderSpecs[typ].records {
+			return fmt.Errorf("dns zone %q: provider %q (type %q) cannot manage records", z.Domain, z.Provider, typ)
 		}
 	}
 	return nil
+}
+
+// ProviderByName returns the named provider, or nil when absent.
+func (d *DNSConfig) ProviderByName(name string) *DNSProvider {
+	if d == nil {
+		return nil
+	}
+	for i := range d.Providers {
+		if d.Providers[i].Name == name {
+			return &d.Providers[i]
+		}
+	}
+	return nil
+}
+
+// ZoneFor returns the most specific zone (longest matching Domain suffix) that
+// governs domain, or nil when none — i.e. when Shuttle should not manage a record
+// for it. Matching is on dot-bounded suffixes: zone "example.com" covers
+// "app.example.com" and "example.com" itself, but not "notexample.com".
+func (d *DNSConfig) ZoneFor(domain string) *DNSZone {
+	if d == nil {
+		return nil
+	}
+	var best *DNSZone
+	for i := range d.Zones {
+		z := &d.Zones[i]
+		if domain == z.Domain || strings.HasSuffix(domain, "."+z.Domain) {
+			if best == nil || len(z.Domain) > len(best.Domain) {
+				best = z
+			}
+		}
+	}
+	return best
 }
 
 // CertificateNames returns the set of declared certificate names, for validating
