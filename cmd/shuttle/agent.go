@@ -47,6 +47,7 @@ Authenticate one of these ways:
 		driverName, _ := cmd.Flags().GetString("driver")
 		dockerBin, _ := cmd.Flags().GetString("docker-bin")
 		caddyImage, _ := cmd.Flags().GetString("caddy-image")
+		dnsImage, _ := cmd.Flags().GetString("dns-image")
 
 		driver, err := agent.NewDriver(driverName, dockerBin)
 		if err != nil {
@@ -85,6 +86,7 @@ Authenticate one of these ways:
 			Token:        tok,
 			DockerBin:    dockerBin,
 			CaddyImage:   caddyImage,
+			DNSImage:     dnsImage,
 		}
 
 		ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
@@ -106,6 +108,7 @@ func init() {
 	agentCmd.Flags().String("driver", "compose", "Deploy driver: 'compose' (Docker Compose) or 'synology' (DSM Container Manager)")
 	agentCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
 	agentCmd.Flags().String("caddy-image", "", "Caddy sidecar image (default ghcr.io/neikow/shuttle-caddy:<version>); override with a custom xcaddy build for other DNS providers")
+	agentCmd.Flags().String("dns-image", "", "CoreDNS sidecar image for private DNS (default coredns/coredns)")
 	_ = agentCmd.MarkFlagRequired("orchestrator")
 	_ = agentCmd.MarkFlagRequired("host")
 

@@ -84,6 +84,7 @@ from --work-dir.`,
 		if caddyImage == "" {
 			caddyImage = defaultCaddyImage(Version)
 		}
+		dnsImage, _ := cmd.Flags().GetString("dns-image")
 
 		cfg := agent.Config{
 			Host:         res.Host,
@@ -95,6 +96,7 @@ from --work-dir.`,
 			Token:        res.Token,
 			DockerBin:    dockerBin,
 			CaddyImage:   caddyImage,
+			DNSImage:     dnsImage,
 		}
 		return agent.Run(ctx, cfg, driver)
 	},
@@ -158,4 +160,5 @@ func init() {
 	joinCmd.Flags().String("driver", "compose", "Deploy driver: 'compose' (Docker Compose) or 'synology' (DSM Container Manager)")
 	joinCmd.Flags().String("docker-bin", "", "Override the Docker executable path (e.g. /usr/local/bin/docker on Synology)")
 	joinCmd.Flags().String("caddy-image", "", "Caddy sidecar image (default ghcr.io/neikow/shuttle-caddy:<version>)")
+	joinCmd.Flags().String("dns-image", "", "CoreDNS sidecar image for private DNS (default coredns/coredns)")
 }
