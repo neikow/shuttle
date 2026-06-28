@@ -263,6 +263,12 @@ func (r *Repo) Validate() error {
 		if err := r.DNS.validate(); err != nil {
 			return err
 		}
+		// Cross-file: a sidecar provider's host must be a declared host.
+		for _, p := range r.DNS.Providers {
+			if p.Type == "sidecar" && p.Host != "" && !hostSet[p.Host] {
+				return fmt.Errorf("dns provider %q: host %q is not declared in hosts.yaml", p.Name, p.Host)
+			}
+		}
 	}
 	certNames := map[string]bool{}
 	if r.DNS != nil {
