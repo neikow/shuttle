@@ -26,6 +26,9 @@ const (
 	EventBackupFailed     EventType = "backup.failed"
 	EventRestoreSucceeded EventType = "restore.succeeded"
 	EventRestoreFailed    EventType = "restore.failed"
+	EventDNSRecordSet     EventType = "dns.record_set"
+	EventDNSRecordRemoved EventType = "dns.record_removed"
+	EventDNSDriftHealed   EventType = "dns.drift_healed"
 )
 
 // Event is a single thing that happened in the orchestrator. One flat struct

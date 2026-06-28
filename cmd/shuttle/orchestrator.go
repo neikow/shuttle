@@ -222,6 +222,14 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		go reconciler.Run(ctx)
 		slog.Info("drift reconciler started", "interval", "60s")
 
+		// DNS record reconciler: manages A/AAAA records for dns.yml zones (no-op
+		// until the repo declares any). Slower cadence than drift to be gentle on
+		// provider APIs; reads the working copy the drift reconciler keeps synced.
+		dnsReconciler := orchestrator.NewDNSReconciler(syncer, store, 2*time.Minute)
+		dnsReconciler.SetEventBus(bus)
+		go dnsReconciler.Run(ctx)
+		slog.Info("dns record reconciler started", "interval", "2m")
+
 		if cfg.InfisicalPollInterval != "" {
 			if secProvider == nil {
 				return fmt.Errorf("infisical_poll_interval set but no secrets provider configured")
