@@ -325,10 +325,14 @@ secrets_path_template: "{{ .SecretsPathTemplate }}"
 # secrets_base_path: "/shared"
 # secrets_path_template: "/services/{service}"
 {{ end }}
-# Per-repo/org HTTPS credentials (token fetched from Infisical at runtime).
+# Private IaC repo? Authenticate with a REPO-SCOPED token (token fetched from
+# Infisical at runtime, never written to disk). Prefer a least-privilege token
+# that can reach only this repo: a GitHub fine-grained PAT (Contents: read) or
+# deploy key, a GitLab project access token (read_repository), or a Gitea
+# repo token — not an account/org-wide PAT. Scope repo_prefix to the one repo.
 # git_credentials:
-#   - repo_prefix: github.com/myorg
-#     infisical_key: GITHUB_TOKEN
+#   - repo_prefix: github.com/you/iac   # single repo, no scheme
+#     infisical_key: IAC_REPO_TOKEN
 `
 	t, err := template.New("orch").Parse(tmpl)
 	if err != nil {

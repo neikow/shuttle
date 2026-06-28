@@ -124,6 +124,13 @@ contains a freshly scaffolded **local** repo with no remote, `orchestrator init`
 auto-detects it and drives it directly over `file://` — the single-machine path,
 where steps 2–3 collapse into one `shuttle orchestrator init` (no push).
 
+If the IaC repo is **private**, give the orchestrator a **repo-scoped** token to
+clone it — a GitHub fine-grained PAT (Contents: read) or deploy key, a GitLab
+project access token (`read_repository`), etc., limited to that one repo rather
+than an account/org-wide PAT. Store the token in your secrets provider and
+reference it from `orchestrator.yaml` `git_credentials`; see
+[Git credentials](configuration.md#git-credentials).
+
 If you scaffolded CI, set the repo variables it expects — `SHUTTLE_URL`,
 `SHUTTLE_WEBHOOK_SECRET` (deploy), and `SHUTTLE_TOKEN` (plan) — in your provider's
 CI/CD settings so push-to-deploy and PR/MR plan comments work.

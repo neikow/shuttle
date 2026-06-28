@@ -50,7 +50,7 @@ See `deploy/config.example.yml` for a ready-to-edit template (it documents the
 | `infisical_webhook_secret` | — | HMAC secret for `POST /webhook/infisical`. Required to enable Infisical secret-change webhooks. |
 | `infisical_webhook_debounce` | `5s` | How long to coalesce a burst of Infisical changes before triggering a redeploy. Accepts Go duration syntax (`5s`, `1m`, …). |
 | `infisical_poll_interval` | — | Enable periodic Infisical secret fingerprint polling as a fallback when webhooks aren't delivered. Accepts Go duration syntax (`1m`, `5m`, …). Empty disables polling. |
-| `git_credentials` | — | List of per-repo/org HTTPS token credentials. See [Git credentials](#git-credentials) below. |
+| `git_credentials` | — | Per-repo HTTPS token credentials for private repos; use repo-scoped tokens. See [Git credentials](#git-credentials) below. |
 | `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
 | `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |
 | `agent_token_auth` | `false` | Require agents to present a valid enrollment token to register (see [operations.md](operations.md#enrolling-agents-with-tokens)). |
@@ -173,16 +173,37 @@ Each entry specifies the repo prefix and where to fetch the token:
 
 ```yaml
 git_credentials:
-  - repo_prefix: github.com/myorg   # no scheme; matches any HTTPS URL with this prefix
-    infisical_key: GITHUB_TOKEN     # secret key to fetch from Infisical
-    infisical_env: production       # optional; overrides INFISICAL_ENV
-    infisical_path: /shared         # optional; Infisical folder for this key
+  - repo_prefix: github.com/you/iac   # no scheme; the single repo this token unlocks
+    infisical_key: IAC_REPO_TOKEN     # secret key to fetch from Infisical
+    infisical_env: production         # optional; overrides INFISICAL_ENV
+    infisical_path: /shared           # optional; Infisical folder for this key
 ```
 
 The `repo_prefix` must not include the scheme (`https://` is stripped). On each
 git operation the orchestrator fetches the token from Infisical and passes it via
-`git -c http.<url>.extraHeader=Authorization:Bearer <token>`. Requires
+`git -c http.<url>.extraHeader=Authorization:Bearer <token>`, scoped to the
+`repo_prefix` so it is never sent to any other remote. Requires
 `secrets_provider: infisical`.
+
+::: tip Use a repo-scoped token (recommended)
+Mint a token that can reach **only the IaC repo**, not your whole account or org,
+and set `repo_prefix` to that one repo (e.g. `github.com/you/iac`, not
+`github.com/you`). Defense in depth: even though Shuttle only ever sends the token
+to its `repo_prefix`, a least-privilege token limits the blast radius if it leaks.
+
+- **GitHub** — a [fine-grained PAT](https://github.com/settings/personal-access-tokens)
+  scoped to the single repo with **Contents: Read-only**, or a per-repo
+  **deploy key** / GitHub App installation token. Avoid classic PATs (the `repo`
+  scope grants every private repo you can see).
+- **GitLab** — a [project access token](https://docs.gitlab.com/ee/user/project/settings/project_access_tokens.html)
+  on that project with the **`read_repository`** scope and the **Reporter** role.
+  Avoid a personal access token (account-wide).
+- **Gitea / Forgejo** — a repo-scoped access token (or a deploy key) with read
+  access to that repository only.
+
+Store the token's *value* in Infisical (never in the repo); rotate it there and
+the next git operation picks it up — no restart.
+:::
 
 `shuttle check` reports the status of every configured credential (whether the
 token resolved successfully) alongside the service validation results.
@@ -251,8 +272,8 @@ secrets_base_path: "/shared"
 secrets_path_template: "/services/{service}"
 
 git_credentials:
-  - repo_prefix: github.com/myorg
-    infisical_key: GITHUB_TOKEN
+  - repo_prefix: github.com/you/iac   # single repo; use a repo-scoped token
+    infisical_key: IAC_REPO_TOKEN
     infisical_env: production
     infisical_path: /shared
 ```

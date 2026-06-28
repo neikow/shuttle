@@ -309,6 +309,23 @@ func printOrchNextSteps(w io.Writer, opts OrchInitOptions, configPath string) {
 		_, _ = fmt.Fprintln(w, "       curl localhost:8088")
 		_, _ = fmt.Fprintf(w, "       curl -s -H \"Authorization: Bearer %s\" localhost%s/deploys | jq\n", opts.BearerToken, opts.HTTPAddr)
 	}
+
+	// Cloning a remote repo over HTTPS may need credentials. Advertise the
+	// least-privilege option so private repos default to a repo-scoped token.
+	if isRemoteRepo(opts.RepoURL) {
+		_, _ = fmt.Fprintln(w, "\n  Private repo? Add a REPO-SCOPED git credential (least privilege):")
+		_, _ = fmt.Fprintln(w, "    • Mint a token that reaches only this repo — a GitHub fine-grained PAT")
+		_, _ = fmt.Fprintln(w, "      (Contents: read) / deploy key, or a GitLab project access token")
+		_, _ = fmt.Fprintln(w, "      (read_repository) — not an account/org-wide PAT.")
+		_, _ = fmt.Fprintln(w, "    • Store its value in your secrets provider and reference it from")
+		_, _ = fmt.Fprintln(w, "      orchestrator.yaml git_credentials. See docs: Configuration › Git credentials.")
+	}
+}
+
+// isRemoteRepo reports whether repo_url is a network remote (vs empty or a local
+// file:// self-drive) — i.e. one that may require git credentials to clone.
+func isRemoteRepo(repoURL string) bool {
+	return repoURL != "" && !strings.HasPrefix(repoURL, "file://")
 }
 
 func writeConfigYML(path string, opts OrchInitOptions) error {
