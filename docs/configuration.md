@@ -17,8 +17,9 @@ reinstalling — Caddy config, secrets paths, git credentials. Keys present in
 If the file is absent, config.yml values stand. A parse error is logged and the
 old values are kept — a bad commit never blocks deploys.
 
-`shuttle init` generates both files interactively (see
-[operations.md](operations.md#bootstrap-with-shuttle-init)).
+`shuttle orchestrator init` generates `config.yml`; `shuttle init` scaffolds
+`orchestrator.yaml` with the IaC repo (see
+[operations.md](operations.md#bootstrap-shuttle-init-shuttle-orchestrator-init)).
 
 ---
 

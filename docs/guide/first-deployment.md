@@ -11,25 +11,37 @@ the server you'll deploy to. The server needs Docker with Compose v2.
 
 ## 1. Bootstrap
 
-On your control host, run the wizard once. It generates a bearer token + webhook
-secret, writes `config.yml` (mode 0600), and scaffolds an IaC repo:
+For a real deployment the IaC repo lives in git and the orchestrator runs on a
+server, so bootstrap spans **two machines**.
+
+On your **workstation**, scaffold the repo (choosing the CI provider you'll push
+to), create an empty repo on your provider, and publish:
 
 ```sh
-shuttle init
+shuttle init --ci github          # or: gitlab / none — scaffolds the IaC repo
+git remote add origin git@github.com:you/iac.git
+git push -u origin main
 ```
 
-The wizard is **secure by default** — press Enter through it and you get TLS with
-SSH-like token enrollment, including a self-signed orchestrator cert generated for
-you (no `openssl`, no CA to distribute). It also asks for your control URL, the
-secrets provider, the repo to use (a starter example, an empty scaffold, or your
-own remote), and whether to write GitHub Actions workflows. Mutual TLS and an
-insecure local link are available if you pick them. Re-running is safe; it never
-overwrites your edits.
+On the **orchestrator server**, generate the server config from that remote URL —
+a bearer token + webhook secret and `config.yml` (mode 0600):
+
+```sh
+shuttle orchestrator init --repo-url https://github.com/you/iac.git
+```
+
+`orchestrator init` is **secure by default** — press Enter through it and you get
+TLS with SSH-like token enrollment, including a self-signed orchestrator cert
+generated for you (no `openssl`, no CA to distribute). `--repo-url` is also how
+you point at an IaC repo you already have. Pass `--advanced` for the secrets
+provider, mutual TLS, an insecure local link, and the externally reachable
+control URL. Re-running is safe; it never overwrites your edits.
 
 ::: tip Deploying to a remote server
-For a real host, set the **externally reachable control URL** to your public
-HTTPS endpoint (e.g. `https://orchestrator.example.com:8080`) when asked — `enroll`
-uses it to pin the orchestrator's cert in the join command, and CI reads it too.
+For a real host, run `shuttle orchestrator init --advanced` and set the
+**externally reachable control URL** to your public HTTPS endpoint (e.g.
+`https://orchestrator.example.com:8080`) when asked — `enroll` uses it to pin the
+orchestrator's cert in the join command, and CI reads it too.
 :::
 
 ::: details Prefer to write the config by hand?
@@ -124,7 +136,8 @@ git commit -m "deploy whoami"
 git push
 ```
 
-If you wired the webhook during `shuttle init`, the push deploys immediately;
+If you scaffolded CI (`shuttle init --ci github|gitlab`) and set its repo
+variables, the push deploys immediately;
 otherwise the orchestrator's reconcile loop picks it up within ~60s (or trigger it
 now with `shuttle plan` to preview, then a manual deploy). The agent pulls the
 image, runs it, and reports back — and if you set `domains`, Caddy gets a route
