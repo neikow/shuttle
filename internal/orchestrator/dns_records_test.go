@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/dns"
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/secrets"
@@ -125,6 +126,49 @@ func TestDNSReconciler_HealsDrift(t *testing.T) {
 	}
 	if len(fake.removed) != 0 {
 		t.Errorf("removed = %+v, want none (value drift heals, not deletes)", fake.removed)
+	}
+}
+
+func TestCheckDNSRecords(t *testing.T) {
+	repo, err := config.Load(writeDNSReconcilerRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := (&GitSyncer{}).CheckDNSRecords(repo)
+
+	byFQDN := map[string]DNSRecordCheck{}
+	for _, c := range checks {
+		byFQDN[c.FQDN] = c
+	}
+	pub, ok := byFQDN["app.example.com"]
+	if !ok || pub.Manual || pub.Provider != "ovh" || pub.Value != "203.0.113.20" {
+		t.Errorf("public record = %+v, want ovh/non-manual/203.0.113.20", pub)
+	}
+	priv, ok := byFQDN["app.home.example.com"]
+	if !ok || !priv.Manual || priv.Value != "100.64.0.5" {
+		t.Errorf("private record = %+v, want manual/100.64.0.5", priv)
+	}
+}
+
+func TestCheckDNSRecords_MissingHostAddress(t *testing.T) {
+	dir := writeDNSReconcilerRepo(t)
+	// Drop the tailscale address the home zone needs.
+	if err := os.WriteFile(filepath.Join(dir, "hosts.yaml"),
+		[]byte("hosts:\n  - name: web1\n    addresses:\n      public: 203.0.113.20\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var problem bool
+	for _, c := range (&GitSyncer{}).CheckDNSRecords(repo) {
+		if c.Err != "" {
+			problem = true
+		}
+	}
+	if !problem {
+		t.Error("expected a problem for the host missing its tailscale address")
 	}
 }
 

@@ -85,6 +85,9 @@ hosts:
     labels:
       region: eu-west
       role: edge
+    addresses:            # optional; targets for Shuttle-managed DNS records
+      public: 203.0.113.20
+      tailscale: 100.64.0.5
     caddy:                # optional; relocate the host's Caddy sidecar ports
       http_port: 8080     # default 80
       https_port: 8443    # default 443
@@ -92,6 +95,11 @@ hosts:
 
 - `name` is required and must be unique.
 - `labels` are free-form metadata.
+- `addresses` are the host's reachable IPs by **network label**, used as the
+  target when Shuttle manages DNS records ([`dns.yml` zones](#dnsyml-optional)).
+  A host can be reachable at several addresses — e.g. a `public` IP and a
+  `tailscale` IP — and each zone names which label its records point at (default
+  `public`). Only needed when you use DNS record management.
 - `caddy.http_port` / `caddy.https_port` set the ports this host's Caddy sidecar
   listens on (and publishes). Useful when the host shares `:80`/`:443` with
   another process, or sits behind a load balancer that forwards to alternate
@@ -152,6 +160,46 @@ Each provider `type` dictates its `credentials:` keys (the editor and
   plugins); for a provider it doesn't bundle, build your own with `xcaddy` and
   point the agent at it with `--caddy-image`.
 - `shuttle check` validates that every provider's credentials resolve.
+
+### Record management (`zones:`)
+
+Certificates above issue TLS; `zones:` makes Shuttle also **create the A/AAAA
+records** that point a service's domains at its host — the manual step Caddy's
+DNS modules don't do. Each zone maps a domain suffix to a record-management
+provider and the host-address label its records target:
+
+```yaml
+zones:
+  - domain: example.com         # public: portfolio etc. via OVH
+    provider: ovh               # a providers[] entry (records-capable)
+    address: public             # host addresses[] label (default "public")
+  - domain: home.example.com    # private: homelab/Tailscale via the sidecar
+    provider: home-sidecar
+    address: tailscale
+  - domain: legacy.net          # leave these to me
+    provider: manual
+```
+
+- A service domain is matched to the **longest** zone suffix; that zone's
+  provider then upserts `<domain> A/AAAA -> host.addresses[zone.address]`. This is
+  how one project drives **split DNS** — public records via OVH, private
+  (Tailscale) records via the sidecar.
+- **Record-management providers** (the `zones[]` `provider`) are a separate
+  capability from the ACME `certificates[]` providers. Supported today: **`ovh`**
+  (via libdns) and **`manual`** (a no-op: Shuttle creates nothing, `shuttle
+  check`/`plan` just list what *you* must create). The private-DNS **`sidecar`**
+  provider is documented separately. `cloudflare`/`route53` remain ACME-only for
+  now.
+- **Ownership & drift.** Every managed record is paired with an owner TXT
+  (`_shuttle-owner.<name>` = `heritage=shuttle`); Shuttle only ever updates or
+  deletes records it owns — **foreign records are never touched**. The
+  orchestrator catalogs owned records in its ledger and, on each reconcile,
+  **heals** records changed out-of-band and **removes** ones whose service/domain
+  left the repo. Removing a `zone` from `dns.yml` stops management (records are
+  left as-is, not deleted).
+- **Credentials are secrets** (same model as the cert providers) — resolved from
+  the secrets provider per reconcile, never on disk. `shuttle check` lists every
+  managed record (and flags a host missing the zone's address label).
 
 ## `services/<name>/<name>.yaml`
 
