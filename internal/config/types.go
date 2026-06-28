@@ -224,6 +224,25 @@ type Host struct {
 	// Caddy optionally overrides the host's Caddy sidecar listen/publish ports.
 	// Nil keeps the defaults (80 HTTP, 443 HTTPS).
 	Caddy *HostCaddy `yaml:"caddy"`
+	// Addresses are the host's reachable IPs by named network label, used as the
+	// target for DNS records Shuttle manages (see dns.yml zones). A host may be
+	// reachable at several addresses — e.g. {public: 203.0.113.20, tailscale:
+	// 100.64.0.5} — and each dns.yml zone names which label its records point at
+	// (default "public"). Empty when DNS record management is not used.
+	Addresses map[string]string `yaml:"addresses"`
+}
+
+// DefaultAddressLabel is the host-address label a dns.yml zone targets when it
+// names none.
+const DefaultAddressLabel = "public"
+
+// Address returns the host's IP for the given network label, falling back to the
+// "public" address when label is empty. Returns "" when unset.
+func (h Host) Address(label string) string {
+	if label == "" {
+		label = DefaultAddressLabel
+	}
+	return h.Addresses[label]
 }
 
 // HostCaddy configures the ports a host's Caddy sidecar listens on (and

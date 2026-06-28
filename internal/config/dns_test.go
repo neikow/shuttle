@@ -131,6 +131,25 @@ func TestLoad_dns_invalid(t *testing.T) {
 			dns: validDNSYML,
 			svc: "name: app\nhost: web1\ndomains: [app.example.com]\ntls_certificate: nonexistent\n",
 		},
+		"zone unknown provider": {
+			dns: validDNSYML + "zones:\n  - domain: example.com\n    provider: nope\n",
+			svc: svc,
+		},
+		"zone provider cannot manage records": {
+			// cloudflare is ACME-only (no records capability) → invalid as a zone provider.
+			dns: "providers:\n  - name: cf\n    type: cloudflare\n    credentials:\n      api_token: { infisical_key: T }\n" +
+				"zones:\n  - domain: example.com\n    provider: cf\n",
+			svc: svc,
+		},
+		"cert provider cannot issue (manual)": {
+			dns: "providers:\n  - name: m\n    type: manual\n" +
+				"certificates:\n  - name: c\n    domains: [\"*.example.com\"]\n    provider: m\n",
+			svc: svc,
+		},
+		"duplicate zone domain": {
+			dns: validDNSYML + "zones:\n  - domain: example.com\n    provider: ovh\n  - domain: example.com\n    provider: ovh\n",
+			svc: svc,
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -158,5 +177,75 @@ func TestDomainCoveredBy(t *testing.T) {
 		if got := DomainCoveredBy(tc.domain, tc.subject); got != tc.want {
 			t.Errorf("DomainCoveredBy(%q,%q) = %v, want %v", tc.domain, tc.subject, got, tc.want)
 		}
+	}
+}
+
+const zonesDNSYML = `providers:
+  - name: ovh
+    type: ovh
+    endpoint: ovh-eu
+    credentials:
+      application_key:    { infisical_key: OVH_APP_KEY }
+      application_secret: { infisical_key: OVH_APP_SECRET }
+      consumer_key:       { infisical_key: OVH_CONSUMER_KEY }
+  - name: home
+    type: manual
+zones:
+  - domain: example.com
+    provider: ovh
+  - domain: home.example.com
+    provider: home
+    address: tailscale
+`
+
+func TestLoad_dns_zones(t *testing.T) {
+	dir := writeRepoWithDNS(t, zonesDNSYML, "name: app\nhost: web1\ndomains: [app.example.com]\n")
+	repo, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := len(repo.DNS.Zones); got != 2 {
+		t.Fatalf("zones = %d, want 2", got)
+	}
+	if p := repo.DNS.ProviderByName("home"); p == nil || p.Type != "manual" {
+		t.Errorf("ProviderByName(home) = %+v, want manual provider", p)
+	}
+}
+
+func TestZoneFor_LongestSuffix(t *testing.T) {
+	d := &DNSConfig{Zones: []DNSZone{
+		{Domain: "example.com", Provider: "ovh"},
+		{Domain: "home.example.com", Provider: "home", Address: "tailscale"},
+	}}
+	cases := map[string]string{
+		"portfolio.example.com": "example.com",      // only the public zone matches
+		"app.home.example.com":  "home.example.com", // longest suffix wins
+		"home.example.com":      "home.example.com", // exact
+		"example.com":           "example.com",      // apex
+		"notexample.com":        "",                 // not a dot-bounded suffix
+		"other.net":             "",                 // no match
+	}
+	for domain, want := range cases {
+		z := d.ZoneFor(domain)
+		got := ""
+		if z != nil {
+			got = z.Domain
+		}
+		if got != want {
+			t.Errorf("ZoneFor(%q) = %q, want %q", domain, got, want)
+		}
+	}
+}
+
+func TestHostAddress(t *testing.T) {
+	h := Host{Addresses: map[string]string{"public": "203.0.113.20", "tailscale": "100.64.0.5"}}
+	if got := h.Address(""); got != "203.0.113.20" {
+		t.Errorf("Address(\"\") = %q, want public default", got)
+	}
+	if got := h.Address("tailscale"); got != "100.64.0.5" {
+		t.Errorf("Address(tailscale) = %q", got)
+	}
+	if got := h.Address("missing"); got != "" {
+		t.Errorf("Address(missing) = %q, want empty", got)
 	}
 }
