@@ -169,12 +169,19 @@ DNS modules don't do. Each zone maps a domain suffix to a record-management
 provider and the host-address label its records target:
 
 ```yaml
+providers:
+  # ... (cert providers above) ...
+  - name: home-dns           # private DNS served by a CoreDNS sidecar
+    type: sidecar
+    host: homelab            # the host whose agent runs CoreDNS (required)
+    port: 53                 # published :53 port (default 53)
+
 zones:
   - domain: example.com         # public: portfolio etc. via OVH
     provider: ovh               # a providers[] entry (records-capable)
     address: public             # host addresses[] label (default "public")
   - domain: home.example.com    # private: homelab/Tailscale via the sidecar
-    provider: home-sidecar
+    provider: home-dns
     address: tailscale
   - domain: legacy.net          # leave these to me
     provider: manual
@@ -185,21 +192,39 @@ zones:
   how one project drives **split DNS** — public records via OVH, private
   (Tailscale) records via the sidecar.
 - **Record-management providers** (the `zones[]` `provider`) are a separate
-  capability from the ACME `certificates[]` providers. Supported today: **`ovh`**
-  (via libdns) and **`manual`** (a no-op: Shuttle creates nothing, `shuttle
-  check`/`plan` just list what *you* must create). The private-DNS **`sidecar`**
-  provider is documented separately. `cloudflare`/`route53` remain ACME-only for
-  now.
-- **Ownership & drift.** Every managed record is paired with an owner TXT
-  (`_shuttle-owner.<name>` = `heritage=shuttle`); Shuttle only ever updates or
-  deletes records it owns — **foreign records are never touched**. The
-  orchestrator catalogs owned records in its ledger and, on each reconcile,
-  **heals** records changed out-of-band and **removes** ones whose service/domain
-  left the repo. Removing a `zone` from `dns.yml` stops management (records are
-  left as-is, not deleted).
+  capability from the ACME `certificates[]` providers. Supported: **`ovh`** (via
+  libdns), **`sidecar`** (a CoreDNS sidecar, below), and **`manual`** (a no-op:
+  Shuttle creates nothing, `shuttle check`/`plan` just list what *you* must
+  create). `cloudflare`/`route53` remain ACME-only for now.
+- **Ownership & drift** (API providers like `ovh`). Every managed record is
+  paired with an owner TXT (`_shuttle-owner.<name>` = `heritage=shuttle`); Shuttle
+  only ever updates or deletes records it owns — **foreign records are never
+  touched**. The orchestrator catalogs owned records in its ledger and, on each
+  reconcile, **heals** records changed out-of-band and **removes** ones whose
+  service/domain left the repo. Removing a `zone` stops management (records left
+  as-is, not deleted).
 - **Credentials are secrets** (same model as the cert providers) — resolved from
   the secrets provider per reconcile, never on disk. `shuttle check` lists every
   managed record (and flags a host missing the zone's address label).
+
+#### Private DNS sidecar (`type: sidecar`)
+
+For zones with no public DNS provider — a homelab / Tailscale network — a
+`sidecar` provider runs **CoreDNS** on a designated host and serves the zone
+itself. The orchestrator renders a zone file from the same desired records and
+pushes the full zone set to that host's agent each reconcile (declarative, like
+the Caddy config push); the agent starts CoreDNS **lazily** (only the named host)
+and CoreDNS reloads on change. No public DNS, no inbound ports, no ACME needed.
+
+- `host` (required) names the host whose agent runs CoreDNS; `port` (default 53)
+  is the host port it publishes for `:53`. Records point at each service's
+  `addresses[zone.address]` (e.g. the `tailscale` IP).
+- Point your private resolver at it: on Tailscale, add a **split DNS** nameserver
+  for `home.example.com` → the sidecar host's Tailscale IP. Queries for the zone
+  then resolve to your services' Tailscale IPs.
+- The sidecar's zone file is the source of truth (no owner-TXT/ledger needed — the
+  whole zone is Shuttle's). Image defaults to `coredns/coredns`; override with the
+  agent's `--dns-image`.
 
 ## `services/<name>/<name>.yaml`
 
