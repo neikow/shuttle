@@ -21,12 +21,12 @@ import (
 // (advertise_server_name), the local loopback names, and the hostnames parsed
 // from the advertised gRPC and control URLs. IP literals become IP SANs, names
 // become DNS SANs.
-func certSANs(opts InitOptions) []string {
-	sans := []string{opts.AdvertiseServerName, "localhost", "127.0.0.1"}
-	if h := hostOnly(opts.AdvertiseAddr); h != "" {
+func certSANs(serverName, advertiseAddr, controlURL string) []string {
+	sans := []string{serverName, "localhost", "127.0.0.1"}
+	if h := hostOnly(advertiseAddr); h != "" {
 		sans = append(sans, h)
 	}
-	if u, err := url.Parse(opts.AdvertiseControlURL); err == nil && u.Hostname() != "" {
+	if u, err := url.Parse(controlURL); err == nil && u.Hostname() != "" {
 		sans = append(sans, u.Hostname())
 	}
 	return sans

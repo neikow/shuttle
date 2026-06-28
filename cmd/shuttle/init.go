@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -19,475 +16,215 @@ import (
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Scaffold a new orchestrator config and IaC repository",
-	Long: `Interactive wizard that sets up a new Shuttle orchestrator environment.
+	Short: "Scaffold a new IaC repository (hosts, services, CI)",
+	Long: `Scaffold a new Shuttle IaC git repository in the current directory (or --dir).
 
-Everything lands in one project directory (the current dir, or --dir): the
-bootstrap config.yml, an optional .env (provider credentials), and the IaC git
-repo itself (hosts.yaml, services/, orchestrator.yaml) — no nested sub-folder.
-Only the generated TLS material is nested, under certs/. The scaffolded
-.gitignore keeps the sensitive files (config.yml, .env, certs/) out of git.
+This writes only the git-managed side of a project: hosts.yaml, services/,
+orchestrator.yaml, a .gitignore, and (optionally) CI workflows for your git
+provider, then makes an initial commit. It does NOT generate the orchestrator's
+server config — run 'shuttle orchestrator init' for config.yml, .env, and TLS
+material (it can share this same directory).
 
-Optionally adds GitHub Actions workflows for automated deploy-on-push and
-PR plan-comment CI.`,
-	Example: `  # Interactive setup in the current directory
+The repo is provider- and remote-agnostic: create the remote yourself when ready
+(e.g. an empty repo on GitHub/GitLab), push, then point the orchestrator at it
+with 'shuttle orchestrator init --repo-url <url>' on the server.
+
+By default it asks two questions (starter vs empty, and CI provider) and takes
+secure defaults for the rest. Pass --advanced to be prompted for Caddy and secret
+paths too.`,
+	Example: `  # Scaffold a starter repo (whoami example) in the current directory
   shuttle init
 
-  # Set up the project in a specific directory
-  shuttle init --dir /etc/shuttle`,
+  # Empty scaffold with GitLab CI, no prompts for it
+  shuttle init --dir /etc/shuttle --ci gitlab`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		outputDir, _ := cmd.Flags().GetString("dir")
-		opts, err := promptInitOptions(os.Stdin, os.Stdout, outputDir)
+		dir, _ := cmd.Flags().GetString("dir")
+		advanced, _ := cmd.Flags().GetBool("advanced")
+		ci, _ := cmd.Flags().GetString("ci")
+		opts, err := promptRepoInit(os.Stdin, os.Stdout, dir, ci, advanced)
 		if err != nil {
 			return err
 		}
-		return applyInit(cmd.Context(), opts, os.Stdout)
+		return applyRepoInit(cmd.Context(), opts, os.Stdout)
 	},
 }
 
 func init() {
-	initCmd.Flags().String("dir", ".", "Project directory for config.yml, .env, and the IaC repo (certs/ nested under it)")
+	initCmd.Flags().String("dir", ".", "Directory to scaffold the IaC repo into")
+	initCmd.Flags().Bool("advanced", false, "Prompt for advanced settings (Caddy, secret paths)")
+	initCmd.Flags().String("ci", "", "CI workflows to generate for your git provider: none|github|gitlab (default: prompt)")
 }
 
-// InitOptions holds every setting gathered during the init wizard.
-// Separating prompt (I/O) from apply (logic) keeps applyInit fully testable.
-type InitOptions struct {
-	OutputDir string // project directory: config.yml, .env, and (by default) the IaC repo
-	RepoDir   string // where the IaC git repo is scaffolded (defaults to OutputDir)
+// RepoInitOptions holds the settings for scaffolding an IaC repo. Separating the
+// prompt (I/O) from the apply (logic) keeps applyRepoInit fully testable.
+type RepoInitOptions struct {
+	RepoDir string
 
-	// Bootstrap — written to config.yml (stay on the server, never in git).
-	DataDir  string
-	GRPCAddr string
-	HTTPAddr string
-
-	// Secrets written to config.yml; .env carries Infisical creds.
-	BearerToken   string
-	WebhookSecret string
-
-	// IaC remote URL (repo_url in config.yml). Empty = fill in later.
-	RemoteURL string
-
-	// RepoMode controls what the IaC repo is seeded with:
+	// RepoMode controls what the repo is seeded with:
 	//   "starter"  — an example whoami service + a "local" host to deploy first
 	//   "empty"/"" — placeholder hosts.yaml + empty services/ (bring your own)
-	//   "existing" — don't scaffold locally; just point repo_url at RemoteURL
 	RepoMode string
 
-	// TLS: "insecure", "token", "mtls". Defaults to "token" (server TLS + SSH-like
-	// agent enrollment) — the recommended, secure-by-default transport.
-	TLSMode             string
-	TLSCertPath         string
-	TLSKeyPath          string
-	TLSCAPath           string
-	AdvertiseAddr       string
-	AdvertiseServerName string
-	AgentTokenAuth      bool
+	// CIProvider selects which CI workflow files to generate for the git provider
+	// the user will push to: "none" (default), "github", or "gitlab". The remote
+	// itself is created by the user later, so only the provider is needed here.
+	CIProvider string
 
-	// AdvertiseControlURL is the externally reachable control-plane URL written to
-	// config.yml so `shuttle enroll --config` needs no --url. Locally this is the
-	// http_addr on localhost; in production it's the public HTTPS endpoint.
-	AdvertiseControlURL string
-
-	// GenerateCert, when true, makes applyInit write a fresh self-signed EC
-	// orchestrator TLS cert/key at TLSCertPath/TLSKeyPath (skipped if they already
-	// exist). This is what makes the secure token-enrollment path one step: agents
-	// trust-on-first-use pin the cert and receive it via redeem, so there's no CA
-	// to distribute and no openssl/make dependency.
-	GenerateCert bool
-
-	// Secrets provider.
-	SecretsProvider string // "none" or "infisical"
-
-	// Caddy (written to orchestrator.yaml in the IaC repo).
-	CaddyAdminURL string
-	HTTPSRedirect bool
-
-	// Repo-level config (orchestrator.yaml) extras.
+	// Repo-managed orchestrator.yaml overrides (advanced). Empty = commented
+	// examples only.
+	CaddyAdminURL       string
+	HTTPSRedirect       bool
 	SecretsBasePath     string
 	SecretsPathTemplate string
-
-	// Infisical credentials — written to .env (only when provider=infisical).
-	InfisicalClientID     string
-	InfisicalClientSecret string
-	InfisicalProjectID    string
-	InfisicalEnv          string
-	InfisicalSiteURL      string
-
-	// GitHub Actions: whether to write workflow files into the IaC repo.
-	SetupGitHubActions bool
 }
 
-// promptInitOptions runs the interactive wizard and returns a filled InitOptions.
-func promptInitOptions(r io.Reader, w io.Writer, outputDir string) (InitOptions, error) {
-	s := bufio.NewScanner(r)
-	ask := func(prompt, defaultVal string) string {
-		if defaultVal != "" {
-			_, _ = fmt.Fprintf(w, "%s [%s]: ", prompt, defaultVal)
-		} else {
-			_, _ = fmt.Fprintf(w, "%s: ", prompt)
-		}
-		if !s.Scan() {
-			return defaultVal
-		}
-		if v := strings.TrimSpace(s.Text()); v != "" {
-			return v
-		}
-		return defaultVal
-	}
-	askBool := func(prompt string, def bool) bool {
-		defStr := "y/N"
-		if def {
-			defStr = "Y/n"
-		}
-		v := strings.ToLower(ask(prompt+" ("+defStr+")", ""))
-		switch v {
-		case "y", "yes":
-			return true
-		case "n", "no":
-			return false
-		default:
-			return def
-		}
-	}
-	askSecret := func(prompt string) string {
-		_, _ = fmt.Fprintf(w, "%s (leave empty to auto-generate): ", prompt)
-		if !s.Scan() {
-			return ""
-		}
-		return strings.TrimSpace(s.Text())
-	}
-
-	_, _ = fmt.Fprintln(w, "\nShuttle init — sets up a secure orchestrator environment.")
-	_, _ = fmt.Fprintln(w, "Press Enter to accept the [default] for any question.")
-	_, _ = fmt.Fprintln(w)
-
-	opts := InitOptions{OutputDir: outputDir}
-
-	// ── Orchestrator settings ──────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "=== Orchestrator ===")
-	opts.DataDir = ask("Data directory", "./data")
-	opts.HTTPAddr = ask("Control-plane HTTP address", ":8080")
-	opts.GRPCAddr = ask("Agent gRPC address", ":9090")
-	opts.AdvertiseControlURL = ask("Externally reachable control URL (agents/CI/enroll use it)", "http://localhost"+opts.HTTPAddr)
-
-	// ── Secrets (auto-generated, protected) ────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== Control-plane secrets ===")
-	_, _ = fmt.Fprintln(w, "The bearer token (admin auth) and webhook secret are auto-generated")
-	_, _ = fmt.Fprintln(w, "with crypto/rand and written at mode 0600. Override only if you must.")
-	opts.BearerToken = askSecret("Bearer token")
-	opts.WebhookSecret = askSecret("Webhook secret")
-
-	// ── Agent transport security ───────────────────────────────────────────
-	// Token enrollment over TLS is the default: it encrypts + authenticates the
-	// agent link with no per-agent certs and no inbound firewall holes.
-	_, _ = fmt.Fprintln(w, "\n=== Agent transport security ===")
-	_, _ = fmt.Fprintln(w, "  1) Token enrollment over TLS — recommended (SSH-like, no cert copying)")
-	_, _ = fmt.Fprintln(w, "  2) Mutual TLS — advanced (you manage a CA + per-agent certs)")
-	_, _ = fmt.Fprintln(w, "  3) Insecure — NO encryption or auth, local experiments only")
-	switch ask("Choice", "1") {
-	case "3":
-		opts.TLSMode = "insecure"
-		_, _ = fmt.Fprintln(w, "  ⚠ Insecure transport: the agent link is unencrypted and unauthenticated.")
-	case "2":
-		opts.TLSMode = "mtls"
-		_, _ = fmt.Fprintln(w, "Run `make certs` (or your PKI) to produce the cert/key/CA, then point at them:")
-		opts.TLSCertPath = ask("TLS cert path", "./certs/orchestrator.crt")
-		opts.TLSKeyPath = ask("TLS key path", "./certs/orchestrator.key")
-		opts.TLSCAPath = ask("CA cert path", "./certs/ca.crt")
-		opts.AdvertiseAddr = ask("Advertise address (host:port agents dial)", "localhost"+opts.GRPCAddr)
-		opts.AdvertiseServerName = ask("Cert hostname / SAN agents verify", "orchestrator")
-	default:
-		opts.TLSMode = "token"
-		opts.AgentTokenAuth = true
-		opts.TLSCertPath = ask("TLS cert path", "./certs/orchestrator.crt")
-		opts.TLSKeyPath = ask("TLS key path", "./certs/orchestrator.key")
-		opts.AdvertiseAddr = ask("Advertise address (host:port agents dial)", "localhost"+opts.GRPCAddr)
-		opts.AdvertiseServerName = ask("Cert hostname / SAN agents verify", "orchestrator")
-		// Generating the self-signed cert is what keeps "secure" and "easy"
-		// together — agents pin it on first use and receive it via redeem.
-		opts.GenerateCert = askBool("Generate a self-signed TLS cert now?", true)
-	}
-
-	// ── IaC repository ────────────────────────────────────────────────────
-	// The IaC repo is scaffolded directly into the project directory (no nested
-	// sub-folder) so editors that open the project root find hosts.yaml/services/
-	// without extra config; config.yml/.env/certs are gitignored.
-	opts.RepoDir = opts.OutputDir
-	_, _ = fmt.Fprintln(w, "\n=== IaC repository ===")
-	_, _ = fmt.Fprintln(w, "Scaffolded into the project directory; sensitive files are gitignored.")
-	_, _ = fmt.Fprintln(w, "  1) Starter repo with an example service (whoami) to deploy first")
-	_, _ = fmt.Fprintln(w, "  2) Empty repo scaffold (bring your own services)")
-	_, _ = fmt.Fprintln(w, "  3) Use an existing remote (enter URL, no local scaffold)")
-	switch ask("Choice", "1") {
-	case "3":
-		opts.RepoMode = "existing"
-		opts.RemoteURL = ask("Remote URL", "")
-	case "2":
-		opts.RepoMode = "empty"
-		if askBool("Add an existing git remote (origin) now?", false) {
-			opts.RemoteURL = ask("Remote URL", "")
-		}
-	default:
-		opts.RepoMode = "starter"
-		if askBool("Push the starter repo to an existing git remote (origin) now?", false) {
-			opts.RemoteURL = ask("Remote URL", "")
-		}
-	}
-
-	opts.SetupGitHubActions = askBool("Set up GitHub Actions workflows (deploy + plan comment)?", false)
-
-	// ── Secrets ──────────────────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== Secrets provider ===")
-	_, _ = fmt.Fprintln(w, "  1) None (no secret injection)")
-	_, _ = fmt.Fprintln(w, "  2) Infisical")
-	secretsChoice := ask("Choice", "1")
-	if secretsChoice == "2" {
-		opts.SecretsProvider = "infisical"
-		opts.SecretsBasePath = ask("Shared secrets base path (absolute)", "/shared")
-		opts.SecretsPathTemplate = ask("Per-service path template", "/services/{service}")
-		_, _ = fmt.Fprintln(w, "\nInfisical credentials (written to .env, never to config.yml):")
-		opts.InfisicalClientID = ask("INFISICAL_CLIENT_ID", "")
-		opts.InfisicalClientSecret = ask("INFISICAL_CLIENT_SECRET", "")
-		opts.InfisicalProjectID = ask("INFISICAL_PROJECT_ID", "")
-		opts.InfisicalEnv = ask("INFISICAL_ENV", "production")
-		opts.InfisicalSiteURL = ask("INFISICAL_SITE_URL (leave empty for cloud)", "")
+// promptRepoInit runs the (short by default) IaC-repo wizard. ci, when non-empty
+// (from the --ci flag), pre-answers the CI-provider question.
+func promptRepoInit(r io.Reader, w io.Writer, dir, ci string, advanced bool) (RepoInitOptions, error) {
+	p := newPrompter(r, w, advanced)
+	p.line("\nShuttle init — scaffold a new IaC repository.")
+	if advanced {
+		p.line("Advanced mode: every setting is prompted. Press Enter to accept a [default].")
 	} else {
-		opts.SecretsProvider = "none"
+		p.line("Press Enter for the default. Re-run with --advanced for more options.")
+	}
+	p.line("")
+
+	opts := RepoInitOptions{RepoDir: dir}
+
+	// ── Repo contents (essential) ───────────────────────────────────────────
+	p.line("=== Repository contents ===")
+	p.line("  1) Starter — an example whoami service + a 'local' host to deploy first")
+	p.line("  2) Empty   — placeholder hosts.yaml + empty services/ (bring your own)")
+	if p.ask("Choice", "1") == "2" {
+		opts.RepoMode = "empty"
+	} else {
+		opts.RepoMode = "starter"
 	}
 
-	// ── Caddy ─────────────────────────────────────────────────────────────
-	_, _ = fmt.Fprintln(w, "\n=== Caddy ingress (optional) ===")
-	opts.CaddyAdminURL = ask("Caddy admin URL (empty to disable)", "")
+	// ── CI provider (essential; create the remote yourself later) ───────────
+	// The remote may not exist at scaffold time, so we don't touch it — we only
+	// ask which provider you'll push to so the right CI workflow is generated.
+	opts.CIProvider = normalizeCIProvider(ci)
+	if ci == "" {
+		p.line("\n=== CI workflows ===")
+		p.line("Generate deploy-on-push + plan-on-PR CI for the provider you'll push to.")
+		p.line("  1) None")
+		p.line("  2) GitHub Actions  (.github/workflows/)")
+		p.line("  3) GitLab CI       (.gitlab-ci.yml)")
+		switch p.ask("Choice", "1") {
+		case "2":
+			opts.CIProvider = "github"
+		case "3":
+			opts.CIProvider = "gitlab"
+		default:
+			opts.CIProvider = "none"
+		}
+	}
+
+	// ── Advanced (orchestrator.yaml overrides) ──────────────────────────────
+	opts.CaddyAdminURL = p.adv("Caddy admin URL for orchestrator.yaml (empty to leave commented)", "")
 	if opts.CaddyAdminURL != "" {
-		opts.HTTPSRedirect = askBool("Enable HTTPS redirect (:443 only, 308-redirect :80)?", false)
+		opts.HTTPSRedirect = p.askBool("Enable HTTPS redirect (:443 only, 308-redirect :80)?", false)
+	}
+	opts.SecretsBasePath = p.adv("Secrets base path override for orchestrator.yaml (empty to leave commented)", "")
+	if opts.SecretsBasePath != "" {
+		opts.SecretsPathTemplate = p.ask("Per-service path template", "/services/{service}")
 	}
 
-	return opts, s.Err()
+	return opts, p.err()
 }
 
-// applyInit writes all generated files and scaffolds the IaC repo. It is
-// separate from promptInitOptions so tests can call it with pre-filled options.
-func applyInit(ctx context.Context, opts InitOptions, w io.Writer) error {
-	// Auto-generate any missing secrets.
-	if opts.BearerToken == "" {
-		opts.BearerToken = generateHexToken()
+// normalizeCIProvider maps the --ci flag (and any pre-set value) to a known
+// provider, defaulting unknown/empty to "none".
+func normalizeCIProvider(ci string) string {
+	switch strings.ToLower(strings.TrimSpace(ci)) {
+	case "github", "gh":
+		return "github"
+	case "gitlab", "gl":
+		return "gitlab"
+	default:
+		return "none"
 	}
-	if opts.WebhookSecret == "" {
-		opts.WebhookSecret = generateHexToken()
-	}
+}
 
-	// A local starter repo with no remote drives itself: point repo_url at the
-	// scaffolded repo via file:// so the orchestrator's git-sync loop deploys
-	// the example service without a push or a remote.
-	if opts.RepoMode == "starter" && opts.RemoteURL == "" {
-		if abs, err := filepath.Abs(opts.RepoDir); err == nil {
-			opts.RemoteURL = "file://" + abs
-		}
+// applyRepoInit scaffolds the IaC repo and prints next steps.
+func applyRepoInit(ctx context.Context, opts RepoInitOptions, w io.Writer) error {
+	if err := scaffoldRepo(ctx, opts, w); err != nil {
+		return fmt.Errorf("scaffold IaC repo: %w", err)
 	}
-
-	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
-		return fmt.Errorf("create output dir: %w", err)
-	}
-
-	// ── TLS cert (self-signed, token path) ─────────────────────────────────
-	// Generate the orchestrator's server cert so the secure default works with
-	// no openssl/make and no CA to distribute. Skipped if the files already
-	// exist so re-running init never clobbers a real cert.
-	if opts.GenerateCert && opts.TLSCertPath != "" && opts.TLSKeyPath != "" {
-		// Relative cert paths are stored verbatim in config.yml (resolved from the
-		// orchestrator's CWD at runtime) but written to disk under the project dir.
-		certPath := resolveUnderOutput(opts.OutputDir, opts.TLSCertPath)
-		keyPath := resolveUnderOutput(opts.OutputDir, opts.TLSKeyPath)
-		created, err := ensureSelfSignedCert(certPath, keyPath, certSANs(opts))
-		if err != nil {
-			return fmt.Errorf("generate TLS cert: %w", err)
-		}
-		if created {
-			_, _ = fmt.Fprintf(w, "Generated self-signed TLS cert %s (key %s, mode 0600)\n", certPath, keyPath)
-		} else {
-			_, _ = fmt.Fprintf(w, "TLS cert %s already exists — left unchanged\n", certPath)
-		}
-	}
-
-	// ── config.yml ───────────────────────────────────────────────────────
-	configPath := filepath.Join(opts.OutputDir, "config.yml")
-	if err := writeConfigYML(configPath, opts); err != nil {
-		return fmt.Errorf("write config.yml: %w", err)
-	}
-	_, _ = fmt.Fprintf(w, "Wrote %s\n", configPath)
-	_, _ = fmt.Fprintf(w, "  ⚠ Protect this file: chmod 600 %s\n", configPath)
-
-	// ── .env (Infisical creds) ────────────────────────────────────────────
-	if opts.SecretsProvider == "infisical" {
-		envPath := filepath.Join(opts.OutputDir, ".env")
-		if err := writeDotEnv(envPath, opts); err != nil {
-			return fmt.Errorf("write .env: %w", err)
-		}
-		_, _ = fmt.Fprintf(w, "Wrote %s\n", envPath)
-		_, _ = fmt.Fprintf(w, "  ⚠ Protect this file: chmod 600 %s\n", envPath)
-	}
-
-	// ── IaC repository ────────────────────────────────────────────────────
-	// "existing" points repo_url at a remote the user already manages, so there
-	// is nothing to scaffold locally.
-	if opts.RepoMode != "existing" {
-		if err := scaffoldRepo(ctx, opts, w); err != nil {
-			return fmt.Errorf("scaffold IaC repo: %w", err)
-		}
-	}
-
-	printNextSteps(w, opts, configPath)
+	printRepoNextSteps(w, opts)
 	return nil
 }
 
-// printNextSteps writes the ordered, copy-pasteable commands to finish setup.
-// It adapts to the transport (token enrollment vs insecure vs mtls) and to the
-// repo mode, and — for the self-driving local starter — adds the whoami verify
-// step so a first-timer sees a real deploy.
-func printNextSteps(w io.Writer, opts InitOptions, configPath string) {
-	starterLocal := opts.RepoMode == "starter" && strings.HasPrefix(opts.RemoteURL, "file://")
-	insecure := opts.TLSMode == "insecure"
+// printRepoNextSteps lays out the two paths from a freshly scaffolded repo: the
+// single-machine path (orchestrator drives this local repo via file://) and the
+// cross-machine path (create a remote, push, init the orchestrator on the server
+// from the remote URL).
+func printRepoNextSteps(w io.Writer, opts RepoInitOptions) {
+	cdPrefix := ""
+	if opts.RepoDir != "" && opts.RepoDir != "." {
+		cdPrefix = "cd " + opts.RepoDir + " && "
+	}
 
 	_, _ = fmt.Fprintln(w, "\n=== Next steps ===")
-	n := 0
-	step := func(format string, a ...any) {
-		n++
-		_, _ = fmt.Fprintf(w, "  %d. "+format+"\n", append([]any{n}, a...)...)
-	}
 
-	if opts.TLSMode == "mtls" {
-		step("Generate the cert/key/CA you pointed at (e.g. `make certs`).")
-	}
 	if opts.RepoMode == "empty" {
-		step("Declare hosts in %s and services under %s.", joinRepo(opts.RepoDir, "hosts.yaml"), joinRepo(opts.RepoDir, "services/"))
-	}
-	if opts.RepoMode != "existing" && opts.RemoteURL != "" && !strings.HasPrefix(opts.RemoteURL, "file://") {
-		step("Push the IaC repo to its remote:")
-		if opts.RepoDir == "" || opts.RepoDir == "." {
-			_, _ = fmt.Fprintln(w, "       git push -u origin main")
-		} else {
-			_, _ = fmt.Fprintf(w, "       cd %s && git push -u origin main\n", opts.RepoDir)
-		}
+		_, _ = fmt.Fprintf(w, "  • Declare hosts in %s and add services under %s.\n",
+			joinRepo(opts.RepoDir, "hosts.yaml"), joinRepo(opts.RepoDir, "services/"))
 	}
 
-	step("Start the orchestrator:")
-	_, _ = fmt.Fprintf(w, "       shuttle orchestrator --config %s\n", configPath)
+	_, _ = fmt.Fprintln(w, "\n  Single machine (orchestrator runs here, drives this repo directly):")
+	if opts.RepoDir == "" || opts.RepoDir == "." {
+		_, _ = fmt.Fprintln(w, "    shuttle orchestrator init")
+	} else {
+		_, _ = fmt.Fprintf(w, "    shuttle orchestrator init --dir %s\n", opts.RepoDir)
+	}
 
-	switch {
-	case insecure:
-		// No enrollment: the agent dials directly with no token.
-		step("Start an agent (new terminal) for a declared host:")
-		host := "<host>"
-		if starterLocal {
-			host = "local"
+	_, _ = fmt.Fprintln(w, "\n  Remote orchestrator (publish, then init on the server):")
+	_, _ = fmt.Fprintln(w, "    1. Create an empty repo on your git provider, then push:")
+	_, _ = fmt.Fprintf(w, "         %sgit remote add origin <your-remote-url>\n", cdPrefix)
+	_, _ = fmt.Fprintf(w, "         %sgit push -u origin main\n", cdPrefix)
+	_, _ = fmt.Fprintln(w, "    2. On the orchestrator host, clone-and-init from the remote URL:")
+	_, _ = fmt.Fprintln(w, "         shuttle orchestrator init --repo-url <your-remote-url>")
+
+	if opts.CIProvider == "github" || opts.CIProvider == "gitlab" {
+		_, _ = fmt.Fprintf(w, "\n  CI (%s): set these variables in your repo settings:\n", opts.CIProvider)
+		_, _ = fmt.Fprintln(w, "    • SHUTTLE_URL            — orchestrator control-plane URL")
+		_, _ = fmt.Fprintln(w, "    • SHUTTLE_WEBHOOK_SECRET — matches webhook_secret in config.yml (deploy)")
+		_, _ = fmt.Fprintln(w, "    • SHUTTLE_TOKEN          — control-plane bearer token (plan)")
+	}
+}
+
+// scaffoldCI writes the deploy + plan CI files for the chosen provider. "none"
+// (or unknown) writes nothing.
+func scaffoldCI(dir, provider string) error {
+	switch provider {
+	case "github":
+		ghDir := filepath.Join(dir, ".github", "workflows")
+		if err := os.MkdirAll(ghDir, 0o755); err != nil {
+			return err
 		}
-		_, _ = fmt.Fprintf(w, "       shuttle agent --orchestrator localhost%s --host %s\n", opts.GRPCAddr, host)
+		if err := writeFileIfAbsent(filepath.Join(ghDir, "deploy.yml"), deployWorkflowContent); err != nil {
+			return err
+		}
+		return writeFileIfAbsent(filepath.Join(ghDir, "shuttle-plan.yml"), planWorkflowContent)
+	case "gitlab":
+		return writeFileIfAbsent(filepath.Join(dir, ".gitlab-ci.yml"), gitlabCIContent)
 	default:
-		// Secure path: mint a single-use join token, then run join on the host.
-		host := "<host>"
-		if starterLocal {
-			host = "local"
-		}
-		step("Enroll a host — prints a one-line `shuttle agent join …` command:")
-		_, _ = fmt.Fprintf(w, "       shuttle enroll --config %s --host %s\n", configPath, host)
-		if starterLocal {
-			step("Run that printed command in a new terminal to start the local agent.")
-		} else {
-			step("Run that printed command once on the target host to start its agent.")
-		}
+		return nil
 	}
-
-	if starterLocal {
-		step("Watch the whoami example deploy (~60s), then verify it:")
-		_, _ = fmt.Fprintln(w, "       curl localhost:8088")
-		_, _ = fmt.Fprintf(w, "       curl -s -H \"Authorization: Bearer %s\" localhost%s/deploys | jq\n", opts.BearerToken, opts.HTTPAddr)
-		_, _ = fmt.Fprintf(w, "\nEdit %s and commit to roll out a change.\n", joinRepo(opts.RepoDir, "services/whoami/"))
-	}
-}
-
-func writeConfigYML(path string, opts InitOptions) error {
-	const tmpl = `# Shuttle orchestrator config — generated by shuttle init.
-# Keep this file on the orchestrator server. Do not commit it to the IaC repo.
-
-bearer_token: "{{ .BearerToken }}"
-grpc_addr: "{{ .GRPCAddr }}"
-http_addr: "{{ .HTTPAddr }}"
-data_dir: "{{ .DataDir }}"
-
-# IaC repository. Set both repo_url and webhook_secret to enable git sync and
-# POST /webhook.
-repo_url: "{{ .RemoteURL }}"
-repo_branch: "main"
-webhook_secret: "{{ .WebhookSecret }}"
-{{ if .AdvertiseControlURL -}}
-# Externally reachable control-plane URL. 'shuttle enroll --config' reads it so
-# enrolling a host needs no --url; in production make this the public HTTPS URL.
-advertise_control_url: "{{ .AdvertiseControlURL }}"
-{{ end -}}
-{{ if eq .TLSMode "token" -}}
-# gRPC — server TLS + token enrollment.
-grpc_tls_cert: "{{ .TLSCertPath }}"
-grpc_tls_key: "{{ .TLSKeyPath }}"
-agent_token_auth: true
-{{ if .AdvertiseAddr -}}
-advertise_addr: "{{ .AdvertiseAddr }}"
-{{ end -}}
-{{ if .AdvertiseServerName -}}
-advertise_server_name: "{{ .AdvertiseServerName }}"
-{{ end -}}
-{{ else if eq .TLSMode "mtls" -}}
-# gRPC — mutual TLS.
-grpc_tls_cert: "{{ .TLSCertPath }}"
-grpc_tls_key: "{{ .TLSKeyPath }}"
-grpc_tls_ca: "{{ .TLSCAPath }}"
-{{ else -}}
-# gRPC — insecure (dev only; add grpc_tls_cert/key for production).
-{{ end -}}
-secrets_provider: "{{ .SecretsProvider }}"
-{{ if eq .SecretsProvider "infisical" -}}
-secrets_base_path: "{{ .SecretsBasePath }}"
-secrets_path_template: "{{ .SecretsPathTemplate }}"
-{{ end -}}
-`
-	t := template.Must(template.New("config").Parse(tmpl))
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return t.Execute(f, opts)
-}
-
-func writeDotEnv(path string, opts InitOptions) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	lines := []string{
-		"# Infisical credentials for the Shuttle orchestrator.",
-		"# Loaded automatically at startup from CWD/.env.",
-		"# Keep this file protected and out of version control.",
-	}
-	add := func(k, v string) {
-		if v != "" {
-			lines = append(lines, k+"="+v)
-		}
-	}
-	add("INFISICAL_CLIENT_ID", opts.InfisicalClientID)
-	add("INFISICAL_CLIENT_SECRET", opts.InfisicalClientSecret)
-	add("INFISICAL_PROJECT_ID", opts.InfisicalProjectID)
-	add("INFISICAL_ENV", opts.InfisicalEnv)
-	add("INFISICAL_SITE_URL", opts.InfisicalSiteURL)
-	_, err = fmt.Fprintln(f, strings.Join(lines, "\n"))
-	return err
 }
 
 // scaffoldRepo initialises a git repo at opts.RepoDir and writes the standard
-// IaC scaffold: hosts.yaml, services/, orchestrator.yaml. If SetupGitHubActions
-// is true it also writes the workflow files. Makes an initial commit.
-func scaffoldRepo(ctx context.Context, opts InitOptions, w io.Writer) error {
+// IaC scaffold: hosts.yaml, services/, orchestrator.yaml, .gitignore, and (per
+// opts.CIProvider) CI workflow files. Makes an initial commit. Idempotent:
+// existing files are never overwritten. The remote is left to the user.
+func scaffoldRepo(ctx context.Context, opts RepoInitOptions, w io.Writer) error {
 	dir := opts.RepoDir
+	if dir == "" {
+		dir = "."
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -501,7 +238,8 @@ func scaffoldRepo(ctx context.Context, opts InitOptions, w io.Writer) error {
 		_, _ = exec.CommandContext(ctx, "git", "-C", dir, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput()
 	}
 
-	// .gitignore
+	// .gitignore — protects the server-side files (config.yml/.env/certs) that
+	// `shuttle orchestrator init` writes alongside the repo.
 	if err := writeFileIfAbsent(filepath.Join(dir, ".gitignore"), gitignoreContent); err != nil {
 		return err
 	}
@@ -546,29 +284,9 @@ func scaffoldRepo(ctx context.Context, opts InitOptions, w io.Writer) error {
 		return err
 	}
 
-	// GitHub Actions workflows
-	if opts.SetupGitHubActions {
-		ghDir := filepath.Join(dir, ".github", "workflows")
-		if err := os.MkdirAll(ghDir, 0o755); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(ghDir, "deploy.yml"), deployWorkflowContent); err != nil {
-			return err
-		}
-		if err := writeFileIfAbsent(filepath.Join(ghDir, "shuttle-plan.yml"), planWorkflowContent); err != nil {
-			return err
-		}
-	}
-
-	// Set remote if provided.
-	if opts.RemoteURL != "" {
-		// Add or update origin.
-		remotes, _ := exec.CommandContext(ctx, "git", "-C", dir, "remote").Output()
-		if !strings.Contains(string(remotes), "origin") {
-			if out, err := exec.CommandContext(ctx, "git", "-C", dir, "remote", "add", "origin", opts.RemoteURL).CombinedOutput(); err != nil {
-				return fmt.Errorf("git remote add: %w: %s", err, strings.TrimSpace(string(out)))
-			}
-		}
+	// CI workflows for the chosen git provider.
+	if err := scaffoldCI(dir, opts.CIProvider); err != nil {
+		return err
 	}
 
 	// Initial commit if the repo has no commits yet.
@@ -586,7 +304,7 @@ func scaffoldRepo(ctx context.Context, opts InitOptions, w io.Writer) error {
 	return nil
 }
 
-func renderOrchestratorYAML(opts InitOptions) (string, error) {
+func renderOrchestratorYAML(opts RepoInitOptions) (string, error) {
 	const tmpl = `# Orchestrator settings managed in git — no restart needed.
 # Bootstrap settings (bearer_token, repo_url, webhook_secret, TLS, addresses)
 # stay in config.yml on the orchestrator server.
@@ -600,15 +318,17 @@ https_redirect: {{ .HTTPSRedirect }}
 # caddy_admin_url: "http://caddy:2019"
 # https_redirect: false
 {{ end -}}
-{{ if eq .SecretsProvider "infisical" -}}
+{{ if .SecretsBasePath -}}
 secrets_base_path: "{{ .SecretsBasePath }}"
 secrets_path_template: "{{ .SecretsPathTemplate }}"
-
+{{ else -}}
+# secrets_base_path: "/shared"
+# secrets_path_template: "/services/{service}"
+{{ end }}
 # Per-repo/org HTTPS credentials (token fetched from Infisical at runtime).
 # git_credentials:
 #   - repo_prefix: github.com/myorg
 #     infisical_key: GITHUB_TOKEN
-{{ end -}}
 `
 	t, err := template.New("orch").Parse(tmpl)
 	if err != nil {
@@ -621,46 +341,6 @@ secrets_path_template: "{{ .SecretsPathTemplate }}"
 	return b.String(), nil
 }
 
-// joinRepo formats a repo-relative path for display in the next-steps output,
-// collapsing the "current directory" case so messages read "hosts.yaml" rather
-// than "./hosts.yaml". A trailing slash in rel is preserved.
-func joinRepo(repoDir, rel string) string {
-	if repoDir == "" || repoDir == "." {
-		return rel
-	}
-	out := filepath.Join(repoDir, rel)
-	if strings.HasSuffix(rel, "/") {
-		out += "/"
-	}
-	return out
-}
-
-// resolveUnderOutput resolves a config-relative path against the project dir for
-// on-disk writes. Absolute paths pass through unchanged. The value written into
-// config.yml stays relative (resolved from the orchestrator's CWD at runtime),
-// so the file lands under --dir while the config stays portable.
-func resolveUnderOutput(outputDir, p string) string {
-	if p == "" || filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(outputDir, p)
-}
-
-func writeFileIfAbsent(path, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil // already exists
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-func generateHexToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand unavailable: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}
-
 // ── Static file content ────────────────────────────────────────────────────
 
 // gitignoreContent keeps the bootstrap config, provider creds, generated TLS
@@ -670,7 +350,7 @@ const gitignoreContent = `# Shuttle bootstrap config & secrets — keep on the s
 config.yml
 .env
 
-# Self-signed TLS material generated by shuttle init.
+# Self-signed TLS material generated by shuttle orchestrator init.
 certs/
 
 # Orchestrator runtime state (ledger + data dir).
@@ -769,4 +449,50 @@ jobs:
           orchestrator-url: ${{ vars.SHUTTLE_URL }}
           token: ${{ secrets.SHUTTLE_TOKEN }}
           shuttle-version: latest
+`
+
+// gitlabCIContent is the GitLab equivalent of the two GitHub workflows: deploy on
+// push to the default branch (signed webhook), plan on merge requests.
+const gitlabCIContent = `# Shuttle CI for GitLab — generated by shuttle init.
+# Deploy on push to the default branch; plan on merge requests.
+#
+# CI/CD variables required (Settings > CI/CD > Variables):
+#   SHUTTLE_URL             e.g. https://orchestrator.example.com:8080
+#   SHUTTLE_WEBHOOK_SECRET  same value as webhook_secret in config.yml (masked)
+#   SHUTTLE_TOKEN           control-plane bearer token (masked; used by plan)
+stages: [plan, deploy]
+
+shuttle-plan:
+  stage: plan
+  image: alpine:latest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - apk add --no-cache curl bash jq
+    - curl -sSfL https://neikow.github.io/shuttle/install | bash
+  script:
+    - shuttle plan --url "$SHUTTLE_URL" --token "$SHUTTLE_TOKEN" --ref "$CI_COMMIT_SHA"
+
+shuttle-deploy:
+  stage: deploy
+  image: alpine:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apk add --no-cache curl jq openssl
+  script:
+    - |
+      set -euo pipefail
+      BODY=$(jq -nc \
+        --arg ref "$CI_COMMIT_REF_NAME" \
+        --arg sha "$CI_COMMIT_SHA" \
+        --arg repo "$CI_PROJECT_PATH" \
+        '{ref:$ref, commit_sha:$sha, repo:$repo, services:[]}')
+      TS=$(date +%s)
+      SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SHUTTLE_WEBHOOK_SECRET" | awk '{print $NF}')"
+      curl -fsS -X POST "$SHUTTLE_URL/webhook" \
+        -H "X-Hub-Signature-256: $SIG" \
+        -H "X-Shuttle-Timestamp: $TS" \
+        -H "Content-Type: application/json" \
+        --data-binary "$BODY"
 `
