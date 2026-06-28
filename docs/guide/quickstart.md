@@ -1,8 +1,8 @@
 # Quickstart — running in 3 minutes
 
-Install the `shuttle` binary, then let `shuttle init` scaffold a **secure**
-orchestrator and an example service on this machine. No cloud account, no
-cluster — just the binary, Docker, and git.
+Install the `shuttle` binary, then let `shuttle init` and `shuttle orchestrator
+init` scaffold a **secure** orchestrator and an example service on this machine.
+No cloud account, no cluster — just the binary, Docker, and git.
 
 ## What you need
 
@@ -14,29 +14,44 @@ cluster — just the binary, Docker, and git.
 - **Docker** with Compose v2 (`docker compose version`)
 - **git** and **curl**
 
-## 1. Run the setup wizard
+## 1. Run the two setup commands
 
-`shuttle init` is the blessed bootstrap path. In an empty directory, run it and
-**press Enter through every prompt** — the defaults give you a secure setup:
+Bootstrap is two focused commands, each short by default (just **press Enter**
+through the prompts). In an empty directory:
 
 ```sh
 mkdir shuttle-demo && cd shuttle-demo
-shuttle init
+shuttle init               # scaffold the IaC git repo (1 question)
+shuttle orchestrator init  # generate the server config + TLS (2 questions)
 ```
 
-Accepting the defaults gets you:
+`shuttle init` scaffolds the **git-managed** side and asks two questions (starter
+vs empty repo, and the CI provider you'll push to — none / GitHub / GitLab). The
+starter gives you one host (`local`) and one runnable service (`whoami`), plus
+`orchestrator.yaml` and a `.gitignore`. For this single-machine demo pick `none`.
+
+`shuttle orchestrator init` generates the **server** side — `config.yml` and a
+self-signed TLS cert under `./certs` — and asks two questions (agent transport,
+secrets provider). It auto-detects the repo you just scaffolded: with no remote
+it drives the local repo directly (`repo_url: file://…`), so there's nothing to
+push. Accepting the defaults gets you:
 
 - **Token enrollment over TLS** — the agent link is encrypted and authenticated.
-  A self-signed orchestrator cert is generated for you under `./certs`, so
-  there's no `openssl`, no CA to copy, and no per-agent certificates.
+  The self-signed cert means no `openssl`, no CA to copy, no per-agent certs.
 - **Auto-generated secrets** — the control-plane bearer token and webhook secret
   are random and written to `config.yml` at mode `0600`.
-- **A starter IaC repo** in the current directory with one host (`local`) and
-  one runnable service (`whoami`) — `hosts.yaml` and `services/` sit right
-  alongside `config.yml` (which is gitignored). With no remote, the orchestrator
-  drives this local repo directly (`repo_url: file://…`), so nothing to push.
 
-When it finishes it prints the exact next commands. They're reproduced below.
+Both commands live in the same directory: `hosts.yaml`/`services/` sit right
+alongside `config.yml` (which is gitignored). Each prints the exact next
+commands; they're reproduced below.
+
+::: tip More options
+Pass `--advanced` to either command to be prompted for everything (addresses,
+Caddy, secret paths, mutual TLS, …). Otherwise the defaults are secure and the
+prompts stay short. To run the orchestrator on a *different* machine, push this
+repo to a remote and bootstrap the server with `shuttle orchestrator init
+--repo-url <url>` — see [Deploy to a real host](/guide/first-deployment).
+:::
 
 ## 2. Start the orchestrator
 
@@ -117,8 +132,9 @@ cd .. && rm -rf shuttle-demo
 
 This is the full Shuttle pipeline:
 
-1. `shuttle init` scaffolded a secure orchestrator (TLS + token enrollment) and
-   an **IaC repo** the orchestrator watches.
+1. `shuttle init` scaffolded the **IaC repo** the orchestrator watches, and
+   `shuttle orchestrator init` generated a secure server config (TLS + token
+   enrollment).
 2. The agent **enrolled** over TLS with a single-use token — no inbound ports, no
    cert distribution.
 3. The orchestrator diffed desired (repo) vs actual (ledger), **rendered** the
@@ -134,9 +150,10 @@ ports) and you push to a remote git repo. That's the next guide:
   server, with enrollment and HTTPS.
 
 ::: tip Want a different setup?
-`shuttle init` also offers mutual TLS or an insecure local link, an empty repo
-scaffold or your own remote, Infisical secrets, Caddy ingress, and GitHub
-Actions. Pick non-default answers at the prompts.
+`shuttle init` also offers an empty repo scaffold and GitHub Actions / GitLab CI
+(asked up front, or `--ci github|gitlab`); `--advanced` adds Caddy and secret
+paths. `shuttle orchestrator init --advanced` offers mutual TLS or an insecure
+local link, Infisical or file secrets, and custom addresses/SANs.
 :::
 
 ::: tip Contributors

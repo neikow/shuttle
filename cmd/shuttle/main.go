@@ -58,6 +58,7 @@ func main() {
 		&cobra.Group{ID: "tools", Title: "Local tools:"},
 	)
 	orchestratorCmd.GroupID = "services"
+	orchestratorCmd.AddCommand(orchestratorInitCmd)
 	agentCmd.GroupID = "services"
 	enrollCmd.GroupID = "ops"
 	pruneCmd.GroupID = "ops"

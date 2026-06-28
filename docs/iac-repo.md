@@ -66,9 +66,13 @@ https_redirect: false
 secrets_base_path: "/shared"
 secrets_path_template: "/services/{service}"
 git_credentials:
-  - repo_prefix: github.com/myorg
-    infisical_key: GITHUB_TOKEN
+  - repo_prefix: github.com/you/iac   # single repo; use a repo-scoped token
+    infisical_key: IAC_REPO_TOKEN
 ```
+
+For a private IaC repo, use a **repo-scoped** token (a GitHub fine-grained PAT /
+deploy key, a GitLab project access token, …) limited to that one repo, not an
+account-wide PAT — see [Git credentials](configuration.md#git-credentials).
 
 A parse error is logged and old values are kept — a bad commit never blocks
 deploys. `shuttle init` writes a commented starter file.

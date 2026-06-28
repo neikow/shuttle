@@ -27,9 +27,9 @@ Think of it as your own tiny Heroku/Vercel that runs on hardware you control.
   *before* the old ones are removed — a bad deploy never takes you offline.
 - **No inbound holes.** Agents dial *out* to the orchestrator, so managed hosts
   need no open ports.
-- **Secure onboarding.** `shuttle init` sets up TLS + SSH-like token enrollment
-  for you — it generates a self-signed cert, so there's no `openssl` step and no
-  CA to distribute.
+- **Secure onboarding.** `shuttle orchestrator init` sets up TLS + SSH-like token
+  enrollment for you — it generates a self-signed cert, so there's no `openssl`
+  step and no CA to distribute.
 - **Backups built in.** Schedule (or auto-snapshot before each deploy) a service's
   data — Docker volumes or postgres — to restic (dedup + encryption, local or S3)
   or a local dir, and restore it from the control plane.
@@ -86,17 +86,20 @@ image, `go install`, building from source, manual download — are in the
 
 ## Get running
 
-`shuttle init` scaffolds a **secure** setup. Run it in an empty directory and
-press Enter through the prompts:
+Two short commands scaffold a **secure** setup. Run them in an empty directory
+and press Enter through the prompts:
 
 ```sh
 mkdir shuttle-demo && cd shuttle-demo
-shuttle init
+shuttle init               # scaffold the IaC git repo
+shuttle orchestrator init  # generate the server config + TLS
 ```
 
-The defaults give you TLS with SSH-like token enrollment (a self-signed cert is
-generated — no `openssl`, no CA to copy), auto-generated secrets written at mode
-`0600`, and a starter IaC repo with a runnable example service. Then:
+`shuttle init` writes a starter IaC repo with a runnable example service.
+`shuttle orchestrator init` writes the server config — its defaults give you TLS
+with SSH-like token enrollment (a self-signed cert is generated — no `openssl`,
+no CA to copy) and auto-generated secrets at mode `0600` — and auto-detects the
+repo you just scaffolded. (Pass `--advanced` to either for every option.) Then:
 
 ```sh
 shuttle orchestrator --config config.yml          # terminal 1

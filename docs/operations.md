@@ -37,49 +37,103 @@ the orchestrator config — see the commented keys in `deploy/config.example.yml
 Agents then dial with `--cert/--key/--ca`. With mutual TLS the orchestrator
 requires and verifies client certs; an insecure agent is rejected.
 
-## Bootstrap with `shuttle init`
+## Bootstrap: `shuttle init` + `shuttle orchestrator init`
 
-`shuttle init` is an interactive, **secure-by-default** wizard that sets up a
-complete orchestrator environment in one command. Run it once on the orchestrator
-server:
+Bootstrap is split along the same seam as the [two-tier config](configuration.md):
+**`shuttle init`** scaffolds the git-managed IaC repo, and **`shuttle
+orchestrator init`** generates the server-side config that stays on the box.
+Both are **secure-by-default** and short — press Enter through them — and both
+take `--advanced` to expose every knob and `--dir` to target a directory (default
+`.`). Run them in the same directory:
 
 ```sh
-shuttle init [--dir /etc/shuttle]
+shuttle init [--dir /etc/shuttle]               # IaC repo
+shuttle orchestrator init [--dir /etc/shuttle]  # server config + TLS
 ```
 
-Press Enter through it and you get a secure setup; pick non-default answers for
-the advanced paths. It prompts for:
+### `shuttle init` — the IaC repo
 
-- Orchestrator addresses and the externally reachable control URL
-- Agent transport: **token enrollment over TLS** (default), mutual TLS, or
-  insecure. The token path can **generate a self-signed orchestrator cert** for
-  you (agents pin it on first use and receive it at enrollment — no CA to copy)
-- Bearer token and webhook secret (auto-generated if left blank, written 0600)
-- The IaC repo: a **starter** example service, an **empty** scaffold, or an
-  **existing** remote URL (no local scaffold)
-- Secrets provider (none or Infisical, with credentials written to `.env`)
-- Whether to write GitHub Actions workflows (deploy-on-push + PR plan-comment)
+Scaffolds the git-managed side and asks **two** questions (default): a **starter**
+example service (`whoami` + a `local` host) or an **empty** scaffold, and the
+**CI provider** you'll push to — `none`, **GitHub Actions** (`.github/workflows/`
+deploy-on-push + PR plan-comment), or **GitLab CI** (`.gitlab-ci.yml` deploy +
+merge-request plan). `--ci github|gitlab|none` pre-answers it non-interactively.
+It writes `hosts.yaml`, `services/`, `orchestrator.yaml`, `.gitignore`, the CI
+files, then makes an initial commit. `--advanced` additionally prompts for
+`orchestrator.yaml` overrides (Caddy admin URL, secret paths).
 
-Everything lands in **one project directory** (`--dir`, default `.`) — the
-bootstrap files and the IaC repo share it, with no nested sub-folder. Only the
-TLS material is nested, under `certs/`. The scaffolded `.gitignore` keeps the
-sensitive files out of git.
+The repo is **remote-agnostic**: `shuttle init` never touches a git remote (it
+may not exist yet). You author on one machine, create an empty repo on your
+provider, push, then bootstrap the orchestrator on the server from that URL — see
+[the cross-machine flow](#cross-machine-author-here-run-orchestrator-there) below.
 
-| File | Location | Notes |
-|------|----------|-------|
-| `config.yml` | `--dir` (default `.`) | Mode 0600; bootstrap secrets; gitignored |
-| `.env` | `--dir` | Mode 0600; Infisical creds; loaded at startup; gitignored |
-| `certs/` | `--dir/certs/` | Self-signed orchestrator cert/key (token path, if generated); key 0600; gitignored |
-| IaC repo | `--dir` | `hosts.yaml`, `services/`, `orchestrator.yaml`, `.gitignore`, optional `.github/workflows/` — committed here |
+### `shuttle orchestrator init` — the server config
+
+Generates `config.yml`, an optional `.env`, and self-signed TLS material under
+`certs/`. It asks **two** questions (default): agent transport — **token
+enrollment over TLS** (default; generates a self-signed orchestrator cert agents
+pin on first use, no CA to copy), mutual TLS, or insecure — and the secrets
+provider (none, Infisical, or file). It **auto-detects the scaffolded repo** in
+`--dir` to fill `repo_url`: an existing `origin` remote is reused; a local repo
+with no remote is driven directly via `file://` — a real first deploy with
+nothing to push. Override with `--repo-url`. The bearer token and webhook secret
+are auto-generated (written 0600) unless `--advanced` prompts for them, which also
+exposes addresses, the advertise URL/SAN, cert paths, and secret paths.
+
+Everything lands in **one project directory** so the bootstrap files and the IaC
+repo share it, with no nested sub-folder. Only the TLS material is nested, under
+`certs/`. The `.gitignore` from `shuttle init` keeps the sensitive server files
+out of git.
+
+| File | Written by | Location | Notes |
+|------|-----------|----------|-------|
+| `config.yml` | `orchestrator init` | `--dir` (default `.`) | Mode 0600; bootstrap secrets; gitignored |
+| `.env` | `orchestrator init` | `--dir` | Mode 0600; Infisical creds; loaded at startup; gitignored |
+| `certs/` | `orchestrator init` | `--dir/certs/` | Self-signed orchestrator cert/key (token path, if generated); key 0600; gitignored |
+| IaC repo | `init` | `--dir` | `hosts.yaml`, `services/`, `orchestrator.yaml`, `.gitignore`, optional CI (`.github/workflows/` or `.gitlab-ci.yml`) — committed here |
 
 Bootstrapping into one directory matches how editors (and the
 [VS Code extension](editor.md)) open a project root: `hosts.yaml` and
 `services/` sit at the top level, while `config.yml`, `.env`, and `certs/` are
-present but gitignored. A **starter** repo with no remote points `repo_url` at
-the local repo via `file://`, so the orchestrator drives it directly — a real
-first deploy with nothing to push. Running `shuttle init` a second time in the
-same directory is safe: existing files (including a real cert) are never
-overwritten.
+present but gitignored. Re-running either command in the same directory is safe:
+existing files (including a real cert) are never overwritten.
+
+### Cross-machine: author here, run orchestrator there
+
+The two commands run on **different machines** for the common production layout —
+you author the IaC repo on your workstation and run the orchestrator on a server.
+`shuttle init` is remote-agnostic, so the handoff is plain git:
+
+```sh
+# 1. On your workstation — scaffold the repo (pick your CI provider):
+shuttle init --ci github          # or: gitlab / none
+
+# 2. Create an empty repo on GitHub/GitLab/…, then publish:
+git remote add origin git@github.com:you/iac.git
+git push -u origin main
+
+# 3. On the orchestrator server — bootstrap from the remote URL:
+shuttle orchestrator init --repo-url https://github.com/you/iac.git
+shuttle orchestrator --config config.yml
+```
+
+`shuttle orchestrator init` writes `repo_url` into `config.yml`; the orchestrator
+clones it on start and reconciles from it. `--repo-url` is also what to use for an
+IaC repo you already have (no `shuttle init` needed). When `--dir` instead
+contains a freshly scaffolded **local** repo with no remote, `orchestrator init`
+auto-detects it and drives it directly over `file://` — the single-machine path,
+where steps 2–3 collapse into one `shuttle orchestrator init` (no push).
+
+If the IaC repo is **private**, give the orchestrator a **repo-scoped** token to
+clone it — a GitHub fine-grained PAT (Contents: read) or deploy key, a GitLab
+project access token (`read_repository`), etc., limited to that one repo rather
+than an account/org-wide PAT. Store the token in your secrets provider and
+reference it from `orchestrator.yaml` `git_credentials`; see
+[Git credentials](configuration.md#git-credentials).
+
+If you scaffolded CI, set the repo variables it expects — `SHUTTLE_URL`,
+`SHUTTLE_WEBHOOK_SECRET` (deploy), and `SHUTTLE_TOKEN` (plan) — in your provider's
+CI/CD settings so push-to-deploy and PR/MR plan comments work.
 
 ## Running on real hosts
 

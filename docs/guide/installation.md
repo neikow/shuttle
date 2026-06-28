@@ -40,8 +40,8 @@ curl -sSfL https://neikow.github.io/shuttle/install | SHUTTLE_INSTALL_DIR="$HOME
 
 ::: tip Just trying it out?
 After installing, the [Quickstart](/guide/quickstart) gets a secure orchestrator
-and a running service on this machine in ~3 minutes via `shuttle init` — no cloud
-account, no cluster.
+and a running service on this machine in ~3 minutes via `shuttle init` + `shuttle
+orchestrator init` — no cloud account, no cluster.
 :::
 
 Piping a script to `bash` runs code from the network — read it first at
