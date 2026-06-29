@@ -475,6 +475,7 @@ func (g *GitSyncer) applyRoutes(ctx context.Context, repo *config.Repo) {
 		slog.Error("resolve DNS TLS policies failed; falling back to HTTP-01", "err", err)
 		policies = nil
 	}
+	policies = append(policies, resolveInternalTLSPolicies(repo, "")...)
 	if err := caddy.ApplyRoutes(ctx, routes, httpsRedirect, policies); err != nil {
 		slog.Error("apply caddy routes failed", "err", err)
 		return
@@ -497,6 +498,7 @@ func (g *GitSyncer) dispatchHostCaddyConfigs(ctx context.Context, repo *config.R
 			slog.Error("resolve DNS TLS policies failed; falling back to HTTP-01", "host", h.Name, "err", err)
 			policies = nil
 		}
+		policies = append(policies, resolveInternalTLSPolicies(repo, h.Name)...)
 		cfgJSON, ok, err := HostCaddyConfigJSON(repo, h.Name, httpsRedirect, httpPort, httpsPort, policies)
 		if err != nil {
 			slog.Error("build caddy config failed", "host", h.Name, "err", err)

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/dns"
 	"github.com/neikow/shuttle/internal/ledger"
 	"github.com/neikow/shuttle/internal/secrets"
@@ -51,6 +52,39 @@ func TestRenderZoneFile(t *testing.T) {
 	cn := renderZoneFile("home.example.com", []dns.Record{{Name: "app.home.example.com", Type: "CNAME", Value: "lb.example.net"}}, "", 1)
 	if !strings.Contains(cn, "app.home.example.com. IN CNAME lb.example.net.") {
 		t.Errorf("expected CNAME line with FQDN target:\n%s", cn)
+	}
+}
+
+func TestResolveInternalTLSPolicies(t *testing.T) {
+	repo := &config.Repo{
+		Services: []config.Service{
+			{Name: "app", Host: "web1", Domains: []string{"app.home.example.com"}},
+			{Name: "pub", Host: "web1", Domains: []string{"pub.example.com"}},
+		},
+		DNS: &config.DNSConfig{Zones: []config.DNSZone{
+			{Domain: "home.example.com", Provider: "home", InternalTLS: true},
+			{Domain: "example.com", Provider: "ovh"}, // not internal
+		}},
+	}
+	pols := resolveInternalTLSPolicies(repo, "web1")
+	if len(pols) != 1 {
+		t.Fatalf("policies = %d, want 1 (only the internal_tls zone)", len(pols))
+	}
+	subs, _ := pols[0]["subjects"].([]string)
+	if len(subs) != 1 || subs[0] != "app.home.example.com" {
+		t.Errorf("subjects = %v, want [app.home.example.com]", subs)
+	}
+	issuers, _ := pols[0]["issuers"].([]any)
+	if len(issuers) != 1 {
+		t.Fatalf("issuers = %v", issuers)
+	}
+	if m, _ := issuers[0].(map[string]any); m["module"] != "internal" {
+		t.Errorf("issuer = %v, want internal", issuers[0])
+	}
+
+	// No internal_tls zones → nil.
+	if got := resolveInternalTLSPolicies(&config.Repo{DNS: &config.DNSConfig{}}, ""); got != nil {
+		t.Errorf("expected nil with no internal_tls zones, got %v", got)
 	}
 }
 
