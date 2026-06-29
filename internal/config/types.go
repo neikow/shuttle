@@ -33,6 +33,10 @@ type OrchestratorConfig struct {
 	// delivered. Requires a secrets provider. Empty disables polling. Only secret
 	// fingerprints (SHA-256) are kept — never the values.
 	InfisicalPollInterval string `yaml:"infisical_poll_interval"`
+	// DNSReconcileInterval tunes how often the DNS record reconciler runs (e.g.
+	// "2m"). Empty uses the default (2m). Manages A/AAAA/CNAME records and pushes
+	// sidecar zones for dns.yml zones; a no-op when no zones are declared.
+	DNSReconcileInterval string `yaml:"dns_reconcile_interval"`
 	// gRPC TLS. cert+key => the orchestrator serves TLS; adding ca makes it
 	// require+verify client certs (mutual TLS).
 	GRPCTLSCert string `yaml:"grpc_tls_cert"`
