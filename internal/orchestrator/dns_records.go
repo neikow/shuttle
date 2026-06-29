@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strings"
 	"time"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
@@ -271,17 +272,20 @@ func recDetail(dr desiredRecord) map[string]string {
 	}
 }
 
-// recordType returns "A"/"AAAA" for an IP literal, or a problem string when the
-// host address is not a valid IP (CNAME targets are not yet supported).
-func recordType(ip string) (recordType, problem string) {
-	a, err := netip.ParseAddr(ip)
-	if err != nil {
-		return "", fmt.Sprintf("host address %q is not a valid IP", ip)
+// recordType classifies a host address value: an IP literal yields A/AAAA; a
+// hostname yields CNAME; anything else is a problem.
+func recordType(value string) (recordType, problem string) {
+	if a, err := netip.ParseAddr(value); err == nil {
+		if a.Is6() {
+			return "AAAA", ""
+		}
+		return "A", ""
 	}
-	if a.Is6() {
-		return "AAAA", ""
+	// Not an IP — accept a dotted hostname as a CNAME target.
+	if strings.Contains(value, ".") && !strings.ContainsAny(value, " /:") {
+		return "CNAME", ""
 	}
-	return "A", ""
+	return "", fmt.Sprintf("host address %q is neither an IP nor a hostname", value)
 }
 
 func addrLabel(label string) string {

@@ -46,6 +46,28 @@ func TestRenderZoneFile(t *testing.T) {
 	if got := renderZoneFile("home.example.com", nil, "fd7a::1", 1); !strings.Contains(got, "ns IN AAAA fd7a::1") {
 		t.Errorf("expected AAAA ns glue:\n%s", got)
 	}
+
+	// CNAME records get an FQDN (trailing-dot) target.
+	cn := renderZoneFile("home.example.com", []dns.Record{{Name: "app.home.example.com", Type: "CNAME", Value: "lb.example.net"}}, "", 1)
+	if !strings.Contains(cn, "app.home.example.com. IN CNAME lb.example.net.") {
+		t.Errorf("expected CNAME line with FQDN target:\n%s", cn)
+	}
+}
+
+func TestRecordType(t *testing.T) {
+	cases := map[string]string{
+		"203.0.113.5": "A",
+		"2001:db8::1": "AAAA",
+		"lb.example.net": "CNAME",
+	}
+	for in, want := range cases {
+		if got, prob := recordType(in); got != want || prob != "" {
+			t.Errorf("recordType(%q) = %q,%q want %q", in, got, prob, want)
+		}
+	}
+	if _, prob := recordType("not a host"); prob == "" {
+		t.Error("expected a problem for a non-IP non-hostname value")
+	}
 }
 
 func TestDNSReconciler_SidecarZoneNotManagerReconciled(t *testing.T) {

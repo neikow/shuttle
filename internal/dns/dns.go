@@ -15,11 +15,11 @@ import (
 	"errors"
 )
 
-// Record is a DNS address record Shuttle manages for a service.
+// Record is a DNS record Shuttle manages for a service.
 type Record struct {
 	Name  string // FQDN, e.g. "app.example.com" (no trailing dot)
-	Type  string // "A" or "AAAA"
-	Value string // the target IP
+	Type  string // "A", "AAAA", or "CNAME"
+	Value string // the target IP (A/AAAA) or hostname (CNAME)
 }
 
 // ErrUnsupported is returned by a Manager that lacks an API for an operation —
