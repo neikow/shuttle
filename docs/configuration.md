@@ -50,6 +50,7 @@ See `deploy/config.example.yml` for a ready-to-edit template (it documents the
 | `infisical_webhook_secret` | — | HMAC secret for `POST /webhook/infisical`. Required to enable Infisical secret-change webhooks. |
 | `infisical_webhook_debounce` | `5s` | How long to coalesce a burst of Infisical changes before triggering a redeploy. Accepts Go duration syntax (`5s`, `1m`, …). |
 | `infisical_poll_interval` | — | Enable periodic Infisical secret fingerprint polling as a fallback when webhooks aren't delivered. Accepts Go duration syntax (`1m`, `5m`, …). Empty disables polling. |
+| `dns_reconcile_interval` | `2m` | How often the DNS record reconciler runs (manages `dns.yml` zones' A/AAAA/CNAME records + pushes sidecar zones). Go duration syntax. No-op when no zones are declared. |
 | `git_credentials` | — | Per-repo HTTPS token credentials for private repos; use repo-scoped tokens. See [Git credentials](#git-credentials) below. |
 | `grpc_tls_cert` / `grpc_tls_key` | — | Orchestrator TLS keypair. Both set → the orchestrator serves TLS. |
 | `grpc_tls_ca` | — | Added to cert+key → require + verify client certs (mutual TLS). |
