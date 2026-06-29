@@ -93,7 +93,7 @@ message DNSConfigRequest {
 // DNSZoneFile is one zone the sidecar serves: its origin and the rendered
 // RFC1035 zone-file content.
 message DNSZoneFile {
-  string origin = 1;   // e.g. "home.example.com"
+  string origin = 1; // e.g. "home.example.com"
   string zonefile = 2; // rendered RFC1035 zone file
 }
 
