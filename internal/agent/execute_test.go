@@ -4,21 +4,37 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 )
 
 // fakeDriver implements Driver with canned channels for testing the client's
-// execute* orchestration without Docker.
+// execute* orchestration without Docker. Concurrency-safe: the agent run loop
+// calls it from a goroutine while the test inspects calls.
 type fakeDriver struct {
 	applyErr  error
 	backupOut BackupOutcome
-	calls     []string
+	mu        sync.Mutex
+	calllog   []string
+}
+
+func (f *fakeDriver) record(name string) {
+	f.mu.Lock()
+	f.calllog = append(f.calllog, name)
+	f.mu.Unlock()
+}
+
+// calls returns a snapshot of the recorded driver calls.
+func (f *fakeDriver) calls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calllog...)
 }
 
 func (f *fakeDriver) Apply(_ context.Context, _ ApplyParams) (<-chan LogLine, error) {
-	f.calls = append(f.calls, "apply")
+	f.record("apply")
 	if f.applyErr != nil {
 		return nil, f.applyErr
 	}
@@ -26,7 +42,7 @@ func (f *fakeDriver) Apply(_ context.Context, _ ApplyParams) (<-chan LogLine, er
 }
 
 func (f *fakeDriver) Rollback(_ context.Context, _ RollbackParams) (<-chan LogLine, error) {
-	f.calls = append(f.calls, "rollback")
+	f.record("rollback")
 	return feed([]LogLine{{Stream: "stdout", Text: "ok"}}), nil
 }
 
@@ -35,12 +51,12 @@ func (f *fakeDriver) Status(_ context.Context, _, _ string) (string, error) {
 }
 
 func (f *fakeDriver) Down(_ context.Context, _, _ string, _ bool) (<-chan LogLine, error) {
-	f.calls = append(f.calls, "down")
+	f.record("down")
 	return feed(nil), nil
 }
 
 func (f *fakeDriver) Backup(_ context.Context, _ BackupParams) (<-chan LogLine, <-chan BackupOutcome, error) {
-	f.calls = append(f.calls, "backup")
+	f.record("backup")
 	done := make(chan BackupOutcome, 1)
 	done <- f.backupOut
 	close(done)
@@ -48,7 +64,7 @@ func (f *fakeDriver) Backup(_ context.Context, _ BackupParams) (<-chan LogLine, 
 }
 
 func (f *fakeDriver) Restore(_ context.Context, _ RestoreParams) (<-chan LogLine, <-chan BackupOutcome, error) {
-	f.calls = append(f.calls, "restore")
+	f.record("restore")
 	done := make(chan BackupOutcome, 1)
 	done <- f.backupOut
 	close(done)
@@ -165,12 +181,13 @@ func TestHandleCommand_Dispatches(t *testing.T) {
 		}
 	}
 	want := []string{"apply", "rollback", "down", "backup", "restore"}
-	if len(drv.calls) != len(want) {
-		t.Fatalf("driver calls = %v, want %v", drv.calls, want)
+	got := drv.calls()
+	if len(got) != len(want) {
+		t.Fatalf("driver calls = %v, want %v", got, want)
 	}
 	for i, w := range want {
-		if drv.calls[i] != w {
-			t.Errorf("call[%d] = %q, want %q", i, drv.calls[i], w)
+		if got[i] != w {
+			t.Errorf("call[%d] = %q, want %q", i, got[i], w)
 		}
 	}
 }
