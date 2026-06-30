@@ -26,7 +26,7 @@ func newSyncerServer(t *testing.T) *HTTPServer {
 	fake.SetScope(secrets.Scope{Path: "/services/app"}, map[string]string{"API_KEY": "v"})
 	syncer := NewGitSyncer("file://"+src, "main", t.TempDir(), store, reg, fake)
 	srv := NewHTTPServer(testToken, store, reg)
-	srv.EnableWebhook(webhook.NewHandler("whsecret", nil), syncer)
+	srv.EnableWebhook(webhook.NewHandler("whsecret", store), syncer)
 	return srv
 }
 
