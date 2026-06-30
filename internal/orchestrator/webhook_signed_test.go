@@ -72,3 +72,29 @@ func TestForceDeployAndHosts(t *testing.T) {
 		t.Error("ForceDeploy should record a deploy for app")
 	}
 }
+
+func TestHandleDeploy_NoAgent(t *testing.T) {
+	srv := newSyncerServer(t)
+	// Missing sha -> 400.
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, authedRequest(http.MethodPost, "/deploy/app"))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("missing sha: want 400, got %d", w.Code)
+	}
+	// With a sha but no connected agent -> DeployAtSHA fails -> 5xx.
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, authedRequest(http.MethodPost, "/deploy/app?sha=deadbeef"))
+	if w.Code < 400 {
+		t.Errorf("deploy with no agent: want an error status, got %d", w.Code)
+	}
+}
+
+func TestHandleRollback_NoTarget(t *testing.T) {
+	srv := newSyncerServer(t)
+	w := httptest.NewRecorder()
+	// No prior deploy -> no rollback target -> error status.
+	srv.ServeHTTP(w, authedRequest(http.MethodPost, "/rollback?service=app&steps=1"))
+	if w.Code < 400 {
+		t.Errorf("rollback with no target: want an error status, got %d", w.Code)
+	}
+}
