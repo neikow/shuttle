@@ -179,6 +179,7 @@ type OrchestratorCommand struct {
 	//	*OrchestratorCommand_Teardown
 	//	*OrchestratorCommand_Backup
 	//	*OrchestratorCommand_Restore
+	//	*OrchestratorCommand_DnsConfig
 	Payload       isOrchestratorCommand_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -275,6 +276,15 @@ func (x *OrchestratorCommand) GetRestore() *RestoreRequest {
 	return nil
 }
 
+func (x *OrchestratorCommand) GetDnsConfig() *DNSConfigRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*OrchestratorCommand_DnsConfig); ok {
+			return x.DnsConfig
+		}
+	}
+	return nil
+}
+
 type isOrchestratorCommand_Payload interface {
 	isOrchestratorCommand_Payload()
 }
@@ -303,6 +313,10 @@ type OrchestratorCommand_Restore struct {
 	Restore *RestoreRequest `protobuf:"bytes,6,opt,name=restore,proto3,oneof"`
 }
 
+type OrchestratorCommand_DnsConfig struct {
+	DnsConfig *DNSConfigRequest `protobuf:"bytes,7,opt,name=dns_config,json=dnsConfig,proto3,oneof"`
+}
+
 func (*OrchestratorCommand_Deploy) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_Rollback) isOrchestratorCommand_Payload() {}
@@ -314,6 +328,8 @@ func (*OrchestratorCommand_Teardown) isOrchestratorCommand_Payload() {}
 func (*OrchestratorCommand_Backup) isOrchestratorCommand_Payload() {}
 
 func (*OrchestratorCommand_Restore) isOrchestratorCommand_Payload() {}
+
+func (*OrchestratorCommand_DnsConfig) isOrchestratorCommand_Payload() {}
 
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -502,14 +518,16 @@ const file_shuttle_v1_agent_proto_rawDesc = "" +
 	"\rbackup_result\x18\x05 \x01(\v2\x18.shuttle.v1.BackupResultH\x00R\fbackupResult\x126\n" +
 	"\n" +
 	"deploy_log\x18\x06 \x01(\v2\x15.shuttle.v1.DeployLogH\x00R\tdeployLogB\t\n" +
-	"\apayload\"\xfd\x02\n" +
+	"\apayload\"\xbc\x03\n" +
 	"\x13OrchestratorCommand\x123\n" +
 	"\x06deploy\x18\x01 \x01(\v2\x19.shuttle.v1.DeployRequestH\x00R\x06deploy\x129\n" +
 	"\brollback\x18\x02 \x01(\v2\x1b.shuttle.v1.RollbackRequestH\x00R\brollback\x12C\n" +
 	"\fcaddy_config\x18\x03 \x01(\v2\x1e.shuttle.v1.CaddyConfigRequestH\x00R\vcaddyConfig\x129\n" +
 	"\bteardown\x18\x04 \x01(\v2\x1b.shuttle.v1.TeardownRequestH\x00R\bteardown\x123\n" +
 	"\x06backup\x18\x05 \x01(\v2\x19.shuttle.v1.BackupRequestH\x00R\x06backup\x126\n" +
-	"\arestore\x18\x06 \x01(\v2\x1a.shuttle.v1.RestoreRequestH\x00R\arestoreB\t\n" +
+	"\arestore\x18\x06 \x01(\v2\x1a.shuttle.v1.RestoreRequestH\x00R\arestore\x12=\n" +
+	"\n" +
+	"dns_config\x18\a \x01(\v2\x1c.shuttle.v1.DNSConfigRequestH\x00R\tdnsConfigB\t\n" +
 	"\apayload\"J\n" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12#\n" +
@@ -554,6 +572,7 @@ var file_shuttle_v1_agent_proto_goTypes = []any{
 	(*TeardownRequest)(nil),     // 11: shuttle.v1.TeardownRequest
 	(*BackupRequest)(nil),       // 12: shuttle.v1.BackupRequest
 	(*RestoreRequest)(nil),      // 13: shuttle.v1.RestoreRequest
+	(*DNSConfigRequest)(nil),    // 14: shuttle.v1.DNSConfigRequest
 }
 var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: shuttle.v1.AgentEvent.register:type_name -> shuttle.v1.RegisterRequest
@@ -568,13 +587,14 @@ var file_shuttle_v1_agent_proto_depIdxs = []int32{
 	11, // 9: shuttle.v1.OrchestratorCommand.teardown:type_name -> shuttle.v1.TeardownRequest
 	12, // 10: shuttle.v1.OrchestratorCommand.backup:type_name -> shuttle.v1.BackupRequest
 	13, // 11: shuttle.v1.OrchestratorCommand.restore:type_name -> shuttle.v1.RestoreRequest
-	0,  // 12: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
-	1,  // 13: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
-	13, // [13:14] is the sub-list for method output_type
-	12, // [12:13] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	14, // 12: shuttle.v1.OrchestratorCommand.dns_config:type_name -> shuttle.v1.DNSConfigRequest
+	0,  // 13: shuttle.v1.AgentService.Register:input_type -> shuttle.v1.AgentEvent
+	1,  // 14: shuttle.v1.AgentService.Register:output_type -> shuttle.v1.OrchestratorCommand
+	14, // [14:15] is the sub-list for method output_type
+	13, // [13:14] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_agent_proto_init() }
@@ -598,6 +618,7 @@ func file_shuttle_v1_agent_proto_init() {
 		(*OrchestratorCommand_Teardown)(nil),
 		(*OrchestratorCommand_Backup)(nil),
 		(*OrchestratorCommand_Restore)(nil),
+		(*OrchestratorCommand_DnsConfig)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

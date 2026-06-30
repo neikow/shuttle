@@ -150,6 +150,14 @@ func TestLoad_dns_invalid(t *testing.T) {
 			dns: validDNSYML + "zones:\n  - domain: example.com\n    provider: ovh\n  - domain: example.com\n    provider: ovh\n",
 			svc: svc,
 		},
+		"sidecar missing host": {
+			dns: "providers:\n  - name: home\n    type: sidecar\nzones:\n  - domain: home.example.com\n    provider: home\n",
+			svc: svc,
+		},
+		"sidecar unknown host": {
+			dns: "providers:\n  - name: home\n    type: sidecar\n    host: nosuchhost\nzones:\n  - domain: home.example.com\n    provider: home\n",
+			svc: svc,
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -234,6 +242,27 @@ func TestZoneFor_LongestSuffix(t *testing.T) {
 		if got != want {
 			t.Errorf("ZoneFor(%q) = %q, want %q", domain, got, want)
 		}
+	}
+}
+
+func TestLoad_dns_sidecar(t *testing.T) {
+	dns := "providers:\n" +
+		"  - name: home\n    type: sidecar\n    host: web1\n    port: 5353\n" +
+		"zones:\n  - domain: home.example.com\n    provider: home\n    address: tailscale\n"
+	dir := writeRepoWithDNS(t, dns, "name: app\nhost: web1\ndomains: [app.home.example.com]\n")
+	repo, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := repo.DNS.ProviderByName("home")
+	if p == nil || p.Type != "sidecar" || p.Host != "web1" {
+		t.Fatalf("sidecar provider = %+v", p)
+	}
+	if p.SidecarPort() != 5353 {
+		t.Errorf("SidecarPort = %d, want 5353", p.SidecarPort())
+	}
+	if (DNSProvider{}).SidecarPort() != DefaultDNSSidecarPort {
+		t.Errorf("default SidecarPort = %d, want %d", (DNSProvider{}).SidecarPort(), DefaultDNSSidecarPort)
 	}
 }
 

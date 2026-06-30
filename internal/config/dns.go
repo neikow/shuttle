@@ -34,10 +34,26 @@ type DNSConfig struct {
 // (cloudflare/route53), some manage records (ovh/manual), per dnsProviderSpecs.
 type DNSProvider struct {
 	Name        string               `yaml:"name"`
-	Type        string               `yaml:"type"`     // e.g. "ovh", "manual"
+	Type        string               `yaml:"type"`     // e.g. "ovh", "manual", "sidecar"
 	Endpoint    string               `yaml:"endpoint"` // provider-specific (OVH: ovh-eu, ovh-ca, ...)
 	Credentials map[string]SecretRef `yaml:"credentials"`
+	// Host names the host whose agent runs the CoreDNS sidecar (sidecar type
+	// only). Port is the host port that sidecar publishes for :53 (default 53).
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
 }
+
+// SidecarPort returns the sidecar's host port, defaulting to 53.
+func (p DNSProvider) SidecarPort() int {
+	if p.Port == 0 {
+		return DefaultDNSSidecarPort
+	}
+	return p.Port
+}
+
+// DefaultDNSSidecarPort is the host port the CoreDNS sidecar publishes when a
+// sidecar provider names none.
+const DefaultDNSSidecarPort = 53
 
 // DNSZone binds a domain suffix to a record-management provider. A service's
 // domain is matched to the longest zone whose Domain is a suffix of it; the
@@ -91,6 +107,7 @@ var dnsProviderSpecs = map[string]dnsProviderSpec{
 	"cloudflare": {requiredCreds: []string{"api_token"}, acme: true},
 	"route53":    {requiredCreds: []string{"access_key_id", "secret_access_key", "region"}, acme: true},
 	"manual":     {records: true},
+	"sidecar":    {records: true},
 }
 
 // loadDNS reads the optional dns.yml at the repo root. A missing file yields
@@ -144,6 +161,14 @@ func (d *DNSConfig) validate() error {
 			}
 			if ref.InfisicalKey == "" {
 				return fmt.Errorf("dns provider %q: credential %q: infisical_key is required", p.Name, key)
+			}
+		}
+		if p.Type == "sidecar" {
+			if p.Host == "" {
+				return fmt.Errorf("dns provider %q: host is required for type \"sidecar\" (the host whose agent runs CoreDNS)", p.Name)
+			}
+			if p.Port != 0 && (p.Port < 1 || p.Port > 65535) {
+				return fmt.Errorf("dns provider %q: port %d out of range 1-65535", p.Name, p.Port)
 			}
 		}
 	}

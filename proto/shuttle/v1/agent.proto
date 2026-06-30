@@ -27,6 +27,7 @@ message OrchestratorCommand {
     TeardownRequest teardown = 4;
     BackupRequest backup = 5;
     RestoreRequest restore = 6;
+    DNSConfigRequest dns_config = 7;
   }
 }
 

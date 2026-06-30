@@ -616,6 +616,119 @@ func (x *CaddyConfigRequest) GetHttpsPort() int32 {
 	return 0
 }
 
+// DNSConfigRequest is the full set of DNS zones a host's CoreDNS sidecar should
+// serve (private split-horizon DNS, e.g. for a Tailscale network). It is pushed
+// declaratively each reconcile — the agent writes the zone files + Corefile and
+// CoreDNS reloads. The agent lazily starts the sidecar on the first push, so a
+// host runs CoreDNS only if the orchestrator targets it (a dns.yml sidecar
+// provider naming that host).
+type DNSConfigRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Zones []*DNSZoneFile         `protobuf:"bytes,1,rep,name=zones,proto3" json:"zones,omitempty"`
+	// port is the host UDP/TCP port the sidecar publishes for :53 (default 53).
+	Port          int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DNSConfigRequest) Reset() {
+	*x = DNSConfigRequest{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DNSConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DNSConfigRequest) ProtoMessage() {}
+
+func (x *DNSConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DNSConfigRequest.ProtoReflect.Descriptor instead.
+func (*DNSConfigRequest) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DNSConfigRequest) GetZones() []*DNSZoneFile {
+	if x != nil {
+		return x.Zones
+	}
+	return nil
+}
+
+func (x *DNSConfigRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+// DNSZoneFile is one zone the sidecar serves: its origin and the rendered
+// RFC1035 zone-file content.
+type DNSZoneFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Origin        string                 `protobuf:"bytes,1,opt,name=origin,proto3" json:"origin,omitempty"`     // e.g. "home.example.com"
+	Zonefile      string                 `protobuf:"bytes,2,opt,name=zonefile,proto3" json:"zonefile,omitempty"` // rendered RFC1035 zone file
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DNSZoneFile) Reset() {
+	*x = DNSZoneFile{}
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DNSZoneFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DNSZoneFile) ProtoMessage() {}
+
+func (x *DNSZoneFile) ProtoReflect() protoreflect.Message {
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DNSZoneFile.ProtoReflect.Descriptor instead.
+func (*DNSZoneFile) Descriptor() ([]byte, []int) {
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DNSZoneFile) GetOrigin() string {
+	if x != nil {
+		return x.Origin
+	}
+	return ""
+}
+
+func (x *DNSZoneFile) GetZonefile() string {
+	if x != nil {
+		return x.Zonefile
+	}
+	return ""
+}
+
 type CaddyConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -626,7 +739,7 @@ type CaddyConfigResponse struct {
 
 func (x *CaddyConfigResponse) Reset() {
 	*x = CaddyConfigResponse{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +751,7 @@ func (x *CaddyConfigResponse) String() string {
 func (*CaddyConfigResponse) ProtoMessage() {}
 
 func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[7]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +764,7 @@ func (x *CaddyConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaddyConfigResponse.ProtoReflect.Descriptor instead.
 func (*CaddyConfigResponse) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{7}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CaddyConfigResponse) GetOk() bool {
@@ -683,7 +796,7 @@ type BackupRetention struct {
 
 func (x *BackupRetention) Reset() {
 	*x = BackupRetention{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +808,7 @@ func (x *BackupRetention) String() string {
 func (*BackupRetention) ProtoMessage() {}
 
 func (x *BackupRetention) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[8]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +821,7 @@ func (x *BackupRetention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupRetention.ProtoReflect.Descriptor instead.
 func (*BackupRetention) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{8}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *BackupRetention) GetKeepLast() int32 {
@@ -769,7 +882,7 @@ type BackupRequest struct {
 
 func (x *BackupRequest) Reset() {
 	*x = BackupRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +894,7 @@ func (x *BackupRequest) String() string {
 func (*BackupRequest) ProtoMessage() {}
 
 func (x *BackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[9]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +907,7 @@ func (x *BackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupRequest.ProtoReflect.Descriptor instead.
 func (*BackupRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{9}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BackupRequest) GetBackupId() string {
@@ -896,7 +1009,7 @@ type RestoreRequest struct {
 
 func (x *RestoreRequest) Reset() {
 	*x = RestoreRequest{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -908,7 +1021,7 @@ func (x *RestoreRequest) String() string {
 func (*RestoreRequest) ProtoMessage() {}
 
 func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[10]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -921,7 +1034,7 @@ func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
 func (*RestoreRequest) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{10}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RestoreRequest) GetOperationId() string {
@@ -1013,7 +1126,7 @@ type BackupResult struct {
 
 func (x *BackupResult) Reset() {
 	*x = BackupResult{}
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1138,7 @@ func (x *BackupResult) String() string {
 func (*BackupResult) ProtoMessage() {}
 
 func (x *BackupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_shuttle_v1_deploy_proto_msgTypes[11]
+	mi := &file_shuttle_v1_deploy_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1151,7 @@ func (x *BackupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
 func (*BackupResult) Descriptor() ([]byte, []int) {
-	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{11}
+	return file_shuttle_v1_deploy_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *BackupResult) GetOperationId() string {
@@ -1146,7 +1259,13 @@ const file_shuttle_v1_deploy_proto_rawDesc = "" +
 	"configJson\x12\x1b\n" +
 	"\thttp_port\x18\x02 \x01(\x05R\bhttpPort\x12\x1d\n" +
 	"\n" +
-	"https_port\x18\x03 \x01(\x05R\thttpsPort\";\n" +
+	"https_port\x18\x03 \x01(\x05R\thttpsPort\"U\n" +
+	"\x10DNSConfigRequest\x12-\n" +
+	"\x05zones\x18\x01 \x03(\v2\x17.shuttle.v1.DNSZoneFileR\x05zones\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\"A\n" +
+	"\vDNSZoneFile\x12\x16\n" +
+	"\x06origin\x18\x01 \x01(\tR\x06origin\x12\x1a\n" +
+	"\bzonefile\x18\x02 \x01(\tR\bzonefile\";\n" +
 	"\x13CaddyConfigResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x91\x01\n" +
@@ -1228,7 +1347,7 @@ func file_shuttle_v1_deploy_proto_rawDescGZIP() []byte {
 }
 
 var file_shuttle_v1_deploy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_shuttle_v1_deploy_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(DeployStatus)(0),           // 0: shuttle.v1.DeployStatus
 	(BackupStatus)(0),           // 1: shuttle.v1.BackupStatus
@@ -1239,32 +1358,35 @@ var file_shuttle_v1_deploy_proto_goTypes = []any{
 	(*DeployLog)(nil),           // 6: shuttle.v1.DeployLog
 	(*TeardownRequest)(nil),     // 7: shuttle.v1.TeardownRequest
 	(*CaddyConfigRequest)(nil),  // 8: shuttle.v1.CaddyConfigRequest
-	(*CaddyConfigResponse)(nil), // 9: shuttle.v1.CaddyConfigResponse
-	(*BackupRetention)(nil),     // 10: shuttle.v1.BackupRetention
-	(*BackupRequest)(nil),       // 11: shuttle.v1.BackupRequest
-	(*RestoreRequest)(nil),      // 12: shuttle.v1.RestoreRequest
-	(*BackupResult)(nil),        // 13: shuttle.v1.BackupResult
-	nil,                         // 14: shuttle.v1.DeployRequest.EnvEntry
-	nil,                         // 15: shuttle.v1.RollbackRequest.EnvEntry
-	nil,                         // 16: shuttle.v1.BackupRequest.EnvEntry
-	nil,                         // 17: shuttle.v1.RestoreRequest.EnvEntry
+	(*DNSConfigRequest)(nil),    // 9: shuttle.v1.DNSConfigRequest
+	(*DNSZoneFile)(nil),         // 10: shuttle.v1.DNSZoneFile
+	(*CaddyConfigResponse)(nil), // 11: shuttle.v1.CaddyConfigResponse
+	(*BackupRetention)(nil),     // 12: shuttle.v1.BackupRetention
+	(*BackupRequest)(nil),       // 13: shuttle.v1.BackupRequest
+	(*RestoreRequest)(nil),      // 14: shuttle.v1.RestoreRequest
+	(*BackupResult)(nil),        // 15: shuttle.v1.BackupResult
+	nil,                         // 16: shuttle.v1.DeployRequest.EnvEntry
+	nil,                         // 17: shuttle.v1.RollbackRequest.EnvEntry
+	nil,                         // 18: shuttle.v1.BackupRequest.EnvEntry
+	nil,                         // 19: shuttle.v1.RestoreRequest.EnvEntry
 }
 var file_shuttle_v1_deploy_proto_depIdxs = []int32{
-	14, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
-	15, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
+	16, // 0: shuttle.v1.DeployRequest.env:type_name -> shuttle.v1.DeployRequest.EnvEntry
+	17, // 1: shuttle.v1.RollbackRequest.env:type_name -> shuttle.v1.RollbackRequest.EnvEntry
 	0,  // 2: shuttle.v1.DeployResponse.status:type_name -> shuttle.v1.DeployStatus
 	4,  // 3: shuttle.v1.DeployResponse.logs:type_name -> shuttle.v1.LogLine
 	4,  // 4: shuttle.v1.DeployLog.lines:type_name -> shuttle.v1.LogLine
-	16, // 5: shuttle.v1.BackupRequest.env:type_name -> shuttle.v1.BackupRequest.EnvEntry
-	10, // 6: shuttle.v1.BackupRequest.retention:type_name -> shuttle.v1.BackupRetention
-	17, // 7: shuttle.v1.RestoreRequest.env:type_name -> shuttle.v1.RestoreRequest.EnvEntry
-	1,  // 8: shuttle.v1.BackupResult.status:type_name -> shuttle.v1.BackupStatus
-	4,  // 9: shuttle.v1.BackupResult.logs:type_name -> shuttle.v1.LogLine
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 5: shuttle.v1.DNSConfigRequest.zones:type_name -> shuttle.v1.DNSZoneFile
+	18, // 6: shuttle.v1.BackupRequest.env:type_name -> shuttle.v1.BackupRequest.EnvEntry
+	12, // 7: shuttle.v1.BackupRequest.retention:type_name -> shuttle.v1.BackupRetention
+	19, // 8: shuttle.v1.RestoreRequest.env:type_name -> shuttle.v1.RestoreRequest.EnvEntry
+	1,  // 9: shuttle.v1.BackupResult.status:type_name -> shuttle.v1.BackupStatus
+	4,  // 10: shuttle.v1.BackupResult.logs:type_name -> shuttle.v1.LogLine
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_shuttle_v1_deploy_proto_init() }
@@ -1278,7 +1400,7 @@ func file_shuttle_v1_deploy_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shuttle_v1_deploy_proto_rawDesc), len(file_shuttle_v1_deploy_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   16,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

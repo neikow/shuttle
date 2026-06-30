@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"time"
 
+	shuttlev1 "github.com/neikow/shuttle/gen/shuttle/v1"
 	"github.com/neikow/shuttle/internal/config"
 	"github.com/neikow/shuttle/internal/dns"
 	"github.com/neikow/shuttle/internal/ledger"
@@ -83,13 +84,33 @@ func (d *DNSReconciler) tick(ctx context.Context) {
 		byZone[dr.zone.Domain] = append(byZone[dr.zone.Domain], dr)
 	}
 
+	hosts := hostMap(repo)
+	serial := time.Now().Unix()
 	credCache := map[string]map[string]string{}
+	sidecarByHost := map[string]*sidecarZones{}
 	for i := range repo.DNS.Zones {
 		z := repo.DNS.Zones[i]
+		prov := repo.DNS.ProviderByName(z.Provider)
+
+		// Sidecar zones are pushed as full zone files to the host's CoreDNS, not
+		// reconciled record-by-record through a Manager.
+		if prov != nil && prov.Type == "sidecar" {
+			nsIP := hosts[prov.Host].Address(z.Address)
+			zf := renderZoneFile(z.Domain, recordsOf(byZone[z.Domain]), nsIP, serial)
+			sz := sidecarByHost[prov.Host]
+			if sz == nil {
+				sz = &sidecarZones{port: prov.SidecarPort()}
+				sidecarByHost[prov.Host] = sz
+			}
+			sz.files = append(sz.files, &shuttlev1.DNSZoneFile{Origin: z.Domain, Zonefile: zf})
+			continue
+		}
+
 		if err := d.reconcileZone(ctx, z, repo.DNS, byZone[z.Domain], credCache); err != nil {
 			slog.Error("dns reconcile zone", "zone", z.Domain, "err", err)
 		}
 	}
+	d.dispatchSidecar(sidecarByHost)
 }
 
 // buildDesiredRecords derives the records the repo wants: for each managed domain

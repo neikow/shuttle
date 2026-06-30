@@ -78,6 +78,25 @@ message CaddyConfigRequest {
   int32 https_port = 3;
 }
 
+// DNSConfigRequest is the full set of DNS zones a host's CoreDNS sidecar should
+// serve (private split-horizon DNS, e.g. for a Tailscale network). It is pushed
+// declaratively each reconcile — the agent writes the zone files + Corefile and
+// CoreDNS reloads. The agent lazily starts the sidecar on the first push, so a
+// host runs CoreDNS only if the orchestrator targets it (a dns.yml sidecar
+// provider naming that host).
+message DNSConfigRequest {
+  repeated DNSZoneFile zones = 1;
+  // port is the host UDP/TCP port the sidecar publishes for :53 (default 53).
+  int32 port = 2;
+}
+
+// DNSZoneFile is one zone the sidecar serves: its origin and the rendered
+// RFC1035 zone-file content.
+message DNSZoneFile {
+  string origin = 1; // e.g. "home.example.com"
+  string zonefile = 2; // rendered RFC1035 zone file
+}
+
 message CaddyConfigResponse {
   bool ok = 1;
   string error = 2;

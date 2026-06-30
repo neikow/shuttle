@@ -129,6 +129,10 @@ type Config struct {
 	// default. DNS-challenge certificates require an image with the provider
 	// plugin compiled in (the shipped ghcr.io/neikow/shuttle-caddy image).
 	CaddyImage string
+	// DNSImage overrides the CoreDNS sidecar image (private split-horizon DNS).
+	// Empty keeps the default. The sidecar starts lazily, only when the
+	// orchestrator pushes a DNS config to this host.
+	DNSImage string
 }
 
 // tokenCreds attaches a bearer token to every RPC. RequireTransportSecurity is
@@ -182,8 +186,12 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 		slog.Info("caddy ingress sidecar running", "network", caddy.opts.Network, "container", caddy.opts.Container)
 	}
 
+	// CoreDNS sidecar is constructed but not started here — it starts lazily on
+	// the first DNS config push (only the host a dns.yml sidecar provider names).
+	dns := newDNSSidecar(DNSOptions{DockerBin: cfg.DockerBin, Image: cfg.DNSImage})
+
 	for {
-		if err := runSession(ctx, cfg, client, driver, deployed, caddy); err != nil {
+		if err := runSession(ctx, cfg, client, driver, deployed, caddy, dns); err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
@@ -197,7 +205,7 @@ func Run(ctx context.Context, cfg Config, driver Driver) error {
 	}
 }
 
-func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver, deployed *deployedSet, caddy *caddySidecar) error {
+func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceClient, driver Driver, deployed *deployedSet, caddy *caddySidecar, dns *dnsSidecar) error {
 	stream, err := client.Register(ctx)
 	if err != nil {
 		return fmt.Errorf("register: %w", err)
@@ -248,7 +256,7 @@ func runSession(ctx context.Context, cfg Config, client shuttlev1.AgentServiceCl
 		if err != nil {
 			return fmt.Errorf("recv: %w", err)
 		}
-		if err := handleCommand(ctx, cfg, sender, driver, deployed, caddy, cmd); err != nil {
+		if err := handleCommand(ctx, cfg, sender, driver, deployed, caddy, dns, cmd); err != nil {
 			slog.Error("command error", "err", err)
 		}
 	}
@@ -291,6 +299,7 @@ func handleCommand(
 	driver Driver,
 	deployed *deployedSet,
 	caddy *caddySidecar,
+	dns *dnsSidecar,
 	cmd *shuttlev1.OrchestratorCommand,
 ) error {
 	switch payload := cmd.Payload.(type) {
@@ -309,6 +318,16 @@ func handleCommand(
 			return fmt.Errorf("apply caddy config: %w", err)
 		}
 		slog.Info("caddy config applied")
+		return nil
+	case *shuttlev1.OrchestratorCommand_DnsConfig:
+		zones := make([]dnsZone, 0, len(payload.DnsConfig.Zones))
+		for _, z := range payload.DnsConfig.Zones {
+			zones = append(zones, dnsZone{Origin: z.Origin, Zonefile: z.Zonefile})
+		}
+		if err := dns.apply(ctx, zones, int(payload.DnsConfig.Port)); err != nil {
+			return fmt.Errorf("apply dns config: %w", err)
+		}
+		slog.Info("dns sidecar config applied", "zones", len(zones))
 		return nil
 	case *shuttlev1.OrchestratorCommand_Teardown:
 		return executeTeardown(ctx, cfg, stream, driver, deployed, payload.Teardown)
