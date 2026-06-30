@@ -265,3 +265,45 @@ func TestServer_roundtrip(t *testing.T) {
 		t.Error("no publishDiagnostics with the expected 1 problem")
 	}
 }
+
+func TestServer_completionAndLifecycle(t *testing.T) {
+	uri := "file:///repo/services/api/api.yaml"
+	var in bytes.Buffer
+	frame(t, &in, 1, "initialize", map[string]any{})
+	frame(t, &in, 0, "textDocument/didOpen", didOpenParams{
+		TextDocument: textDocumentItem{URI: uri, Text: "name: api\n"},
+	})
+	// Completion at the top level should return key suggestions.
+	frame(t, &in, 2, "textDocument/completion", completionParams{
+		TextDocument: textDocumentIdentifier{URI: uri},
+		Position:     position{Line: 1, Character: 0},
+	})
+	frame(t, &in, 0, "textDocument/didChange", didChangeParams{
+		TextDocument:   textDocumentIdentifier{URI: uri},
+		ContentChanges: []contentChange{{Text: "name: api\nhost: web1\nbogus: x\n"}},
+	})
+	frame(t, &in, 0, "textDocument/didSave", didSaveParams{TextDocument: textDocumentIdentifier{URI: uri}})
+	frame(t, &in, 0, "textDocument/didClose", didCloseParams{TextDocument: textDocumentIdentifier{URI: uri}})
+	frame(t, &in, 3, "shutdown", nil)
+	frame(t, &in, 0, "exit", nil)
+
+	var out bytes.Buffer
+	if err := NewServer(&in, &out, "test").Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r := bufio.NewReader(&out)
+	var sawCompletion bool
+	for {
+		msg, err := readMessage(r)
+		if err != nil {
+			break
+		}
+		if len(msg.ID) > 0 && string(msg.ID) == "2" && msg.Result != nil {
+			sawCompletion = true
+		}
+	}
+	if !sawCompletion {
+		t.Error("no completion response for request id 2")
+	}
+}
