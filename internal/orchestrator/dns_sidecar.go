@@ -51,7 +51,11 @@ func renderZoneFile(origin string, records []dns.Record, nsIP string, serial int
 		return sorted[i].Type < sorted[j].Type
 	})
 	for _, r := range sorted {
-		fmt.Fprintf(&b, "%s IN %s %s\n", fqdn(r.Name), r.Type, r.Value)
+		val := r.Value
+		if r.Type == "CNAME" {
+			val = fqdn(val) // CNAME targets are FQDNs in a zone file
+		}
+		fmt.Fprintf(&b, "%s IN %s %s\n", fqdn(r.Name), r.Type, val)
 	}
 	return b.String()
 }

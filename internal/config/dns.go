@@ -64,6 +64,11 @@ type DNSZone struct {
 	Domain   string `yaml:"domain"`   // suffix, e.g. "home.example.com" (no scheme)
 	Provider string `yaml:"provider"` // a DNSProvider name whose type can manage records
 	Address  string `yaml:"address"`  // host-address label to point records at (default "public")
+	// InternalTLS serves this zone's domains over HTTPS using Caddy's internal
+	// (self-signed) CA instead of public ACME — for private zones (e.g. a sidecar
+	// zone) that can't pass a public ACME challenge. Clients must trust Caddy's
+	// local CA. Default false (public ACME / HTTP-01 as usual).
+	InternalTLS bool `yaml:"internal_tls"`
 }
 
 // DNSCertificate is one certificate (a Caddy TLS automation policy): the

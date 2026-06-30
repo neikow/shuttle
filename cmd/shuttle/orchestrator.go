@@ -222,13 +222,22 @@ func runOrchestrator(ctx context.Context, cfg *config.OrchestratorConfig) error 
 		go reconciler.Run(ctx)
 		slog.Info("drift reconciler started", "interval", "60s")
 
-		// DNS record reconciler: manages A/AAAA records for dns.yml zones (no-op
-		// until the repo declares any). Slower cadence than drift to be gentle on
-		// provider APIs; reads the working copy the drift reconciler keeps synced.
-		dnsReconciler := orchestrator.NewDNSReconciler(syncer, store, 2*time.Minute)
+		// DNS record reconciler: manages A/AAAA/CNAME records + pushes sidecar
+		// zones for dns.yml zones (no-op until the repo declares any). Slower
+		// cadence than drift to be gentle on provider APIs; reads the working copy
+		// the drift reconciler keeps synced.
+		dnsInterval := 2 * time.Minute
+		if cfg.DNSReconcileInterval != "" {
+			d, err := time.ParseDuration(cfg.DNSReconcileInterval)
+			if err != nil {
+				return fmt.Errorf("dns_reconcile_interval: %w", err)
+			}
+			dnsInterval = d
+		}
+		dnsReconciler := orchestrator.NewDNSReconciler(syncer, store, dnsInterval)
 		dnsReconciler.SetEventBus(bus)
 		go dnsReconciler.Run(ctx)
-		slog.Info("dns record reconciler started", "interval", "2m")
+		slog.Info("dns record reconciler started", "interval", dnsInterval)
 
 		if cfg.InfisicalPollInterval != "" {
 			if secProvider == nil {

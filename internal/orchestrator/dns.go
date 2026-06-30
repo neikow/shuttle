@@ -115,6 +115,61 @@ func caddyDNSProvider(p config.DNSProvider, creds map[string]string) map[string]
 	return obj
 }
 
+// resolveInternalTLSPolicies builds Caddy TLS automation policies that issue
+// certificates from Caddy's internal (self-signed) CA for the domains served by
+// host that fall under a dns.yml zone marked internal_tls. This gives private
+// zones (e.g. a sidecar zone with no public DNS) working HTTPS without a public
+// ACME challenge. host=="" matches every service (central Caddy). Returns nil
+// when no internal_tls zone applies.
+func resolveInternalTLSPolicies(repo *config.Repo, host string) []map[string]any {
+	if repo.DNS == nil {
+		return nil
+	}
+	internal := map[string]bool{}
+	for _, z := range repo.DNS.Zones {
+		if z.InternalTLS {
+			internal[z.Domain] = true
+		}
+	}
+	if len(internal) == 0 {
+		return nil
+	}
+	subjectsByZone := map[string]map[string]bool{}
+	for _, svc := range repo.Services {
+		if host != "" && svc.Host != host {
+			continue
+		}
+		for _, d := range svc.Domains {
+			z := repo.DNS.ZoneFor(d)
+			if z == nil || !internal[z.Domain] {
+				continue
+			}
+			if subjectsByZone[z.Domain] == nil {
+				subjectsByZone[z.Domain] = map[string]bool{}
+			}
+			subjectsByZone[z.Domain][d] = true
+		}
+	}
+	zones := make([]string, 0, len(subjectsByZone))
+	for z := range subjectsByZone {
+		zones = append(zones, z)
+	}
+	sort.Strings(zones)
+	var policies []map[string]any
+	for _, z := range zones {
+		policies = append(policies, caddyInternalTLSPolicy(sortedStringSet(subjectsByZone[z])))
+	}
+	return policies
+}
+
+// caddyInternalTLSPolicy issues subjects from Caddy's internal CA.
+func caddyInternalTLSPolicy(subjects []string) map[string]any {
+	return map[string]any{
+		"subjects": subjects,
+		"issuers":  []any{map[string]any{"module": "internal"}},
+	}
+}
+
 // caddyTLSPolicy builds one TLS automation policy: issue subjects via the
 // provider's ACME DNS-01 challenge (the only challenge that can mint wildcards).
 func caddyTLSPolicy(subjects []string, provider map[string]any) map[string]any {

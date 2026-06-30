@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/libdns/libdns"
 )
 
 func TestManualManager_NoOp(t *testing.T) {
@@ -43,28 +45,25 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
-func TestAddressRecord(t *testing.T) {
+func TestRecordFor(t *testing.T) {
 	// Relative name within the zone; A vs AAAA inferred from the IP family.
-	a, err := addressRecord("example.com.", Record{Name: "app.example.com", Value: "203.0.113.5"})
+	a, err := recordFor("example.com.", Record{Name: "app.example.com", Type: "A", Value: "203.0.113.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Name != "app" {
-		t.Errorf("name = %q, want app", a.Name)
-	}
-	if a.RR().Type != "A" {
-		t.Errorf("type = %q, want A", a.RR().Type)
+	if a.RR().Name != "app" || a.RR().Type != "A" {
+		t.Errorf("A record = %+v, want app/A", a.RR())
 	}
 
-	apex, err := addressRecord("example.com.", Record{Name: "example.com", Value: "203.0.113.5"})
+	apex, err := recordFor("example.com.", Record{Name: "example.com", Type: "A", Value: "203.0.113.5"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if apex.Name != "@" {
-		t.Errorf("apex name = %q, want @", apex.Name)
+	if apex.RR().Name != "@" {
+		t.Errorf("apex name = %q, want @", apex.RR().Name)
 	}
 
-	v6, err := addressRecord("example.com.", Record{Name: "app.example.com", Value: "2001:db8::1"})
+	v6, err := recordFor("example.com.", Record{Name: "app.example.com", Type: "AAAA", Value: "2001:db8::1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +71,18 @@ func TestAddressRecord(t *testing.T) {
 		t.Errorf("type = %q, want AAAA", v6.RR().Type)
 	}
 
-	if _, err := addressRecord("example.com.", Record{Name: "app.example.com", Value: "not-an-ip"}); err == nil {
+	cn, err := recordFor("example.com.", Record{Name: "app.example.com", Type: "CNAME", Value: "lb.example.net"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cn.RR().Type != "CNAME" {
+		t.Errorf("type = %q, want CNAME", cn.RR().Type)
+	}
+	if c, ok := cn.(libdns.CNAME); !ok || c.Target != "lb.example.net." {
+		t.Errorf("cname = %+v, want target lb.example.net.", cn)
+	}
+
+	if _, err := recordFor("example.com.", Record{Name: "app.example.com", Type: "A", Value: "not-an-ip"}); err == nil {
 		t.Error("invalid IP should error")
 	}
 }

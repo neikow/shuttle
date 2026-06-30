@@ -31,11 +31,11 @@ func newOVHManager(endpoint string, creds map[string]string) (*ovhManager, error
 
 func (m *ovhManager) Ensure(ctx context.Context, zone string, r Record) error {
 	z := zoneFQDN(zone)
-	addr, err := addressRecord(z, r)
+	rec, err := recordFor(z, r)
 	if err != nil {
 		return err
 	}
-	if _, err := m.p.SetRecords(ctx, z, []libdns.Record{addr}); err != nil {
+	if _, err := m.p.SetRecords(ctx, z, []libdns.Record{rec}); err != nil {
 		return fmt.Errorf("ovh set %s: %w", r.Name, err)
 	}
 	txt := ownerTXTRecord(z, r.Name)
@@ -47,11 +47,11 @@ func (m *ovhManager) Ensure(ctx context.Context, zone string, r Record) error {
 
 func (m *ovhManager) Remove(ctx context.Context, zone string, r Record) error {
 	z := zoneFQDN(zone)
-	addr, err := addressRecord(z, r)
+	rec, err := recordFor(z, r)
 	if err != nil {
 		return err
 	}
-	del := []libdns.Record{addr, ownerTXTRecord(z, r.Name)}
+	del := []libdns.Record{rec, ownerTXTRecord(z, r.Name)}
 	if _, err := m.p.DeleteRecords(ctx, z, del); err != nil {
 		return fmt.Errorf("ovh delete %s: %w", r.Name, err)
 	}
@@ -76,29 +76,41 @@ func (m *ovhManager) Owned(ctx context.Context, zone string) ([]Record, error) {
 		owned[strings.TrimPrefix(txt.Name, ownerTXTPrefix)] = true
 	}
 
-	// Second pass: emit the address records that are owned.
+	// Second pass: emit the owned A/AAAA/CNAME records.
 	var out []Record
 	for _, rec := range recs {
-		a, ok := rec.(libdns.Address)
-		if !ok || !owned[a.Name] {
-			continue
+		switch v := rec.(type) {
+		case libdns.Address:
+			if !owned[v.Name] {
+				continue
+			}
+			typ := "A"
+			if v.IP.Is6() {
+				typ = "AAAA"
+			}
+			out = append(out, Record{Name: fqdnTrim(libdns.AbsoluteName(v.Name, z)), Type: typ, Value: v.IP.String()})
+		case libdns.CNAME:
+			if !owned[v.Name] {
+				continue
+			}
+			out = append(out, Record{Name: fqdnTrim(libdns.AbsoluteName(v.Name, z)), Type: "CNAME", Value: fqdnTrim(v.Target)})
 		}
-		typ := "A"
-		if a.IP.Is6() {
-			typ = "AAAA"
-		}
-		out = append(out, Record{Name: fqdnTrim(libdns.AbsoluteName(a.Name, z)), Type: typ, Value: a.IP.String()})
 	}
 	return out, nil
 }
 
-// addressRecord builds the libdns A/AAAA record for r within absolute zone z.
-func addressRecord(z string, r Record) (libdns.Address, error) {
+// recordFor builds the libdns record for r within absolute zone z: an A/AAAA
+// Address for an IP value, or a CNAME for a hostname value.
+func recordFor(z string, r Record) (libdns.Record, error) {
+	name := libdns.RelativeName(fqdnDot(r.Name), z)
+	if r.Type == "CNAME" {
+		return libdns.CNAME{Name: name, Target: fqdnDot(r.Value)}, nil
+	}
 	ip, err := netip.ParseAddr(r.Value)
 	if err != nil {
-		return libdns.Address{}, fmt.Errorf("dns: record %s has invalid IP %q: %w", r.Name, r.Value, err)
+		return nil, fmt.Errorf("dns: record %s has invalid IP %q: %w", r.Name, r.Value, err)
 	}
-	return libdns.Address{Name: libdns.RelativeName(fqdnDot(r.Name), z), IP: ip}, nil
+	return libdns.Address{Name: name, IP: ip}, nil
 }
 
 // ownerTXTRecord builds the owner-TXT marker for fqdn within absolute zone z.

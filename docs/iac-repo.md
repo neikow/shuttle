@@ -188,9 +188,13 @@ zones:
 ```
 
 - A service domain is matched to the **longest** zone suffix; that zone's
-  provider then upserts `<domain> A/AAAA -> host.addresses[zone.address]`. This is
-  how one project drives **split DNS** — public records via OVH, private
-  (Tailscale) records via the sidecar.
+  provider then upserts a record for `<domain>` pointing at
+  `host.addresses[zone.address]`. This is how one project drives **split DNS** —
+  public records via OVH, private (Tailscale) records via the sidecar.
+- **A or CNAME by address shape.** When the host address is an **IP** the record
+  is an `A`/`AAAA`; when it's a **hostname** (e.g. `addresses: {public:
+  my-lb.example.net}`) the record is a `CNAME` pointing at it — useful for a load
+  balancer or a MagicDNS name.
 - **Record-management providers** (the `zones[]` `provider`) are a separate
   capability from the ACME `certificates[]` providers. Supported: **`ovh`** (via
   libdns), **`sidecar`** (a CoreDNS sidecar, below), and **`manual`** (a no-op:
@@ -225,6 +229,29 @@ and CoreDNS reloads on change. No public DNS, no inbound ports, no ACME needed.
 - The sidecar's zone file is the source of truth (no owner-TXT/ledger needed — the
   whole zone is Shuttle's). Image defaults to `coredns/coredns`; override with the
   agent's `--dns-image`.
+
+##### HTTPS for private services (`internal_tls`)
+
+A private zone can't pass a public ACME challenge, so a `certificates:` entry
+won't get it a real cert. Set **`internal_tls: true`** on the zone instead and
+the domains it serves are issued from **Caddy's internal (self-signed) CA**:
+
+```yaml
+zones:
+  - domain: home.example.com
+    provider: home-dns
+    address: tailscale
+    internal_tls: true     # HTTPS via Caddy's local CA
+```
+
+Clients must trust that CA (export it from Caddy, or accept it per-device) — fine
+for a homelab. Without `internal_tls` a private service is plain HTTP (or you pin
+a `tls_certificate` issued by DNS-01 if the zone *is* publicly delegated).
+
+::: tip Reconcile cadence
+The DNS reconciler runs every 2 minutes by default; tune it with
+`dns_reconcile_interval` in `config.yml` (e.g. `30s`).
+:::
 
 ## `services/<name>/<name>.yaml`
 
