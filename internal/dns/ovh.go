@@ -10,8 +10,17 @@ import (
 	"github.com/libdns/ovh"
 )
 
+// recordClient is the subset of the libdns interfaces the manager uses, so the
+// OVH provider can be swapped for a fake in tests. The libdns OVH provider
+// satisfies it.
+type recordClient interface {
+	GetRecords(ctx context.Context, zone string) ([]libdns.Record, error)
+	SetRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error)
+	DeleteRecords(ctx context.Context, zone string, recs []libdns.Record) ([]libdns.Record, error)
+}
+
 // ovhManager manages records in an OVH DNS zone via the libdns OVH provider.
-type ovhManager struct{ p *ovh.Provider }
+type ovhManager struct{ c recordClient }
 
 func newOVHManager(endpoint string, creds map[string]string) (*ovhManager, error) {
 	p := &ovh.Provider{
@@ -26,7 +35,7 @@ func newOVHManager(endpoint string, creds map[string]string) (*ovhManager, error
 	if p.ApplicationKey == "" || p.ApplicationSecret == "" || p.ConsumerKey == "" {
 		return nil, fmt.Errorf("ovh: missing credentials (need application_key, application_secret, consumer_key)")
 	}
-	return &ovhManager{p: p}, nil
+	return &ovhManager{c: p}, nil
 }
 
 func (m *ovhManager) Ensure(ctx context.Context, zone string, r Record) error {
@@ -35,11 +44,11 @@ func (m *ovhManager) Ensure(ctx context.Context, zone string, r Record) error {
 	if err != nil {
 		return err
 	}
-	if _, err := m.p.SetRecords(ctx, z, []libdns.Record{rec}); err != nil {
+	if _, err := m.c.SetRecords(ctx, z, []libdns.Record{rec}); err != nil {
 		return fmt.Errorf("ovh set %s: %w", r.Name, err)
 	}
 	txt := ownerTXTRecord(z, r.Name)
-	if _, err := m.p.SetRecords(ctx, z, []libdns.Record{txt}); err != nil {
+	if _, err := m.c.SetRecords(ctx, z, []libdns.Record{txt}); err != nil {
 		return fmt.Errorf("ovh set owner txt for %s: %w", r.Name, err)
 	}
 	return nil
@@ -52,7 +61,7 @@ func (m *ovhManager) Remove(ctx context.Context, zone string, r Record) error {
 		return err
 	}
 	del := []libdns.Record{rec, ownerTXTRecord(z, r.Name)}
-	if _, err := m.p.DeleteRecords(ctx, z, del); err != nil {
+	if _, err := m.c.DeleteRecords(ctx, z, del); err != nil {
 		return fmt.Errorf("ovh delete %s: %w", r.Name, err)
 	}
 	return nil
@@ -60,7 +69,7 @@ func (m *ovhManager) Remove(ctx context.Context, zone string, r Record) error {
 
 func (m *ovhManager) Owned(ctx context.Context, zone string) ([]Record, error) {
 	z := zoneFQDN(zone)
-	recs, err := m.p.GetRecords(ctx, z)
+	recs, err := m.c.GetRecords(ctx, z)
 	if err != nil {
 		return nil, fmt.Errorf("ovh get %s: %w", zone, err)
 	}
