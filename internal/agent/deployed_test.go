@@ -48,6 +48,34 @@ func TestSeedFromDisk(t *testing.T) {
 	}
 }
 
+func TestDeployedSet_PutRemove(t *testing.T) {
+	s := newDeployedSet()
+	s.put("web", "/work/web", "sha1")
+	s.put("api", "/work/api", "sha2")
+	if snap := s.snapshot(); len(snap) != 2 || snap["web"].sha != "sha1" || snap["api"].workDir != "/work/api" {
+		t.Fatalf("after put: %+v", s.snapshot())
+	}
+	// put updates in place (same key), not a duplicate.
+	s.put("web", "/work/web", "sha1b")
+	if snap := s.snapshot(); len(snap) != 2 || snap["web"].sha != "sha1b" {
+		t.Fatalf("after re-put: %+v", s.snapshot())
+	}
+	// snapshot is a copy: mutating it doesn't affect the set.
+	snap := s.snapshot()
+	delete(snap, "web")
+	if _, ok := s.snapshot()["web"]; !ok {
+		t.Error("snapshot must be a copy; mutating it changed the set")
+	}
+	s.remove("web")
+	if snap := s.snapshot(); len(snap) != 1 {
+		t.Fatalf("after remove: %+v", snap)
+	}
+	if _, ok := s.snapshot()["web"]; ok {
+		t.Error("web should be removed")
+	}
+	s.remove("nonexistent") // no-op, must not panic
+}
+
 func TestSeedFromDisk_missingBaseDir(t *testing.T) {
 	s := newDeployedSet()
 	if n := s.seedFromDisk(filepath.Join(t.TempDir(), "does-not-exist")); n != 0 {
