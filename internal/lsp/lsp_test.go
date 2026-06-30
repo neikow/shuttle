@@ -307,3 +307,33 @@ func TestServer_completionAndLifecycle(t *testing.T) {
 		t.Error("no completion response for request id 2")
 	}
 }
+
+func TestCompleteAt_tlsCertificateRefFromSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "dns.yml"),
+		[]byte("certificates:\n  - name: star-example\n    domains: [\"*.example.com\"]\n  - name: apex\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svcDir := filepath.Join(dir, "services", "api")
+	if err := os.MkdirAll(svcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	items := completeAt(filepath.Join(svcDir, "api.yaml"), "tls_certificate: ", position{Line: 0, Character: 17})
+	got := labels(items)
+	if !slices.Contains(got, "star-example") || !slices.Contains(got, "apex") {
+		t.Errorf("tls_certificate refs = %v, want cert names from sibling dns.yml", got)
+	}
+}
+
+func TestCompleteAt_serviceEnumValues(t *testing.T) {
+	// update_policy value -> enum.
+	got := labels(completeAt("/repo/services/api/api.yaml", "update_policy: ", position{Line: 0, Character: 15}))
+	if !slices.Contains(got, "rolling") || !slices.Contains(got, "recreate") {
+		t.Errorf("update_policy values = %v, want rolling/recreate", got)
+	}
+	// delete_volumes value -> enum.
+	got = labels(completeAt("/repo/services/api/api.yaml", "delete_volumes: ", position{Line: 0, Character: 16}))
+	if !slices.Contains(got, "manual") {
+		t.Errorf("delete_volumes values = %v, want manual", got)
+	}
+}
