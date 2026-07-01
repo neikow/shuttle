@@ -265,3 +265,75 @@ func TestServer_roundtrip(t *testing.T) {
 		t.Error("no publishDiagnostics with the expected 1 problem")
 	}
 }
+
+func TestServer_completionAndLifecycle(t *testing.T) {
+	uri := "file:///repo/services/api/api.yaml"
+	var in bytes.Buffer
+	frame(t, &in, 1, "initialize", map[string]any{})
+	frame(t, &in, 0, "textDocument/didOpen", didOpenParams{
+		TextDocument: textDocumentItem{URI: uri, Text: "name: api\n"},
+	})
+	// Completion at the top level should return key suggestions.
+	frame(t, &in, 2, "textDocument/completion", completionParams{
+		TextDocument: textDocumentIdentifier{URI: uri},
+		Position:     position{Line: 1, Character: 0},
+	})
+	frame(t, &in, 0, "textDocument/didChange", didChangeParams{
+		TextDocument:   textDocumentIdentifier{URI: uri},
+		ContentChanges: []contentChange{{Text: "name: api\nhost: web1\nbogus: x\n"}},
+	})
+	frame(t, &in, 0, "textDocument/didSave", didSaveParams{TextDocument: textDocumentIdentifier{URI: uri}})
+	frame(t, &in, 0, "textDocument/didClose", didCloseParams{TextDocument: textDocumentIdentifier{URI: uri}})
+	frame(t, &in, 3, "shutdown", nil)
+	frame(t, &in, 0, "exit", nil)
+
+	var out bytes.Buffer
+	if err := NewServer(&in, &out, "test").Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	r := bufio.NewReader(&out)
+	var sawCompletion bool
+	for {
+		msg, err := readMessage(r)
+		if err != nil {
+			break
+		}
+		if len(msg.ID) > 0 && string(msg.ID) == "2" && msg.Result != nil {
+			sawCompletion = true
+		}
+	}
+	if !sawCompletion {
+		t.Error("no completion response for request id 2")
+	}
+}
+
+func TestCompleteAt_tlsCertificateRefFromSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "dns.yml"),
+		[]byte("certificates:\n  - name: star-example\n    domains: [\"*.example.com\"]\n  - name: apex\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svcDir := filepath.Join(dir, "services", "api")
+	if err := os.MkdirAll(svcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	items := completeAt(filepath.Join(svcDir, "api.yaml"), "tls_certificate: ", position{Line: 0, Character: 17})
+	got := labels(items)
+	if !slices.Contains(got, "star-example") || !slices.Contains(got, "apex") {
+		t.Errorf("tls_certificate refs = %v, want cert names from sibling dns.yml", got)
+	}
+}
+
+func TestCompleteAt_serviceEnumValues(t *testing.T) {
+	// update_policy value -> enum.
+	got := labels(completeAt("/repo/services/api/api.yaml", "update_policy: ", position{Line: 0, Character: 15}))
+	if !slices.Contains(got, "rolling") || !slices.Contains(got, "recreate") {
+		t.Errorf("update_policy values = %v, want rolling/recreate", got)
+	}
+	// delete_volumes value -> enum.
+	got = labels(completeAt("/repo/services/api/api.yaml", "delete_volumes: ", position{Line: 0, Character: 16}))
+	if !slices.Contains(got, "manual") {
+		t.Errorf("delete_volumes values = %v, want manual", got)
+	}
+}

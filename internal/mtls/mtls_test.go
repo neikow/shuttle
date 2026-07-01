@@ -107,3 +107,44 @@ func TestClientCreds_badCA(t *testing.T) {
 		t.Fatal("expected error for CA with no certs")
 	}
 }
+
+func TestServerTLSHandshake(t *testing.T) {
+	dir := t.TempDir()
+	ca, caKey := issueCert(t, dir, "ca", nil, nil, nil)
+	issueCert(t, dir, "orchestrator", []string{"orchestrator"}, ca, caKey)
+
+	p := func(n string) string { return filepath.Join(dir, n) }
+	serverCreds, err := ServerTLSCreds(p("orchestrator.crt"), p("orchestrator.key"))
+	if err != nil {
+		t.Fatalf("ServerTLSCreds: %v", err)
+	}
+	clientCreds, err := ClientTLSCreds(p("ca.crt"), "orchestrator")
+	if err != nil {
+		t.Fatalf("ClientTLSCreds: %v", err)
+	}
+
+	c1, c2 := net.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		_, _, err := serverCreds.ServerHandshake(c1)
+		errCh <- err
+	}()
+	if _, _, err := clientCreds.ClientHandshake(context.Background(), "orchestrator", c2); err != nil {
+		t.Fatalf("client handshake (server-auth only): %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("server handshake: %v", err)
+	}
+}
+
+func TestServerTLSCreds_missingFile(t *testing.T) {
+	if _, err := ServerTLSCreds("/nope/x.crt", "/nope/x.key"); err == nil {
+		t.Fatal("expected error for missing files")
+	}
+}
+
+func TestClientTLSCreds_badCA(t *testing.T) {
+	if _, err := ClientTLSCreds("/nope/ca.crt", "orchestrator"); err == nil {
+		t.Fatal("expected error for missing CA")
+	}
+}
